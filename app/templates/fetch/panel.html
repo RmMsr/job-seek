@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Fetch — Job Seek{% endblock %}
+{% block content %}
+<h1>Fetch</h1>
+{% if last_result %}
+  <div style="padding:0.75rem; background:#d4edda; border-radius:4px; margin-bottom:1rem;">
+    Fetched: {{ last_result.jobs_found }} found, {{ last_result.jobs_new }} new.
+    {% if last_result.error %}<strong>Error: {{ last_result.error }}</strong>{% endif %}
+  </div>
+{% endif %}
+{% if sources %}
+  <table style="width:100%; border-collapse:collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Source</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Last run</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">New / Found</th>
+        <th style="padding:0.5rem; border-bottom:2px solid #dee2e6;"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for source in sources %}
+      {% set run = runs_by_source.get(source.id) %}
+      <tr style="border-bottom:1px solid #eee;">
+        <td style="padding:0.5rem;">
+          <strong>{{ source.name }}</strong><br>
+          <small>{{ source.url }}</small>
+        </td>
+        <td style="padding:0.5rem;">
+          {% if run %}{{ run.started_at }}{% else %}—{% endif %}
+          {% if run and run.error %}<br><span style="color:#dc3545;">⚠ {{ run.error }}</span>{% endif %}
+        </td>
+        <td style="padding:0.5rem;">
+          {% if run %}{{ run.jobs_new }} / {{ run.jobs_found }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:0.5rem;">
+          {% if source.enabled %}
+            <button class="btn"
+              hx-post="/fetch/{{ source.id }}"
+              hx-target="body"
+              hx-swap="innerHTML"
+              hx-indicator="#spinner-{{ source.id }}">
+              Fetch
+            </button>
+            <span id="spinner-{{ source.id }}" class="htmx-indicator">⏳</span>
+          {% else %}
+            <span style="color:#999;">disabled</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No sources configured.</p>
+{% endif %}
+{% endblock %}
