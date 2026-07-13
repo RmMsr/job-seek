@@ -10,6 +10,7 @@ from app.main import app
 def conn():
     c = sqlite3.connect(":memory:", check_same_thread=False)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA foreign_keys = ON")
     init_db(c)
     yield c
     c.close()

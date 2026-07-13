@@ -9,12 +9,16 @@ _SYSTEM = (
 
 
 def summarize(client: openai.OpenAI, model: str, simplified_content: str) -> str:
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": simplified_content[:6000]},
-        ],
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content.strip()
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": simplified_content[:6000]},
+            ],
+            temperature=0.3,
+        )
+        content = resp.choices[0].message.content
+        return content.strip() if content else ""
+    except Exception:
+        return ""

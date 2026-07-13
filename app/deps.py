@@ -14,6 +14,7 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     config = load_config()
     conn = sqlite3.connect(config.db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     init_db(conn)
     try:
         yield conn
