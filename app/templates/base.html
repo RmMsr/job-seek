@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Job Seek{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 1rem; }
+    nav a { margin-right: 1rem; text-decoration: none; color: #0066cc; }
+    nav a.active { font-weight: bold; color: #000; }
+    .score-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+    .score-high { background: #d4edda; color: #155724; }
+    .score-mid { background: #fff3cd; color: #856404; }
+    .score-low { background: #f8d7da; color: #721c24; }
+    .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.8em; background: #e9ecef; }
+    .job-row { border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; }
+    .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
+    .feedback-form label { display: block; margin-top: 0.5rem; }
+    .feedback-form textarea { width: 100%; min-height: 60px; }
+    .btn { padding: 6px 14px; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; }
+    .btn-accept { background: #d4edda; border-color: #28a745; }
+    .btn-reject { background: #f8d7da; border-color: #dc3545; }
+    .btn-invalid { background: #e9ecef; border-color: #6c757d; }
+    .filter-bar { margin-bottom: 1rem; }
+    .filter-bar a { margin-right: 0.5rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Jobs</a>
+    <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
+    <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
+    <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
+  </nav>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

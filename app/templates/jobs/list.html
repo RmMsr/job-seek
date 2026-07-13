@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Jobs — Job Seek{% endblock %}
+{% block content %}
+<h1>Jobs</h1>
+<div class="filter-bar">
+  <a href="/">New</a>
+  <a href="/?status=accepted">Accepted</a>
+  <a href="/?status=rejected">Rejected</a>
+  <a href="/?status=invalid">Invalid</a>
+  <a href="/?content_type=lead">Leads</a>
+</div>
+{% if jobs %}
+  {% for job in jobs %}
+    {% include "jobs/_row.html" %}
+  {% endfor %}
+{% else %}
+  <p>No jobs found.</p>
+{% endif %}
+{% endblock %}

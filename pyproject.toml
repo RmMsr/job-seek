@@ -14,6 +14,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "playwright>=1.44",
     "openai>=1.30",
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]
