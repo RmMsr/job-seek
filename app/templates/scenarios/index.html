@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Scenarios — Job Seek{% endblock %}
+{% block content %}
+<h1>Scenarios</h1>
+<form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.5rem;">
+  <input type="text" name="name" placeholder="Scenario name" required>
+  <input type="text" name="description" placeholder="Description (optional)" style="flex:1;">
+  <button type="submit" class="btn">Create</button>
+</form>
+
+{% if reevaluated_count is defined %}
+<div style="padding:0.5rem; background:#d4edda; border-radius:4px; margin-bottom:1rem;">Re-evaluated {{ reevaluated_count }} job(s).</div>
+{% endif %}
+
+{% for scenario in scenarios %}
+<div style="border:1px solid #dee2e6; border-radius:6px; padding:1rem; margin-bottom:1rem;">
+  <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+    <strong>{{ scenario.name }}</strong>
+    {% if scenario.active %}
+      <span class="tag" style="background:#d4edda; color:#155724;">active</span>
+    {% else %}
+      <form method="post" action="/scenarios/{{ scenario.id }}/activate" style="display:inline;">
+        <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Set active</button>
+      </form>
+    {% endif %}
+  </div>
+  {% if scenario.description %}<p style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description }}</p>{% endif %}
+
+  <h4 style="margin:0.75rem 0 0.4rem;">Criteria</h4>
+  <ul id="criteria-{{ scenario.id }}" style="list-style:none; padding:0;">
+    {% for c in criteria_by_scenario[scenario.id] %}
+    <li id="criterion-{{ c.id }}" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem;">
+      <span class="tag">{{ c.weight }}</span>
+      <span>{{ c.text }}</span>
+      <button class="btn" style="padding:2px 8px; font-size:0.8em;"
+        hx-delete="/criteria/{{ c.id }}"
+        hx-target="#criterion-{{ c.id }}"
+        hx-swap="outerHTML">&#x2715;</button>
+    </li>
+    {% else %}
+    <li style="color:#999;">No criteria yet.</li>
+    {% endfor %}
+  </ul>
+  <form hx-post="/scenarios/{{ scenario.id }}/criteria"
+        hx-target="#criteria-{{ scenario.id }}"
+        hx-swap="outerHTML"
+        style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
+    <input type="text" name="text" placeholder="Criterion text" required style="flex:1; min-width:200px;">
+    <select name="weight">
+      <option value="must">must</option>
+      <option value="prefer">prefer</option>
+      <option value="avoid">avoid</option>
+    </select>
+    <button type="submit" class="btn">Add</button>
+  </form>
+
+  <div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <button class="btn"
+      hx-post="/scenarios/{{ scenario.id }}/refine"
+      hx-target="#proposals-area-{{ scenario.id }}"
+      hx-swap="innerHTML">
+      Refine criteria from feedback
+    </button>
+    <form method="post" action="/scenarios/{{ scenario.id }}/reevaluate" style="display:inline;">
+      <button type="submit" class="btn">Re-evaluate jobs</button>
+    </form>
+    <div id="proposals-area-{{ scenario.id }}" style="margin-top:0.75rem; width:100%;"></div>
+  </div>
+</div>
+{% else %}
+<p>No scenarios yet. Create one above.</p>
+{% endfor %}
+{% endblock %}

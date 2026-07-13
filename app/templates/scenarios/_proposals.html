@@ -1,0 +1,18 @@
+{% if proposals %}
+<p><strong>Proposed criteria changes.</strong> Click "Add" on each one you want to keep:</p>
+{% for p in proposals %}
+<div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
+  <span class="tag">{{ p.weight }}</span>
+  <span style="flex:1;">{{ p.text }}</span>
+  <form hx-post="/scenarios/{{ scenario_id }}/criteria"
+        hx-target="#criteria-{{ scenario_id }}"
+        hx-swap="outerHTML">
+    <input type="hidden" name="text" value="{{ p.text }}">
+    <input type="hidden" name="weight" value="{{ p.weight }}">
+    <button type="submit" class="btn btn-accept" style="font-size:0.85em;">Add</button>
+  </form>
+</div>
+{% endfor %}
+{% else %}
+<p>No changes proposed based on current feedback.</p>
+{% endif %}
