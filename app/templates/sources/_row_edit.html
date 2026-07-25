@@ -1,0 +1,22 @@
+<tr id="source-row-{{ source.id }}" style="border-bottom:1px solid #eee;">
+  <td style="padding:0.5rem;" colspan="4">
+    <form hx-post="/sources/{{ source.id }}"
+          hx-target="#source-row-{{ source.id }}"
+          hx-swap="outerHTML"
+          style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+      <strong>{{ source.name }}</strong>
+      <input type="text" name="url" value="{{ source.url }}" required style="flex:1; min-width:200px;">
+      <select name="fetcher_type">
+        <option value="http" {% if source.fetcher_type == "http" %}selected{% endif %}>http</option>
+        <option value="playwright" {% if source.fetcher_type == "playwright" %}selected{% endif %}>playwright</option>
+        <option value="slack" {% if source.fetcher_type == "slack" %}selected{% endif %}>slack</option>
+      </select>
+      <label><input type="checkbox" name="enabled" {% if source.enabled %}checked{% endif %}> enabled</label>
+      <button type="submit" class="btn">Save</button>
+      <button type="button" class="btn"
+        hx-get="/sources/{{ source.id }}"
+        hx-target="#source-row-{{ source.id }}"
+        hx-swap="outerHTML">Cancel</button>
+    </form>
+  </td>
+</tr>

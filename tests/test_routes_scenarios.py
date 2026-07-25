@@ -17,6 +17,30 @@ def test_create_scenario(client, conn):
     assert scenarios[0]["name"] == "Remote ML"
 
 
+def test_edit_scenario_form_returns_fields(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "Remote ML roles")
+    resp = client.get(f"/scenarios/{sid}/edit")
+    assert resp.status_code == 200
+    assert "Remote ML roles" in resp.text
+
+
+def test_update_scenario(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "old description")
+    resp = client.post(f"/scenarios/{sid}", data={"name": "Remote ML v2", "description": "new description"})
+    assert resp.status_code == 200
+    scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
+    assert scenario["name"] == "Remote ML v2"
+    assert scenario["description"] == "new description"
+    assert "Remote ML v2" in resp.text
+
+
+def test_cancel_scenario_edit_returns_display_header(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "Remote ML roles")
+    resp = client.get(f"/scenarios/{sid}")
+    assert resp.status_code == 200
+    assert "Remote ML roles" in resp.text
+
+
 def test_activate_scenario(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     resp = client.post(f"/scenarios/{sid}/activate")

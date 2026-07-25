@@ -1,0 +1,16 @@
+<tr id="source-row-{{ source.id }}" style="border-bottom:1px solid #eee;">
+  <td style="padding:0.5rem;">
+    <strong>{{ source.name }}</strong><br>
+    <small>{{ source.url }}</small>
+  </td>
+  <td style="padding:0.5rem;">{{ source.fetcher_type }}</td>
+  <td style="padding:0.5rem;">
+    {% if source.enabled %}enabled{% else %}<span style="color:#999;">disabled</span>{% endif %}
+  </td>
+  <td style="padding:0.5rem;">
+    <button class="btn" style="font-size:0.85em; padding:3px 10px;"
+      hx-get="/sources/{{ source.id }}/edit"
+      hx-target="#source-row-{{ source.id }}"
+      hx-swap="outerHTML">Edit</button>
+  </td>
+</tr>

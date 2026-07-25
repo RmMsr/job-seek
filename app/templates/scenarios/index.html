@@ -14,17 +14,7 @@
 
 {% for scenario in scenarios %}
 <div style="border:1px solid #dee2e6; border-radius:6px; padding:1rem; margin-bottom:1rem;">
-  <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-    <strong>{{ scenario.name }}</strong>
-    {% if scenario.active %}
-      <span class="tag" style="background:#d4edda; color:#155724;">active</span>
-    {% else %}
-      <form method="post" action="/scenarios/{{ scenario.id }}/activate" style="display:inline;">
-        <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Set active</button>
-      </form>
-    {% endif %}
-  </div>
-  {% if scenario.description %}<p style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description }}</p>{% endif %}
+  {% include "scenarios/_header.html" %}
 
   <h4 style="margin:0.75rem 0 0.4rem;">Criteria</h4>
   <ul id="criteria-{{ scenario.id }}" style="list-style:none; padding:0;">

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sqlite3
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from app.deps import get_db, get_ai_client, get_model
@@ -36,6 +36,39 @@ def create_scenario(
     q.insert_scenario(conn, name, description)
     ctx = _scenarios_context(conn)
     return templates.TemplateResponse(request, "scenarios/index.html", ctx)
+
+
+def _get_scenario_or_404(conn: sqlite3.Connection, scenario_id: int) -> dict:
+    scenario = q.get_scenario(conn, scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    return scenario
+
+
+@router.get("/scenarios/{scenario_id}/edit", response_class=HTMLResponse)
+def edit_scenario_form(scenario_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    scenario = _get_scenario_or_404(conn, scenario_id)
+    return templates.TemplateResponse(request, "scenarios/_header_edit.html", {"scenario": scenario})
+
+
+@router.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
+def scenario_header(scenario_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    scenario = _get_scenario_or_404(conn, scenario_id)
+    return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
+
+
+@router.post("/scenarios/{scenario_id}", response_class=HTMLResponse)
+def update_scenario(
+    scenario_id: int,
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _get_scenario_or_404(conn, scenario_id)
+    q.update_scenario(conn, scenario_id, name=name, description=description)
+    scenario = q.get_scenario(conn, scenario_id)
+    return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
 
 
 @router.post("/scenarios/{scenario_id}/activate", response_class=HTMLResponse)

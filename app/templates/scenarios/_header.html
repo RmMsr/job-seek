@@ -1,0 +1,17 @@
+<div id="scenario-header-{{ scenario.id }}">
+  <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+    <strong>{{ scenario.name }}</strong>
+    {% if scenario.active %}
+      <span class="tag" style="background:#d4edda; color:#155724;">active</span>
+    {% else %}
+      <form method="post" action="/scenarios/{{ scenario.id }}/activate" style="display:inline;">
+        <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Set active</button>
+      </form>
+    {% endif %}
+    <button class="btn" style="font-size:0.85em; padding:3px 10px;"
+      hx-get="/scenarios/{{ scenario.id }}/edit"
+      hx-target="#scenario-header-{{ scenario.id }}"
+      hx-swap="outerHTML">Edit</button>
+  </div>
+  {% if scenario.description %}<p style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description }}</p>{% endif %}
+</div>

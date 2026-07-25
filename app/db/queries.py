@@ -48,6 +48,16 @@ def insert_source(conn: sqlite3.Connection, name: str, url: str, fetcher_type: s
     return cur.lastrowid
 
 
+def update_source(
+    conn: sqlite3.Connection, source_id: int, url: str, fetcher_type: str, enabled: bool
+) -> None:
+    conn.execute(
+        "UPDATE sources SET url = ?, fetcher_type = ?, enabled = ? WHERE id = ?",
+        (url, fetcher_type, int(enabled), source_id),
+    )
+    conn.commit()
+
+
 # --- Scenarios ---
 
 def get_scenarios(conn: sqlite3.Connection) -> list[dict]:
@@ -64,6 +74,18 @@ def insert_scenario(conn: sqlite3.Connection, name: str, description: str) -> in
     )
     conn.commit()
     return cur.lastrowid
+
+
+def update_scenario(conn: sqlite3.Connection, scenario_id: int, name: str, description: str) -> None:
+    conn.execute(
+        "UPDATE scenarios SET name = ?, description = ? WHERE id = ?",
+        (name, description, scenario_id),
+    )
+    conn.commit()
+
+
+def get_scenario(conn: sqlite3.Connection, scenario_id: int) -> dict | None:
+    return _row_to_dict(conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone())
 
 
 def set_active_scenario(conn: sqlite3.Connection, scenario_id: int) -> None:

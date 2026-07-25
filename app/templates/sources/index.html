@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Sources — Job Seek{% endblock %}
+{% block content %}
+<h1>Sources</h1>
+{% if sources %}
+  <table style="width:100%; border-collapse:collapse;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Source</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Type</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Status</th>
+        <th style="padding:0.5rem; border-bottom:2px solid #dee2e6;"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for source in sources %}
+      {% include "sources/_row.html" %}
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No sources yet. Add one below.</p>
+{% endif %}
+
+<form method="post" action="/sources" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1.5rem;">
+  <input type="text" name="name" placeholder="Name" required>
+  <input type="text" name="url" placeholder="URL" required style="flex:1; min-width:200px;">
+  <select name="fetcher_type">
+    <option value="http">http</option>
+    <option value="playwright">playwright</option>
+    <option value="slack">slack</option>
+  </select>
+  <button type="submit" class="btn">Add source</button>
+</form>
+{% endblock %}

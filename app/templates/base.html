@@ -30,6 +30,7 @@
   <nav>
     <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
+    <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
   </nav>

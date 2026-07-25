@@ -28,6 +28,16 @@ def test_get_sources_enabled_only(conn):
     assert len(q.get_sources(conn)) == 1
 
 
+def test_update_source(conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    q.update_source(conn, sid, url="https://finn.no/new", fetcher_type="playwright", enabled=False)
+    source = q.get_source(conn, sid)
+    assert source["url"] == "https://finn.no/new"
+    assert source["fetcher_type"] == "playwright"
+    assert source["enabled"] == 0
+    assert source["name"] == "finn.no"
+
+
 def test_scenarios_and_active(conn):
     sid = q.insert_scenario(conn, "Remote ML", "Looking for remote ML roles")
     assert q.get_active_scenario(conn) is None
@@ -45,6 +55,14 @@ def test_set_active_scenario_deactivates_others(conn):
     active = [s for s in scenarios if s["active"]]
     assert len(active) == 1
     assert active[0]["id"] == s2
+
+
+def test_update_scenario(conn):
+    sid = q.insert_scenario(conn, "A", "old description")
+    q.update_scenario(conn, sid, name="A renamed", description="new description")
+    scenarios = {s["id"]: s for s in q.get_scenarios(conn)}
+    assert scenarios[sid]["name"] == "A renamed"
+    assert scenarios[sid]["description"] == "new description"
 
 
 def test_criteria_insert_and_delete(conn):
