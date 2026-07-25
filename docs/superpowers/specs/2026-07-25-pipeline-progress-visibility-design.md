@@ -64,6 +64,8 @@ On click, the helper:
 ### Removed
 The Fetch page's "last fetch result" banner (`last_result` context variable, currently populated only immediately after a synchronous POST) is dropped. The same information (found/new counts, error) is already visible per-source in the existing run-history table columns ("Last run", "New / Found"), which show fresh data once `location.reload()` fires.
 
+For the same reason, the Scenarios page's "Re-evaluated N job(s)" banner (`reevaluated_count`, likewise only ever populated immediately after a synchronous POST) is also dropped — re-evaluate becomes a full-page-reload action like Fetch, so there's no longer a request/response cycle that could carry that count into the next render.
+
 ---
 
 ## Affected files
