@@ -26,6 +26,15 @@ def source(conn):
     return q.get_source(conn, sid)
 
 
+def _drain(gen):
+    messages = []
+    try:
+        while True:
+            messages.append(next(gen))
+    except StopIteration as stop:
+        return messages, stop.value
+
+
 def _mock_client(classify_resp, summarize_resp, evaluate_resp):
     client = MagicMock()
     def create(**kwargs):
@@ -66,11 +75,12 @@ def test_run_fetch_new_job_stored(conn, source):
 
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
-        result = run_fetch(source, conn, client, "llama3.2", "browser-profile")
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
     assert isinstance(result, FetchResult)
     assert result.jobs_new == 1
     assert result.error is None
+    assert any("job_posting" in m for m in messages)
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["url"] == "http://example.com/job/1"
@@ -84,16 +94,17 @@ def test_run_fetch_skips_existing_url(conn, source):
 
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
-        result = run_fetch(source, conn, client, "llama3.2", "browser-profile")
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
     assert result.jobs_found == 1
     assert result.jobs_new == 0
+    assert any("Skipping duplicate" in m for m in messages)
 
 
 def test_run_fetch_records_fetch_run(conn, source):
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = []
-        run_fetch(source, conn, client=MagicMock(), model="llama3.2", profile_dir="bp")
+        _drain(run_fetch(source, conn, client=MagicMock(), model="llama3.2", profile_dir="bp"))
 
     runs = q.get_recent_fetch_runs(conn)
     assert len(runs) == 1
@@ -109,9 +120,27 @@ def test_run_fetch_irrelevant_not_evaluated(conn, source):
 
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
-        run_fetch(source, conn, client, "llama3.2", "browser-profile")
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
     jobs = q.get_jobs(conn)
     assert jobs[0]["content_type"] == "irrelevant"
     assert jobs[0]["summary"] == ""
     assert client.chat.completions.create.call_count == 1
+
+
+def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        "Good ML role",
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher, caplog.at_level("INFO", logger="job_seek"):
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    assert any("Starting fetch" in m for m in messages)
+    assert any("job_posting" in m for m in messages)
+    assert any("Fetch complete" in m for m in messages)
+    assert messages == [r.message for r in caplog.records]
