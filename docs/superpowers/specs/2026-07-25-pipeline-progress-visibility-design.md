@@ -40,30 +40,29 @@ True Server-Sent Events require a `GET` (per the `EventSource` spec) or hand-rol
 ### Backend
 `run_fetch` (in `app/pipeline.py`) and the bodies of `reevaluate_jobs` and `refine_criteria` (in `app/routes/scenarios.py`) become generator functions that `yield` short human-readable progress strings (and log each one) as they go, instead of doing all the work and returning once at the end. Their side effects (DB writes, `q.complete_fetch_run`, etc.) stay exactly where they are today — only the "report progress" behavior is added.
 
-Each route wraps its generator in a `fastapi.responses.StreamingResponse` with `media_type="text/plain"`, yielding each progress line followed by a newline. The final yielded chunk is always the real HTML this route already produces today:
+Each route wraps its generator in a `fastapi.responses.StreamingResponse` with `media_type="text/plain"`, yielding each progress line followed by a newline. What happens once the stream ends differs by route, because swapping a full rendered page into `document.body.innerHTML` is unreliable — browsers don't parse a nested `<html>/<head>` consistently in that context — so full-page routes just trigger a plain reload instead of shipping a redundant copy of the page over the stream:
 
-- Fetch: the full `fetch/panel.html` page (unchanged from today's response) — client swaps it into `document.body`, mirroring the button's current `hx-target="body" hx-swap="innerHTML"`.
-- Re-evaluate jobs: the full `scenarios/index.html` page (unchanged from today's response). This button is currently a plain `<form>` (full page reload on submit) rather than HTMX — it's converted to use the same JS helper, also targeting `document.body`, since a plain form submit can't be read incrementally.
-- Refine criteria: the `_proposals.html` fragment (unchanged from today's response) — client swaps it into `#proposals-area-{{ scenario_id }}`, matching the button's current `hx-target`.
+- Fetch and Re-evaluate jobs (both currently render/reload the *entire page*): the generator yields progress lines only. No final HTML is sent. When the client sees the stream end, it calls `location.reload()` — a fresh `GET`, exactly as if the user reloaded the page, and exactly what today's full-page swap/reload already amounts to.
+- Refine criteria (renders a *fragment* into `#proposals-area-{{ scenario_id }}`, not the whole page): the generator yields progress lines, then one final chunk prefixed `HTML:` containing the rendered `_proposals.html` fragment (unchanged from today's response). The client swaps this into the target div's `innerHTML`, matching today's `hx-target`/`hx-swap="innerHTML"` behavior exactly.
 
-The client always treats the last chunk specially (see below), so no template restructuring is needed — each route still renders the exact same final HTML it does today, just preceded by progress lines.
+No template restructuring is needed for the underlying page/fragment renders — Fetch and Re-evaluate simply stop sending their final render over the wire (the reload re-fetches it fresh); Refine's final render is unchanged.
 
 ### Frontend
-A single small vanilla-JS helper (no library, no build step — consistent with the project's existing "HTMX + no JS build step" approach) is added to `base.html` and reused by all three buttons (Fetch, Re-evaluate jobs, Refine criteria from feedback). Since none of htmx's own attribute engine can read an incrementally-streamed body, these three triggers stop using `hx-post`/`hx-target` and instead carry two plain `data-*` attributes the helper reads directly: `data-progress-url` (where to POST) and `data-progress-target` (a CSS selector: `body` for Fetch/Re-evaluate, `#proposals-area-{{ scenario_id }}` for Refine — same targets as today's `hx-target` values).
+A single small vanilla-JS helper (no library, no build step — consistent with the project's existing "HTMX + no JS build step" approach) is added to `base.html` and reused by all three buttons (Fetch, Re-evaluate jobs, Refine criteria from feedback). Since none of htmx's own attribute engine can read an incrementally-streamed body, these three triggers stop using `hx-post`/`hx-target` and instead carry plain `data-*` attributes the helper reads directly: `data-progress-url` (where to POST) on all three, plus `data-progress-target` (a CSS selector, `#proposals-area-{{ scenario_id }}`) on the Refine button only — its absence signals "reload the page when done."
 
 On click, the helper:
 
-1. Issues the POST itself (`fetch(url, {method: "POST", body: ...})`).
+1. Issues the POST itself (`fetch(url, {method: "POST"})`).
 2. Starts a 5-second timer.
 3. Reads the response body incrementally via `response.body.getReader()`, decoding chunks and splitting on newlines.
 4. If the 5-second timer fires before the stream ends, reveals a small progress element (inserted next to the button) showing elapsed seconds (ticking up every second) and the most recently received line.
-5. Buffers the final chunk (the real HTML) separately from the plain-text progress lines.
-6. On stream end, sets `document.querySelector(target).innerHTML` (or replaces `document.body` outright for `body`) to the buffered HTML, then removes the progress element and clears the timer.
+5. If a line is prefixed `HTML:`, buffers it (stripped of the prefix) as the final fragment instead of treating it as a status line.
+6. On stream end: removes the progress element and clears the timer, then either sets `document.querySelector(data-progress-target).innerHTML` to the buffered fragment (if `data-progress-target` was present) or calls `location.reload()` (if it wasn't).
 
-**Framing convention:** each yielded chunk is either a progress line (plain text, human-readable, ends in `\n`) or is prefixed with a `HTML:` marker followed by the final fragment (no trailing newline, always the last chunk). This is a private convention between these routes and this one script — not a general protocol.
+**Framing convention:** each yielded chunk is a line of plain text (human-readable, ends in `\n`); a line prefixed `HTML:` is the one exception, carrying the final fragment instead of a status message, and only ever appears last. This is a private convention between the Refine route and this one script — not a general protocol. Fetch and Re-evaluate never emit an `HTML:` line.
 
 ### Removed
-The Fetch page's "last fetch result" banner (`last_result` context variable, currently populated only immediately after a synchronous POST) is dropped. The same information (found/new counts, error) is already visible per-source in the existing run-history table columns ("Last run", "New / Found"), which get refreshed as part of the final swap.
+The Fetch page's "last fetch result" banner (`last_result` context variable, currently populated only immediately after a synchronous POST) is dropped. The same information (found/new counts, error) is already visible per-source in the existing run-history table columns ("Last run", "New / Found"), which show fresh data once `location.reload()` fires.
 
 ---
 
@@ -79,8 +78,8 @@ The Fetch page's "last fetch result" banner (`last_result` context variable, cur
 
 ## Testing strategy
 
-- `run_fetch` becomes directly testable as a generator: tests drive it with `list(run_fetch(...))` and assert on the sequence of yielded strings, plus the final DB state (unchanged from today's assertions).
-- Route tests use `TestClient`, which fully drains `StreamingResponse` bodies into `resp.text` — existing assertions that check for specific substrings in the response continue to work unchanged. New assertions check that expected progress lines appear before the final `HTML:`-prefixed fragment.
+- `run_fetch` becomes directly testable as a generator that both yields progress strings and (via a normal generator `return`) produces a final `FetchResult` retrievable from `StopIteration.value`. Tests drain it with a small helper and assert on the sequence of yielded strings, the returned `FetchResult`, and the final DB state (unchanged from today's assertions).
+- Route tests use `TestClient`, which fully drains `StreamingResponse` bodies into `resp.text` — existing assertions that check for specific substrings in the response continue to work unchanged. For Refine, a new assertion checks the `HTML:`-prefixed fragment appears last. For Fetch and Re-evaluate, new assertions check that expected progress lines appear in `resp.text` and that no `HTML:` line is present.
 - No test covers the client-side JS timer/DOM behavior — that's manual/browser verification only, per this project's existing testing strategy (UI interaction isn't unit tested elsewhere in the codebase either).
 
 ## Out of scope
