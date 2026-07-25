@@ -1,7 +1,8 @@
 from __future__ import annotations
+import logging
 import sqlite3
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
@@ -9,6 +10,8 @@ from app.ai.refine import propose_criteria
 from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
 import openai
+
+logger = logging.getLogger("job_seek")
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -143,31 +146,41 @@ async def accept_proposals(
     )
 
 
-@router.post("/scenarios/{scenario_id}/reevaluate", response_class=HTMLResponse)
+@router.post("/scenarios/{scenario_id}/reevaluate")
 def reevaluate_jobs(
     scenario_id: int,
-    request: Request,
     conn: sqlite3.Connection = Depends(get_db),
     client: openai.OpenAI = Depends(get_ai_client),
     model: str = Depends(get_model),
 ):
-    scenario = dict(conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone())
+    scenario = _get_scenario_or_404(conn, scenario_id)
     criteria = q.get_criteria(conn, scenario_id)
     profile = q.get_profile(conn)
     jobs = q.get_jobs(conn, status="new")
     evaluated = [j for j in jobs if j["scenario_id"] == scenario_id and j["content_type"] in ("job_posting", "lead")]
-    for job in evaluated:
-        new_summary = summarize(client, model, job["simplified_content"]) if job["simplified_content"] else job["summary"]
-        score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
-        q.update_job_pipeline(
-            conn, job["id"],
-            simplified_content=job["simplified_content"],
-            content_type=job["content_type"],
-            summary=new_summary,
-            relevance_score=score,
-            score_reasoning=reasoning,
-            scenario_id=scenario_id,
-        )
-    ctx = _scenarios_context(conn)
-    ctx["reevaluated_count"] = len(evaluated)
-    return templates.TemplateResponse(request, "scenarios/index.html", ctx)
+
+    def stream():
+        total = len(evaluated)
+        msg = f"Re-evaluating {total} job(s) for scenario '{scenario['name']}'"
+        logger.info(msg)
+        yield msg + "\n"
+        for i, job in enumerate(evaluated, start=1):
+            new_summary = summarize(client, model, job["simplified_content"]) if job["simplified_content"] else job["summary"]
+            score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
+            q.update_job_pipeline(
+                conn, job["id"],
+                simplified_content=job["simplified_content"],
+                content_type=job["content_type"],
+                summary=new_summary,
+                relevance_score=score,
+                score_reasoning=reasoning,
+                scenario_id=scenario_id,
+            )
+            msg = f"[{i}/{total}] Re-scored {score}: {job['title'] or job['url']}"
+            logger.info(msg)
+            yield msg + "\n"
+        msg = f"Re-evaluation complete: {total} job(s) updated"
+        logger.info(msg)
+        yield msg + "\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")

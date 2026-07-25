@@ -8,10 +8,6 @@
   <button type="submit" class="btn">Create</button>
 </form>
 
-{% if reevaluated_count is defined %}
-<div style="padding:0.5rem; background:#d4edda; border-radius:4px; margin-bottom:1rem;">Re-evaluated {{ reevaluated_count }} job(s).</div>
-{% endif %}
-
 {% for scenario in scenarios %}
 <div style="border:1px solid #dee2e6; border-radius:6px; padding:1rem; margin-bottom:1rem;">
   {% include "scenarios/_header.html" %}
@@ -51,9 +47,7 @@
       hx-swap="innerHTML">
       Refine criteria from feedback
     </button>
-    <form method="post" action="/scenarios/{{ scenario.id }}/reevaluate" style="display:inline;">
-      <button type="submit" class="btn">Re-evaluate jobs</button>
-    </form>
+    <button class="btn" data-progress-url="/scenarios/{{ scenario.id }}/reevaluate">Re-evaluate jobs</button>
     <div id="proposals-area-{{ scenario.id }}" style="margin-top:0.75rem; width:100%;"></div>
   </div>
 </div>

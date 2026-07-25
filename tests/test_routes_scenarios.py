@@ -83,3 +83,23 @@ def test_refine_accept_adds_criteria(client, conn):
     assert resp.status_code == 200
     criteria = q.get_criteria(conn, sid)
     assert any(c["text"] == "Must be senior" for c in criteria)
+
+
+def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.set_active_scenario(conn, sid)
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", scenario_id=sid)
+
+    with patch("app.routes.scenarios.summarize", return_value="Updated summary"), \
+         patch("app.routes.scenarios.evaluate", return_value=(0.75, "Good match")):
+        resp = client.post(f"/scenarios/{sid}/reevaluate")
+
+    assert resp.status_code == 200
+    assert "Re-evaluating 1 job(s)" in resp.text
+    assert "Re-evaluation complete" in resp.text
+    job = q.get_job(conn, job_id)
+    assert job["relevance_score"] == pytest.approx(0.75)
+    assert job["summary"] == "Updated summary"
