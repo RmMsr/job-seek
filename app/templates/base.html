@@ -35,5 +35,87 @@
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
   </nav>
   <main>{% block content %}{% endblock %}</main>
+  <script>
+    (function () {
+      function onClick(evt) {
+        var el = evt.target.closest("[data-progress-url]");
+        if (!el) return;
+        evt.preventDefault();
+
+        var url = el.getAttribute("data-progress-url");
+        var targetSelector = el.getAttribute("data-progress-target");
+        var progressEl = document.createElement("span");
+        progressEl.style.marginLeft = "0.5rem";
+        progressEl.style.color = "#666";
+        progressEl.hidden = true;
+        el.insertAdjacentElement("afterend", progressEl);
+
+        var start = Date.now();
+        var revealed = false;
+        var lastLine = "";
+        var tickTimer = null;
+        var htmlChunk = null;
+
+        function tick() {
+          var elapsed = Math.round((Date.now() - start) / 1000);
+          progressEl.textContent = elapsed + "s" + (lastLine ? " — " + lastLine : "");
+        }
+
+        var revealTimer = setTimeout(function () {
+          revealed = true;
+          progressEl.hidden = false;
+          tick();
+          tickTimer = setInterval(tick, 1000);
+        }, 5000);
+
+        function finish() {
+          clearTimeout(revealTimer);
+          if (tickTimer) clearInterval(tickTimer);
+          progressEl.remove();
+          if (targetSelector) {
+            var target = document.querySelector(targetSelector);
+            if (target && htmlChunk != null) target.innerHTML = htmlChunk;
+          } else {
+            location.reload();
+          }
+        }
+
+        function handleLine(line) {
+          if (!line) return;
+          if (line.indexOf("HTML:") === 0) {
+            htmlChunk = line.slice(5);
+          } else {
+            lastLine = line;
+            if (revealed) tick();
+          }
+        }
+
+        fetch(url, { method: "POST" }).then(function (response) {
+          var reader = response.body.getReader();
+          var decoder = new TextDecoder();
+          var buffer = "";
+
+          function pump() {
+            return reader.read().then(function (result) {
+              if (result.done) {
+                if (buffer) handleLine(buffer);
+                finish();
+                return;
+              }
+              buffer += decoder.decode(result.value, { stream: true });
+              var lines = buffer.split("\n");
+              buffer = lines.pop();
+              lines.forEach(handleLine);
+              return pump();
+            });
+          }
+
+          return pump();
+        });
+      }
+
+      document.body.addEventListener("click", onClick);
+    })();
+  </script>
 </body>
 </html>
