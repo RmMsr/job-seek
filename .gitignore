@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 job-seek.db
 browser-profile/
+job-seek/
 temp/
 *.egg-info/
 dist/
