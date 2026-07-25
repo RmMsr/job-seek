@@ -71,6 +71,8 @@ def test_refine_returns_proposals(client, conn):
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
         resp = client.post(f"/scenarios/{sid}/refine")
     assert resp.status_code == 200
+    assert "Requesting criteria proposals" in resp.text
+    assert "HTML:" in resp.text
     assert "Must be senior" in resp.text
 
 

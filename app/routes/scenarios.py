@@ -106,7 +106,7 @@ def delete_criterion(criterion_id: int, conn: sqlite3.Connection = Depends(get_d
     return HTMLResponse(content="")
 
 
-@router.post("/scenarios/{scenario_id}/refine", response_class=HTMLResponse)
+@router.post("/scenarios/{scenario_id}/refine")
 def refine_criteria(
     scenario_id: int,
     request: Request,
@@ -114,15 +114,24 @@ def refine_criteria(
     client: openai.OpenAI = Depends(get_ai_client),
     model: str = Depends(get_model),
 ):
-    scenario = dict(conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone())
+    scenario = _get_scenario_or_404(conn, scenario_id)
     existing = q.get_criteria(conn, scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
-    proposals = propose_criteria(client, model, scenario, existing, notes)
-    return templates.TemplateResponse(
-        request,
-        "scenarios/_proposals.html",
-        {"proposals": proposals, "scenario_id": scenario_id},
-    )
+
+    def stream():
+        msg = f"Requesting criteria proposals for '{scenario['name']}' from LLM"
+        logger.info(msg)
+        yield msg + "\n"
+        proposals = propose_criteria(client, model, scenario, existing, notes)
+        msg = f"Received {len(proposals)} proposal(s)"
+        logger.info(msg)
+        yield msg + "\n"
+        html = templates.get_template("scenarios/_proposals.html").render(
+            request=request, proposals=proposals, scenario_id=scenario_id
+        )
+        yield "HTML:" + html
+
+    return StreamingResponse(stream(), media_type="text/plain")
 
 
 @router.post("/scenarios/{scenario_id}/refine/accept", response_class=HTMLResponse)

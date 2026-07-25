@@ -42,9 +42,8 @@
 
   <div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
     <button class="btn"
-      hx-post="/scenarios/{{ scenario.id }}/refine"
-      hx-target="#proposals-area-{{ scenario.id }}"
-      hx-swap="innerHTML">
+      data-progress-url="/scenarios/{{ scenario.id }}/refine"
+      data-progress-target="#proposals-area-{{ scenario.id }}">
       Refine criteria from feedback
     </button>
     <button class="btn" data-progress-url="/scenarios/{{ scenario.id }}/reevaluate">Re-evaluate jobs</button>
