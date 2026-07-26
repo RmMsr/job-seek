@@ -84,7 +84,10 @@
           progressEl.remove();
           if (targetSelector) {
             var target = document.querySelector(targetSelector);
-            if (target && htmlChunk != null) target.innerHTML = htmlChunk;
+            if (target && htmlChunk != null) {
+              target.innerHTML = htmlChunk;
+              if (window.htmx) window.htmx.process(target);
+            }
           } else {
             location.reload();
           }
