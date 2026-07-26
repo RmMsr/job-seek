@@ -129,7 +129,7 @@ def refine_criteria(
         html = templates.get_template("scenarios/_proposals.html").render(
             request=request, proposals=proposals, scenario_id=scenario_id
         )
-        yield "HTML:" + html
+        yield "HTML:" + html.replace("\n", "")
 
     return StreamingResponse(stream(), media_type="text/plain")
 

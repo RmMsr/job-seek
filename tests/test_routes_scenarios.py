@@ -76,6 +76,22 @@ def test_refine_returns_proposals(client, conn):
     assert "Must be senior" in resp.text
 
 
+def test_refine_html_chunk_has_no_embedded_newline(client, conn):
+    # The client reads the stream line-by-line, splitting on "\n", and only
+    # recognizes "HTML:" as a prefix of a complete line. A fragment with an
+    # embedded newline would be split across multiple "lines" client-side,
+    # silently truncating the html to "" instead of the real fragment.
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
+    with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
+        resp = client.post(f"/scenarios/{sid}/refine")
+    lines = resp.text.split("\n")
+    html_lines = [line for line in lines if line.startswith("HTML:")]
+    assert len(html_lines) == 1
+    assert "Must be senior" in html_lines[0]
+
+
 def test_refine_accept_adds_criteria(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     resp = client.post(
