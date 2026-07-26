@@ -3,18 +3,17 @@ import logging
 import sqlite3
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
 from app.ai.refine import propose_criteria
 from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
+from app.template_env import templates
 import openai
 
 logger = logging.getLogger("job_seek")
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _scenarios_context(conn: sqlite3.Connection) -> dict:

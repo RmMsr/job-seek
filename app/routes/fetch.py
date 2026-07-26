@@ -2,14 +2,13 @@ from __future__ import annotations
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from app.deps import get_db, get_ai_client, get_model, get_config
 from app.db import queries as q
 from app.pipeline import run_fetch
+from app.template_env import templates
 import openai
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/fetch", response_class=HTMLResponse)

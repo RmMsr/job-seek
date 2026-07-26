@@ -3,7 +3,7 @@
 {% for p in proposals %}
 <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
   <span class="tag">{{ p.weight }}</span>
-  <span style="flex:1;">{{ p.text }}</span>
+  <span style="flex:1;">{{ p.text | markdown_inline }}</span>
   <form hx-post="/scenarios/{{ scenario_id }}/criteria"
         hx-target="#criteria-{{ scenario_id }}"
         hx-swap="outerHTML">

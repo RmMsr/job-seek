@@ -13,5 +13,5 @@
       hx-target="#scenario-header-{{ scenario.id }}"
       hx-swap="outerHTML">Edit</button>
   </div>
-  {% if scenario.description %}<p style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description }}</p>{% endif %}
+  {% if scenario.description %}<div style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description | markdown }}</div>{% endif %}
 </div>

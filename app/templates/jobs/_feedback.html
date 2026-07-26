@@ -5,10 +5,10 @@
     <a href="{{ job.url }}" target="_blank" rel="noopener">↗ original</a>
   </div>
   {% if job.summary %}
-    <div style="margin-top:0.5rem;">{{ job.summary }}</div>
+    <div style="margin-top:0.5rem;">{{ job.summary | markdown }}</div>
   {% endif %}
   {% if job.score_reasoning %}
-    <div style="margin-top:0.4rem; font-size:0.9em; color:#666;"><em>{{ job.score_reasoning }}</em></div>
+    <div style="margin-top:0.4rem; font-size:0.9em; color:#666;">{{ job.score_reasoning | markdown }}</div>
   {% endif %}
   <form class="feedback-form" style="margin-top:0.75rem;"
     hx-post="/jobs/{{ job.id }}/feedback"

@@ -2,7 +2,7 @@
   {% for c in criteria %}
   <li id="criterion-{{ c.id }}" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem;">
     <span class="tag">{{ c.weight }}</span>
-    <span>{{ c.text }}</span>
+    <span>{{ c.text | markdown_inline }}</span>
     <button class="btn" style="padding:2px 8px; font-size:0.8em;"
       hx-delete="/criteria/{{ c.id }}"
       hx-target="#criterion-{{ c.id }}"

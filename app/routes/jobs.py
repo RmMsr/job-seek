@@ -2,12 +2,11 @@ from __future__ import annotations
 import sqlite3
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from app.deps import get_db
 from app.db import queries as q
+from app.template_env import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
