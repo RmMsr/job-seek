@@ -1,4 +1,4 @@
-from app.markdown_render import render_markdown, render_markdown_inline
+from app.markdown_render import render_markdown, render_markdown_inline, markdown_to_text
 
 
 def test_render_markdown_bold():
@@ -27,3 +27,20 @@ def test_render_markdown_inline_unwraps_single_paragraph():
 
 def test_render_markdown_inline_keeps_formatting():
     assert str(render_markdown_inline("Must be **senior**")) == "Must be <strong>senior</strong>"
+
+
+def test_markdown_to_text_strips_tags():
+    assert markdown_to_text("**Role:** ML Engineer") == "Role: ML Engineer"
+
+
+def test_markdown_to_text_truncation_leaves_no_stray_markers():
+    # Truncating the raw source mid-token (as the row preview used to do)
+    # could leave a stray "**" visible; truncating post-render avoids that.
+    text = "**Key requirements** include Python and a love of edge devices"
+    truncated = markdown_to_text(text)[:12]
+    assert "**" not in truncated
+
+
+def test_markdown_to_text_empty():
+    assert markdown_to_text("") == ""
+    assert markdown_to_text(None) == ""
