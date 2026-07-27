@@ -36,6 +36,13 @@ def test_classify_invalid_json_returns_error():
     assert content_type == "error"
 
 
+def test_classify_strips_markdown_code_fence():
+    client = _mock_client('```json\n{"type": "job_posting", "reason": "Full role details"}\n```')
+    content_type, reason = classify(client, "llama3.2", "Senior ML Engineer at Acme...")
+    assert content_type == "job_posting"
+    assert reason == "Full role details"
+
+
 def test_classify_sends_slack_hint():
     client = _mock_client('{"type": "lead", "reason": "Slack post"}')
     classify(client, "llama3.2", "content", is_slack=True)

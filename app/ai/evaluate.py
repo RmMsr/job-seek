@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import openai
+from app.ai.json_utils import extract_json
 
 _SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario with criteria,
 and a job summary, return a relevance score from 0.0 to 1.0 and a brief reasoning.
@@ -36,7 +37,7 @@ def evaluate(
             ],
             temperature=0,
         )
-        data = json.loads(resp.choices[0].message.content)
+        data = json.loads(extract_json(resp.choices[0].message.content))
         score = max(0.0, min(1.0, float(data.get("score", 0.0))))
         return score, data.get("reasoning", "")
     except Exception as exc:

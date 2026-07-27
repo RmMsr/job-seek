@@ -36,3 +36,10 @@ def test_evaluate_invalid_json_returns_zero():
     score, reasoning = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
     assert score == 0.0
     assert "error" in reasoning.lower()
+
+
+def test_evaluate_strips_markdown_code_fence():
+    client = _mock_client('```json\n{"score": 0.6, "reasoning": "Decent match"}\n```')
+    score, reasoning = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    assert score == pytest.approx(0.6)
+    assert reasoning == "Decent match"

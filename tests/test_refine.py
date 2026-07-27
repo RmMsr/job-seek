@@ -38,3 +38,11 @@ def test_propose_criteria_filters_invalid_weight():
     client = _mock_client(response)
     proposals = propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
     assert proposals == []
+
+
+def test_propose_criteria_strips_markdown_code_fence():
+    response = '```json\n[{"text": "Must be senior level", "weight": "must", "action": "add"}]\n```'
+    client = _mock_client(response)
+    proposals = propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
+    assert len(proposals) == 1
+    assert proposals[0].text == "Must be senior level"

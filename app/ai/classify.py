@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import openai
+from app.ai.json_utils import extract_json
 
 _SYSTEM = (
     "You classify text as one of: job_posting, lead, irrelevant, error. "
@@ -33,7 +34,7 @@ def classify(
             ],
             temperature=0,
         )
-        data = json.loads(resp.choices[0].message.content)
+        data = json.loads(extract_json(resp.choices[0].message.content))
         content_type = data.get("type", "error")
         if content_type not in ("job_posting", "lead", "irrelevant", "error"):
             content_type = "error"
