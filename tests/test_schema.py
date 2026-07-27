@@ -48,6 +48,37 @@ def test_sources_accepts_finn_listing_fetcher_type(conn):
     )
 
 
+def test_init_db_migration_preserves_referencing_jobs_with_fk_enforced(conn):
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
+    conn.commit()
+
+    init_db(conn)
+
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('finn.no', 'http://y', 'finn_listing')")
+    jobs = conn.execute("SELECT source_id, url FROM jobs").fetchall()
+    assert [dict(j) for j in jobs] == [{"source_id": 1, "url": "http://job/1"}]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO jobs (source_id, url) VALUES (999, 'http://job/2')")
+
+
 def test_init_db_migrates_sources_table_missing_finn_listing_type(conn):
     conn.executescript(
         """

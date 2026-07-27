@@ -68,21 +68,28 @@ def _migrate_sources_fetcher_type(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if row is None or "finn_listing" in row[0]:
         return
+    # Rebuild under a new name rather than renaming "sources" away: SQLite
+    # auto-rewrites other tables' REFERENCES clauses when the referenced
+    # table is renamed, which would leave jobs/fetch_runs pointing at a
+    # since-dropped "sources_old". Building the replacement under a fresh
+    # name and swapping it into place afterwards avoids that entirely.
+    conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(
         """
-        ALTER TABLE sources RENAME TO sources_old;
-        CREATE TABLE sources (
+        CREATE TABLE sources_new (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             url TEXT NOT NULL,
             fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
             enabled INTEGER NOT NULL DEFAULT 1
         );
-        INSERT INTO sources SELECT * FROM sources_old;
-        DROP TABLE sources_old;
+        INSERT INTO sources_new SELECT * FROM sources;
+        DROP TABLE sources;
+        ALTER TABLE sources_new RENAME TO sources;
         """
     )
     conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 def init_db(conn: sqlite3.Connection) -> None:
