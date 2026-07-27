@@ -3,7 +3,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
-from app.pipeline import run_fetch, FetchResult
+from app.pipeline import run_fetch, FetchResult, _make_fetcher
+from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.base import RawJob
 
 
@@ -144,3 +145,8 @@ def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
     assert any("job_posting" in m for m in messages)
     assert any("Fetch complete" in m for m in messages)
     assert messages == [r.message for r in caplog.records]
+
+
+def test_make_fetcher_dispatches_finn_listing():
+    source = {"id": 1, "name": "finn.no", "url": "http://x", "fetcher_type": "finn_listing"}
+    assert isinstance(_make_fetcher(source, "browser-profile"), FinnListingFetcher)

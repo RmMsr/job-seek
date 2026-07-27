@@ -10,6 +10,7 @@
         <option value="http" {% if source.fetcher_type == "http" %}selected{% endif %}>http</option>
         <option value="playwright" {% if source.fetcher_type == "playwright" %}selected{% endif %}>playwright</option>
         <option value="slack" {% if source.fetcher_type == "slack" %}selected{% endif %}>slack</option>
+        <option value="finn_listing" {% if source.fetcher_type == "finn_listing" %}selected{% endif %}>finn_listing</option>
       </select>
       <label><input type="checkbox" name="enabled" {% if source.enabled %}checked{% endif %}> enabled</label>
       <button type="submit" class="btn">Save</button>

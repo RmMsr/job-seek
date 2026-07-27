@@ -13,6 +13,7 @@ from app.fetchers.base import RawJob
 from app.fetchers.http import HttpFetcher
 from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.slack import SlackFetcher
+from app.fetchers.finn import FinnListingFetcher
 
 logger = logging.getLogger("job_seek")
 
@@ -32,6 +33,8 @@ def _make_fetcher(source: dict, profile_dir: str):
         return HttpFetcher(source)
     if ft == "slack":
         return SlackFetcher(source, profile_dir)
+    if ft == "finn_listing":
+        return FinnListingFetcher(source)
     return PlaywrightFetcher(source, profile_dir)
 
 
