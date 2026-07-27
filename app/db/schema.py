@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
-    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack')),
+    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
     enabled INTEGER NOT NULL DEFAULT 1
 );
 
@@ -62,5 +62,29 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
 """
 
 
+def _migrate_sources_fetcher_type(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sources'"
+    ).fetchone()
+    if row is None or "finn_listing" in row[0]:
+        return
+    conn.executescript(
+        """
+        ALTER TABLE sources RENAME TO sources_old;
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO sources SELECT * FROM sources_old;
+        DROP TABLE sources_old;
+        """
+    )
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
+    _migrate_sources_fetcher_type(conn)
