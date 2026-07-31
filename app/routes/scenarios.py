@@ -151,6 +151,12 @@ def update_criterion(
     return templates.TemplateResponse(request, "scenarios/_criterion.html", {"c": criterion})
 
 
+@router.delete("/criteria/{criterion_id}/remove-proposal", response_class=HTMLResponse)
+def remove_criterion_via_proposal(criterion_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    q.delete_criterion(conn, criterion_id)
+    return HTMLResponse(content=f'<li id="criterion-{criterion_id}" hx-swap-oob="delete"></li>')
+
+
 @router.post("/scenarios/{scenario_id}/refine")
 def refine_criteria(
     scenario_id: int,

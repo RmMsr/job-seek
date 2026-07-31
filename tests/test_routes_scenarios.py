@@ -99,6 +99,22 @@ def test_cancel_criterion_edit_returns_display_row(client, conn):
     assert "Must be remote" in resp.text
 
 
+def test_remove_proposal_deletes_criterion(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.delete(f"/criteria/{cid}/remove-proposal")
+    assert resp.status_code == 200
+    assert q.get_criterion(conn, cid) is None
+
+
+def test_remove_proposal_response_marks_criterion_row_for_oob_delete(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.delete(f"/criteria/{cid}/remove-proposal")
+    assert f'id="criterion-{cid}"' in resp.text
+    assert 'hx-swap-oob="delete"' in resp.text
+
+
 def test_refine_returns_proposals(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
