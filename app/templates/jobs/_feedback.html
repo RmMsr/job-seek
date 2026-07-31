@@ -7,8 +7,11 @@
   {% if job.summary %}
     <div style="margin-top:0.5rem;">{{ job.summary | markdown }}</div>
   {% endif %}
-  {% if job.score_reasoning %}
-    <div style="margin-top:0.4rem; font-size:0.9em; color:#666;">{{ job.score_reasoning | markdown }}</div>
+  {% if job.best_score_reasoning %}
+    <div style="margin-top:0.4rem; font-size:0.9em; color:#666;">
+      <span class="tag">{{ job.best_scenario_name }}</span>
+      {{ job.best_score_reasoning | markdown }}
+    </div>
   {% endif %}
   <form class="feedback-form" style="margin-top:0.75rem;"
     hx-post="/jobs/{{ job.id }}/feedback"

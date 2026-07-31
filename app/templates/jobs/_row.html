@@ -1,6 +1,6 @@
 <div class="job-row" id="job-{{ job.id }}">
   <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-    {% set score = job.relevance_score %}
+    {% set score = job.best_score %}
     {% if score is not none %}
       {% if score >= 0.7 %}
         <span class="score-badge score-high">{{ "%.0f"|format(score * 100) }}%</span>
@@ -9,6 +9,7 @@
       {% else %}
         <span class="score-badge score-low">{{ "%.0f"|format(score * 100) }}%</span>
       {% endif %}
+      <span class="tag">{{ job.best_scenario_name }}</span>
     {% endif %}
     <span class="tag">{{ job.content_type or "unknown" }}</span>
     <span class="tag">{{ job.source_name or "" }}</span>
