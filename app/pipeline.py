@@ -14,6 +14,7 @@ from app.fetchers.http import HttpFetcher
 from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.slack import SlackFetcher
 from app.fetchers.finn import FinnListingFetcher
+from app.scenario_version import compute_version_hash
 
 logger = logging.getLogger("job_seek")
 
@@ -61,8 +62,7 @@ def run_fetch(
         yield _progress(f"Fetched {jobs_found} raw posting(s) from '{source['name']}'")
 
         profile = q.get_profile(conn)
-        scenario = q.get_active_scenario(conn)
-        criteria = q.get_criteria(conn, scenario["id"]) if scenario else []
+        scenarios = q.get_scenarios(conn)
 
         for i, raw in enumerate(raw_jobs, start=1):
             if q.url_exists(conn, raw.url):
@@ -82,19 +82,20 @@ def run_fetch(
             content_type, _ = classify(client, model, simplified, is_slack=is_slack)
             yield _progress(f"[{i}/{jobs_found}] Classified as {content_type}: {raw.url}")
 
-            if content_type in ("job_posting", "lead") and scenario:
+            if content_type in ("job_posting", "lead"):
                 job_summary = summarize(client, model, simplified)
-                score, reasoning = evaluate(client, model, profile, scenario, criteria, job_summary)
                 q.update_job_pipeline(
                     conn, job_id,
                     simplified_content=simplified,
                     content_type=content_type,
                     summary=job_summary,
-                    relevance_score=score,
-                    score_reasoning=reasoning,
-                    scenario_id=scenario["id"],
                 )
-                yield _progress(f"[{i}/{jobs_found}] Scored {score}: {raw.url}")
+                for scenario in scenarios:
+                    criteria = q.get_criteria(conn, scenario["id"])
+                    score, reasoning = evaluate(client, model, profile, scenario, criteria, job_summary)
+                    version_hash = compute_version_hash(scenario, criteria)
+                    q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
+                    yield _progress(f"[{i}/{jobs_found}] Scored {score} for '{scenario['name']}': {raw.url}")
             else:
                 q.update_job_pipeline(
                     conn, job_id,

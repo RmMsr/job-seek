@@ -150,3 +150,46 @@ def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
 def test_make_fetcher_dispatches_finn_listing():
     source = {"id": 1, "name": "finn.no", "url": "http://x", "fetcher_type": "finn_listing"}
     assert isinstance(_make_fetcher(source, "browser-profile"), FinnListingFetcher)
+
+
+def test_run_fetch_scores_against_every_scenario(conn, source):
+    first_id = q.get_scenarios(conn)[0]["id"]
+    second_id = q.insert_scenario(conn, "Robotics", "")
+    q.insert_criterion(conn, second_id, "Must involve embedded systems", "must")
+
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        "Good ML role",
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job_id = q.get_jobs(conn)[0]["id"]
+    assert q.get_job_score(conn, job_id, first_id) is not None
+    assert q.get_job_score(conn, job_id, second_id) is not None
+    assert sum("Scored" in m for m in messages) == 2
+
+
+def test_run_fetch_with_no_scenarios_still_summarizes(conn):
+    source_id = q.insert_source(conn, "test", "http://example.com", "http")
+    source_dict = q.get_source(conn, source_id)
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        "Good ML role",
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, result = _drain(run_fetch(source_dict, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["content_type"] == "job_posting"
+    assert job["summary"] == "Good ML role"
+    assert job["best_score"] is None
+    assert not any("Scored" in m for m in messages)
