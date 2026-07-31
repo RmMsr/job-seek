@@ -1,16 +1,28 @@
 {% if proposals %}
-<p><strong>Proposed criteria changes.</strong> Click "Add" on each one you want to keep:</p>
+<p><strong>Proposed criteria changes.</strong> Review each one below:</p>
 {% for p in proposals %}
-<div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
-  <span class="tag">{{ p.weight }}</span>
+<div id="proposal-{{ loop.index0 }}" style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
+  {% if p.action == "remove" %}
+  <span class="tag">remove</span>
   <span style="flex:1;">{{ p.text | markdown_inline }}</span>
+  <button class="btn btn-reject" style="font-size:0.85em;"
+    hx-delete="/criteria/{{ p.criterion_id }}/remove-proposal"
+    hx-target="#proposal-{{ loop.index0 }}"
+    hx-swap="outerHTML">Remove</button>
+  {% else %}
   <form hx-post="/scenarios/{{ scenario_id }}/criteria"
         hx-target="#criteria-{{ scenario_id }}"
-        hx-swap="outerHTML">
-    <input type="hidden" name="text" value="{{ p.text }}">
-    <input type="hidden" name="weight" value="{{ p.weight }}">
+        hx-swap="outerHTML"
+        style="display:flex; gap:0.5rem; flex:1; align-items:center;">
+    <select name="weight">
+      <option value="must" {% if p.weight == "must" %}selected{% endif %}>must</option>
+      <option value="prefer" {% if p.weight == "prefer" %}selected{% endif %}>prefer</option>
+      <option value="avoid" {% if p.weight == "avoid" %}selected{% endif %}>avoid</option>
+    </select>
+    <input type="text" name="text" value="{{ p.text }}" style="flex:1; min-width:200px;">
     <button type="submit" class="btn btn-accept" style="font-size:0.85em;">Add</button>
   </form>
+  {% endif %}
 </div>
 {% endfor %}
 {% else %}

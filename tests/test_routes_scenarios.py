@@ -111,6 +111,36 @@ def test_refine_returns_proposals(client, conn):
     assert "Must be senior" in resp.text
 
 
+def test_refine_add_proposal_has_editable_inputs(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
+    with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
+        resp = client.post(f"/scenarios/{sid}/refine")
+    assert 'name="text" value="Must be senior"' in resp.text
+    assert 'name="weight"' in resp.text
+
+
+def test_refine_remove_proposal_matched_shows_remove_button(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    proposals = [CriterionProposal(text="Must be remote", weight="must", action="remove")]
+    with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
+        resp = client.post(f"/scenarios/{sid}/refine")
+    assert f"/criteria/{cid}/remove-proposal" in resp.text
+    assert ">Remove<" in resp.text
+
+
+def test_refine_remove_proposal_unmatched_is_omitted(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    proposals = [CriterionProposal(text="Must have a PhD", weight="must", action="remove")]
+    with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
+        resp = client.post(f"/scenarios/{sid}/refine")
+    assert "Must have a PhD" not in resp.text
+    assert "No changes proposed" in resp.text
+
+
 def test_refine_html_chunk_has_no_embedded_newline(client, conn):
     # The client reads the stream line-by-line, splitting on "\n", and only
     # recognizes "HTML:" as a prefix of a complete line. A fragment with an

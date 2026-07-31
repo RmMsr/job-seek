@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
-from app.ai.refine import propose_criteria
+from app.ai.refine import propose_criteria, match_removal_target
 from app.pipeline import run_reevaluate
 from app.template_env import templates
 import openai
@@ -171,8 +171,17 @@ def refine_criteria(
         msg = f"Received {len(proposals)} proposal(s)"
         logger.info(msg)
         yield msg + "\n"
+        resolved = []
+        for p in proposals:
+            if p.action == "remove":
+                criterion_id = match_removal_target(p.text, existing)
+                if criterion_id is None:
+                    continue
+                resolved.append({"text": p.text, "weight": p.weight, "action": "remove", "criterion_id": criterion_id})
+            else:
+                resolved.append({"text": p.text, "weight": p.weight, "action": "add", "criterion_id": None})
         html = templates.get_template("scenarios/_proposals.html").render(
-            request=request, proposals=proposals, scenario_id=scenario_id
+            request=request, proposals=resolved, scenario_id=scenario_id
         )
         yield "HTML:" + html.replace("\n", "")
 
