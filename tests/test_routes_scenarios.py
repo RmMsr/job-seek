@@ -49,6 +49,14 @@ def test_add_criterion(client, conn):
     assert criteria[0]["text"] == "Must be remote"
 
 
+def test_scenarios_page_renders_criterion_markdown(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be *remote*", "must")
+    resp = client.get("/scenarios")
+    assert resp.status_code == 200
+    assert "<em>remote</em>" in resp.text
+
+
 def test_delete_criterion(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     cid = q.insert_criterion(conn, sid, "Must be remote", "must")
