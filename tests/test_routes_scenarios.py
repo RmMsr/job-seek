@@ -105,19 +105,56 @@ def test_refine_accept_adds_criteria(client, conn):
 
 def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    q.set_active_scenario(conn, sid)
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", scenario_id=sid)
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.routes.scenarios.summarize", return_value="Updated summary"), \
-         patch("app.routes.scenarios.evaluate", return_value=(0.75, "Good match")):
+    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
         resp = client.post(f"/scenarios/{sid}/reevaluate")
 
     assert resp.status_code == 200
     assert "Re-evaluating 1 job(s)" in resp.text
     assert "Re-evaluation complete" in resp.text
     job = q.get_job(conn, job_id)
-    assert job["relevance_score"] == pytest.approx(0.75)
+    assert job["best_score"] == pytest.approx(0.75)
     assert job["summary"] == "Updated summary"
+
+
+def test_reevaluate_skips_jobs_already_current(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    job_id = q.get_jobs(conn)[0]["id"]
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+
+    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate:
+        client.post(f"/scenarios/{sid}/reevaluate")
+        resp = client.post(f"/scenarios/{sid}/reevaluate")
+
+    assert mock_evaluate.call_count == 1
+    assert "skipping 1 already current" in resp.text
+    assert "Re-evaluating 0 job(s)" in resp.text
+
+
+def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
+    sid_a = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid_a, "Must be remote", "must")
+    sid_b = q.insert_scenario(conn, "Robotics", "")
+    q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+
+    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+        resp = client.post("/scenarios/reevaluate")
+
+    assert resp.status_code == 200
+    assert "Re-evaluating 2 scenario(s)" in resp.text
+    assert "All scenarios re-evaluated: 2 job(s) updated across 2 scenario(s)" in resp.text
+    assert q.get_job_score(conn, job_id, sid_a) is not None
+    assert q.get_job_score(conn, job_id, sid_b) is not None

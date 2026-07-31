@@ -110,3 +110,38 @@ def run_fetch(
         q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error=str(exc))
         yield _progress(f"Fetch failed for '{source['name']}': {exc}")
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=0, jobs_new=0, error=str(exc))
+
+
+def run_reevaluate(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    scenario: dict,
+) -> Generator[str, None, int]:
+    profile = q.get_profile(conn)
+    criteria = q.get_criteria(conn, scenario["id"])
+    current_hash = compute_version_hash(scenario, criteria)
+    eligible = [j for j in q.get_jobs(conn, status="new") if j["content_type"] in ("job_posting", "lead")]
+    existing_hashes = q.get_job_score_hashes(conn, scenario["id"])
+    to_evaluate = [j for j in eligible if existing_hashes.get(j["id"]) != current_hash]
+    skipped = len(eligible) - len(to_evaluate)
+
+    msg = f"Re-evaluating {len(to_evaluate)} job(s) for scenario '{scenario['name']}'"
+    if skipped:
+        msg += f", skipping {skipped} already current"
+    yield _progress(msg)
+
+    for i, job in enumerate(to_evaluate, start=1):
+        new_summary = summarize(client, model, job["simplified_content"]) if job["simplified_content"] else job["summary"]
+        score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
+        q.update_job_pipeline(
+            conn, job["id"],
+            simplified_content=job["simplified_content"],
+            content_type=job["content_type"],
+            summary=new_summary,
+        )
+        q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, current_hash)
+        yield _progress(f"[{i}/{len(to_evaluate)}] Re-scored {score}: {job['title'] or job['url']}")
+
+    yield _progress(f"Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
+    return len(to_evaluate)

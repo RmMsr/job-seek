@@ -2,11 +2,15 @@
 {% block title %}Scenarios — Job Seek{% endblock %}
 {% block content %}
 <h1>Scenarios</h1>
-<form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.5rem;">
+<form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem;">
   <input type="text" name="name" placeholder="Scenario name" required>
   <input type="text" name="description" placeholder="Description (optional)" style="flex:1;">
   <button type="submit" class="btn">Create</button>
 </form>
+
+{% if scenarios %}
+<button class="btn" data-progress-url="/scenarios/reevaluate" style="margin-bottom:1.5rem;">Re-evaluate all scenarios</button>
+{% endif %}
 
 {% for scenario in scenarios %}
 <div style="border:1px solid #dee2e6; border-radius:6px; padding:1rem; margin-bottom:1rem;">

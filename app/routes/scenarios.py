@@ -6,8 +6,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
 from app.ai.refine import propose_criteria
-from app.ai.summarize import summarize
-from app.ai.evaluate import evaluate
+from app.pipeline import run_reevaluate
 from app.template_env import templates
 import openai
 
@@ -38,6 +37,29 @@ def create_scenario(
     q.insert_scenario(conn, name, description)
     ctx = _scenarios_context(conn)
     return templates.TemplateResponse(request, "scenarios/index.html", ctx)
+
+
+@router.post("/scenarios/reevaluate")
+def reevaluate_all_scenarios(
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    scenarios = q.get_scenarios(conn)
+
+    def stream():
+        yield f"Re-evaluating {len(scenarios)} scenario(s)\n"
+        total_updated = 0
+        for scenario in scenarios:
+            gen = run_reevaluate(conn, client, model, scenario)
+            try:
+                while True:
+                    yield next(gen) + "\n"
+            except StopIteration as stop:
+                total_updated += stop.value
+        yield f"All scenarios re-evaluated: {total_updated} job(s) updated across {len(scenarios)} scenario(s)\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
 
 
 def _get_scenario_or_404(conn: sqlite3.Connection, scenario_id: int) -> dict:
@@ -162,33 +184,13 @@ def reevaluate_jobs(
     model: str = Depends(get_model),
 ):
     scenario = _get_scenario_or_404(conn, scenario_id)
-    criteria = q.get_criteria(conn, scenario_id)
-    profile = q.get_profile(conn)
-    jobs = q.get_jobs(conn, status="new")
-    evaluated = [j for j in jobs if j["scenario_id"] == scenario_id and j["content_type"] in ("job_posting", "lead")]
 
     def stream():
-        total = len(evaluated)
-        msg = f"Re-evaluating {total} job(s) for scenario '{scenario['name']}'"
-        logger.info(msg)
-        yield msg + "\n"
-        for i, job in enumerate(evaluated, start=1):
-            new_summary = summarize(client, model, job["simplified_content"]) if job["simplified_content"] else job["summary"]
-            score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
-            q.update_job_pipeline(
-                conn, job["id"],
-                simplified_content=job["simplified_content"],
-                content_type=job["content_type"],
-                summary=new_summary,
-                relevance_score=score,
-                score_reasoning=reasoning,
-                scenario_id=scenario_id,
-            )
-            msg = f"[{i}/{total}] Re-scored {score}: {job['title'] or job['url']}"
-            logger.info(msg)
-            yield msg + "\n"
-        msg = f"Re-evaluation complete: {total} job(s) updated"
-        logger.info(msg)
-        yield msg + "\n"
+        gen = run_reevaluate(conn, client, model, scenario)
+        try:
+            while True:
+                yield next(gen) + "\n"
+        except StopIteration:
+            pass
 
     return StreamingResponse(stream(), media_type="text/plain")
