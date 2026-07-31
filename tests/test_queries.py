@@ -56,6 +56,35 @@ def test_criteria_insert_and_delete(conn):
     assert q.get_criteria(conn, sid) == []
 
 
+def test_get_criterion(conn):
+    sid = q.insert_scenario(conn, "A", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    criterion = q.get_criterion(conn, cid)
+    assert criterion["id"] == cid
+    assert criterion["text"] == "Must be remote"
+    assert criterion["weight"] == "must"
+
+
+def test_get_criterion_missing_returns_none(conn):
+    assert q.get_criterion(conn, 999) is None
+
+
+def test_update_criterion(conn):
+    sid = q.insert_scenario(conn, "A", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    q.update_criterion(conn, cid, text="Must be fully remote", weight="prefer")
+    criterion = q.get_criterion(conn, cid)
+    assert criterion["text"] == "Must be fully remote"
+    assert criterion["weight"] == "prefer"
+
+
+def test_update_criterion_leaves_source_unchanged(conn):
+    sid = q.insert_scenario(conn, "A", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must", source="feedback")
+    q.update_criterion(conn, cid, text="Must be fully remote", weight="prefer")
+    assert q.get_criterion(conn, cid)["source"] == "feedback"
+
+
 def test_url_exists(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     assert not q.url_exists(conn, "http://job/1")

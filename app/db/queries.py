@@ -105,6 +105,18 @@ def insert_criterion(
     return cur.lastrowid
 
 
+def get_criterion(conn: sqlite3.Connection, criterion_id: int) -> dict | None:
+    return _row_to_dict(conn.execute("SELECT * FROM criteria WHERE id = ?", (criterion_id,)).fetchone())
+
+
+def update_criterion(conn: sqlite3.Connection, criterion_id: int, text: str, weight: str) -> None:
+    conn.execute(
+        "UPDATE criteria SET text = ?, weight = ? WHERE id = ?",
+        (text, weight, criterion_id),
+    )
+    conn.commit()
+
+
 def delete_criterion(conn: sqlite3.Connection, criterion_id: int) -> None:
     conn.execute("DELETE FROM criteria WHERE id = ?", (criterion_id,))
     conn.commit()
