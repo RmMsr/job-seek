@@ -64,10 +64,6 @@ def get_scenarios(conn: sqlite3.Connection) -> list[dict]:
     return _rows_to_dicts(conn.execute("SELECT * FROM scenarios ORDER BY created_at DESC").fetchall())
 
 
-def get_active_scenario(conn: sqlite3.Connection) -> dict | None:
-    return _row_to_dict(conn.execute("SELECT * FROM scenarios WHERE active = 1").fetchone())
-
-
 def insert_scenario(conn: sqlite3.Connection, name: str, description: str) -> int:
     cur = conn.execute(
         "INSERT INTO scenarios (name, description) VALUES (?, ?)", (name, description)
@@ -86,12 +82,6 @@ def update_scenario(conn: sqlite3.Connection, scenario_id: int, name: str, descr
 
 def get_scenario(conn: sqlite3.Connection, scenario_id: int) -> dict | None:
     return _row_to_dict(conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone())
-
-
-def set_active_scenario(conn: sqlite3.Connection, scenario_id: int) -> None:
-    conn.execute("UPDATE scenarios SET active = 0")
-    conn.execute("UPDATE scenarios SET active = 1 WHERE id = ?", (scenario_id,))
-    conn.commit()
 
 
 # --- Criteria ---

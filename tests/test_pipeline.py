@@ -21,8 +21,6 @@ def conn():
 def source(conn):
     sid = q.insert_source(conn, "test", "http://example.com", "http")
     q.insert_scenario(conn, "Remote ML", "")
-    scenario = q.get_scenarios(conn)[0]
-    q.set_active_scenario(conn, scenario["id"])
     q.upsert_profile(conn, "I am an ML engineer.")
     return q.get_source(conn, sid)
 

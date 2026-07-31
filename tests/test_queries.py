@@ -38,25 +38,6 @@ def test_update_source(conn):
     assert source["name"] == "finn.no"
 
 
-def test_scenarios_and_active(conn):
-    sid = q.insert_scenario(conn, "Remote ML", "Looking for remote ML roles")
-    assert q.get_active_scenario(conn) is None
-    q.set_active_scenario(conn, sid)
-    active = q.get_active_scenario(conn)
-    assert active["name"] == "Remote ML"
-
-
-def test_set_active_scenario_deactivates_others(conn):
-    s1 = q.insert_scenario(conn, "A", "")
-    s2 = q.insert_scenario(conn, "B", "")
-    q.set_active_scenario(conn, s1)
-    q.set_active_scenario(conn, s2)
-    scenarios = q.get_scenarios(conn)
-    active = [s for s in scenarios if s["active"]]
-    assert len(active) == 1
-    assert active[0]["id"] == s2
-
-
 def test_update_scenario(conn):
     sid = q.insert_scenario(conn, "A", "old description")
     q.update_scenario(conn, sid, name="A renamed", description="new description")

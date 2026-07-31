@@ -41,13 +41,6 @@ def test_cancel_scenario_edit_returns_display_header(client, conn):
     assert "Remote ML roles" in resp.text
 
 
-def test_activate_scenario(client, conn):
-    sid = q.insert_scenario(conn, "Remote ML", "")
-    resp = client.post(f"/scenarios/{sid}/activate")
-    assert resp.status_code == 200
-    assert q.get_active_scenario(conn)["id"] == sid
-
-
 def test_add_criterion(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     resp = client.post(f"/scenarios/{sid}/criteria", data={"text": "Must be remote", "weight": "must"})

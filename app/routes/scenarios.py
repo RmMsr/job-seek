@@ -95,15 +95,6 @@ def update_scenario(
     return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
 
 
-@router.post("/scenarios/{scenario_id}/activate", response_class=HTMLResponse)
-def activate_scenario(
-    scenario_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)
-):
-    q.set_active_scenario(conn, scenario_id)
-    ctx = _scenarios_context(conn)
-    return templates.TemplateResponse(request, "scenarios/index.html", ctx)
-
-
 @router.post("/scenarios/{scenario_id}/criteria", response_class=HTMLResponse)
 def add_criterion(
     scenario_id: int,
