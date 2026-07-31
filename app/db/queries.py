@@ -150,22 +150,52 @@ def update_job_pipeline(
     simplified_content: str,
     content_type: str,
     summary: str = "",
-    relevance_score: float | None = None,
-    score_reasoning: str = "",
-    scenario_id: int | None = None,
 ) -> None:
     conn.execute(
         """UPDATE jobs SET
             simplified_content = ?,
             content_type = ?,
-            summary = ?,
-            relevance_score = ?,
-            score_reasoning = ?,
-            scenario_id = ?
+            summary = ?
         WHERE id = ?""",
-        (simplified_content, content_type, summary, relevance_score, score_reasoning, scenario_id, job_id),
+        (simplified_content, content_type, summary, job_id),
     )
     conn.commit()
+
+
+def upsert_job_score(
+    conn: sqlite3.Connection,
+    job_id: int,
+    scenario_id: int,
+    score: float,
+    reasoning: str,
+    version_hash: str,
+) -> None:
+    conn.execute(
+        """INSERT INTO job_scores (job_id, scenario_id, relevance_score, score_reasoning, scenario_version_hash)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(job_id, scenario_id) DO UPDATE SET
+            relevance_score = excluded.relevance_score,
+            score_reasoning = excluded.score_reasoning,
+            scenario_version_hash = excluded.scenario_version_hash,
+            evaluated_at = datetime('now')""",
+        (job_id, scenario_id, score, reasoning, version_hash),
+    )
+    conn.commit()
+
+
+def get_job_score(conn: sqlite3.Connection, job_id: int, scenario_id: int) -> dict | None:
+    return _row_to_dict(
+        conn.execute(
+            "SELECT * FROM job_scores WHERE job_id = ? AND scenario_id = ?", (job_id, scenario_id)
+        ).fetchone()
+    )
+
+
+def get_job_score_hashes(conn: sqlite3.Connection, scenario_id: int) -> dict[int, str]:
+    rows = conn.execute(
+        "SELECT job_id, scenario_version_hash FROM job_scores WHERE scenario_id = ?", (scenario_id,)
+    ).fetchall()
+    return {r["job_id"]: r["scenario_version_hash"] for r in rows}
 
 
 def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
@@ -173,6 +203,24 @@ def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note
         "UPDATE jobs SET status = ?, feedback_note = ? WHERE id = ?", (status, note, job_id)
     )
     conn.commit()
+
+
+_BEST_SCORE_SELECT = """
+    jobs.*,
+    best.relevance_score AS best_score,
+    best.score_reasoning AS best_score_reasoning,
+    scenarios.name AS best_scenario_name
+"""
+
+_BEST_SCORE_JOIN = """
+    FROM jobs
+    LEFT JOIN (
+        SELECT job_id, scenario_id, relevance_score, score_reasoning,
+               ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY relevance_score DESC, scenario_id ASC) AS rn
+        FROM job_scores
+    ) best ON best.job_id = jobs.id AND best.rn = 1
+    LEFT JOIN scenarios ON scenarios.id = best.scenario_id
+"""
 
 
 def get_jobs(
@@ -183,29 +231,31 @@ def get_jobs(
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
-        clauses.append("status = ?")
+        clauses.append("jobs.status = ?")
         params.append(status)
     if content_type is not None:
-        clauses.append("content_type = ?")
+        clauses.append("jobs.content_type = ?")
         params.append(content_type)
-    sql = "SELECT * FROM jobs"
+    sql = f"SELECT {_BEST_SCORE_SELECT} {_BEST_SCORE_JOIN}"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY relevance_score DESC NULLS LAST, fetched_at DESC"
+    sql += " ORDER BY best.relevance_score DESC NULLS LAST, jobs.fetched_at DESC"
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
-    return _row_to_dict(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
+    sql = f"SELECT {_BEST_SCORE_SELECT} {_BEST_SCORE_JOIN} WHERE jobs.id = ?"
+    return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
 
 
 def get_recent_feedback_notes(
     conn: sqlite3.Connection, scenario_id: int, limit: int = 20
 ) -> list[str]:
     rows = conn.execute(
-        """SELECT feedback_note FROM jobs
-        WHERE scenario_id = ? AND feedback_note IS NOT NULL AND feedback_note != ''
-        ORDER BY fetched_at DESC LIMIT ?""",
+        """SELECT jobs.feedback_note FROM jobs
+        JOIN job_scores ON job_scores.job_id = jobs.id AND job_scores.scenario_id = ?
+        WHERE jobs.feedback_note IS NOT NULL AND jobs.feedback_note != ''
+        ORDER BY jobs.fetched_at DESC LIMIT ?""",
         (scenario_id, limit),
     ).fetchall()
     return [r["feedback_note"] for r in rows]
