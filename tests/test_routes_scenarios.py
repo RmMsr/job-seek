@@ -65,6 +65,40 @@ def test_delete_criterion(client, conn):
     assert q.get_criteria(conn, sid) == []
 
 
+def test_edit_criterion_form_returns_fields(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.get(f"/criteria/{cid}/edit")
+    assert resp.status_code == 200
+    assert "Must be remote" in resp.text
+
+
+def test_update_criterion_route(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.post(f"/criteria/{cid}", data={"text": "Must be fully remote", "weight": "prefer"})
+    assert resp.status_code == 200
+    assert "Must be fully remote" in resp.text
+    criterion = q.get_criterion(conn, cid)
+    assert criterion["text"] == "Must be fully remote"
+    assert criterion["weight"] == "prefer"
+
+
+def test_update_criterion_leaves_source_unchanged(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must", source="feedback")
+    client.post(f"/criteria/{cid}", data={"text": "Must be fully remote", "weight": "prefer"})
+    assert q.get_criterion(conn, cid)["source"] == "feedback"
+
+
+def test_cancel_criterion_edit_returns_display_row(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.get(f"/criteria/{cid}")
+    assert resp.status_code == 200
+    assert "Must be remote" in resp.text
+
+
 def test_refine_returns_proposals(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")

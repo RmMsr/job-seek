@@ -1,0 +1,18 @@
+<li id="criterion-{{ c.id }}" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem;">
+  <form hx-post="/criteria/{{ c.id }}"
+        hx-target="#criterion-{{ c.id }}"
+        hx-swap="outerHTML"
+        style="display:flex; gap:0.5rem; flex:1; align-items:center;">
+    <select name="weight">
+      <option value="must" {% if c.weight == "must" %}selected{% endif %}>must</option>
+      <option value="prefer" {% if c.weight == "prefer" %}selected{% endif %}>prefer</option>
+      <option value="avoid" {% if c.weight == "avoid" %}selected{% endif %}>avoid</option>
+    </select>
+    <input type="text" name="text" value="{{ c.text }}" required style="flex:1; min-width:200px;">
+    <button type="submit" class="btn">Save</button>
+    <button type="button" class="btn"
+      hx-get="/criteria/{{ c.id }}"
+      hx-target="#criterion-{{ c.id }}"
+      hx-swap="outerHTML">Cancel</button>
+  </form>
+</li>
