@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from app.ai.refine import propose_criteria, CriterionProposal
+from app.ai.refine import propose_criteria, CriterionProposal, match_removal_target
 
 
 def _mock_client(response_text: str) -> MagicMock:
@@ -46,3 +46,21 @@ def test_propose_criteria_strips_markdown_code_fence():
     proposals = propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
     assert len(proposals) == 1
     assert proposals[0].text == "Must be senior level"
+
+
+_EXISTING_WITH_IDS = [
+    {"id": 1, "text": "Must be remote"},
+    {"id": 2, "text": "Must have Python experience"},
+]
+
+
+def test_match_removal_target_exact_match():
+    assert match_removal_target("Must be remote", _EXISTING_WITH_IDS) == 1
+
+
+def test_match_removal_target_ignores_case_and_surrounding_whitespace():
+    assert match_removal_target("  must be remote  ", _EXISTING_WITH_IDS) == 1
+
+
+def test_match_removal_target_no_match_returns_none():
+    assert match_removal_target("Must have a PhD", _EXISTING_WITH_IDS) is None

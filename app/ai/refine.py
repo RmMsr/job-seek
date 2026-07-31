@@ -58,3 +58,11 @@ def propose_criteria(
         return proposals
     except Exception:
         return []
+
+
+def match_removal_target(proposal_text: str, existing_criteria: list[dict]) -> int | None:
+    target = proposal_text.strip().casefold()
+    for criterion in existing_criteria:
+        if criterion["text"].strip().casefold() == target:
+            return criterion["id"]
+    return None
