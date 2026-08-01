@@ -1,19 +1,21 @@
-<ul id="criteria-{{ scenario_id }}" style="list-style:none; padding:0;">
-  {% for c in criteria %}
-  {% include "scenarios/_criterion.html" %}
-  {% else %}
-  <li style="color:#999;">No criteria yet.</li>
-  {% endfor %}
-</ul>
-<form hx-post="/scenarios/{{ scenario_id }}/criteria"
-      hx-target="#criteria-{{ scenario_id }}"
-      hx-swap="outerHTML"
-      style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
-  <input type="text" name="text" placeholder="Criterion text" required style="flex:1; min-width:200px;">
-  <select name="weight">
-    <option value="must">must</option>
-    <option value="prefer">prefer</option>
-    <option value="avoid">avoid</option>
-  </select>
-  <button type="submit" class="btn">Add</button>
-</form>
+<div id="criteria-{{ scenario_id }}">
+  <ul style="list-style:none; padding:0;">
+    {% for c in criteria %}
+    {% include "scenarios/_criterion.html" %}
+    {% else %}
+    <li style="color:#999;">No criteria yet.</li>
+    {% endfor %}
+  </ul>
+  <form hx-post="/scenarios/{{ scenario_id }}/criteria"
+        hx-target="#criteria-{{ scenario_id }}"
+        hx-swap="outerHTML"
+        style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
+    <input type="text" name="text" placeholder="Criterion text" required style="flex:1; min-width:200px;">
+    <select name="weight">
+      <option value="must">must</option>
+      <option value="prefer">prefer</option>
+      <option value="avoid">avoid</option>
+    </select>
+    <button type="submit" class="btn">Add</button>
+  </form>
+</div>

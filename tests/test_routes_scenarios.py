@@ -49,6 +49,25 @@ def test_add_criterion(client, conn):
     assert criteria[0]["text"] == "Must be remote"
 
 
+def test_add_criterion_response_wraps_list_and_form_in_shared_target(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    resp = client.post(f"/scenarios/{sid}/criteria", data={"text": "Must be remote", "weight": "must"})
+    assert resp.status_code == 200
+    # The id that both the add-form and the proposal accept-form target via
+    # hx-target must sit on a wrapping element that contains the whole
+    # list + form, not on the <ul> alone — otherwise HTMX's outerHTML swap
+    # only replaces the <ul>, leaving the old populated <form> orphaned
+    # in the DOM as a sibling.
+    div_marker = f'<div id="criteria-{sid}">'
+    ul_marker = f'<ul id="criteria-{sid}">'
+    assert div_marker in resp.text
+    assert ul_marker not in resp.text
+    div_start = resp.text.index(div_marker)
+    form_start = resp.text.index("<form")
+    div_end = resp.text.rindex("</div>")
+    assert div_start < form_start < div_end
+
+
 def test_scenarios_page_renders_criterion_markdown(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be *remote*", "must")
