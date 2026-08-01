@@ -28,7 +28,8 @@ def job_list(
     else:
         jobs = q.get_jobs(conn, status=status, content_type=content_type)
     jobs = _enrich_jobs(conn, jobs)
-    return templates.TemplateResponse(request, "jobs/list.html", {"jobs": jobs})
+    counts = q.get_job_counts(conn)
+    return templates.TemplateResponse(request, "jobs/list.html", {"jobs": jobs, "counts": counts})
 
 
 @router.get("/jobs/{job_id}/expand", response_class=HTMLResponse)

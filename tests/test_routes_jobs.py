@@ -34,6 +34,17 @@ def test_job_list_filter_accepted(client, conn):
     assert "ML Eng" not in resp2.text
 
 
+def test_job_list_filter_bar_shows_counts(client, conn):
+    sid, jid = _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "New (1)" in resp.text
+    assert "Accepted (0)" in resp.text
+    assert "Rejected (0)" in resp.text
+    assert "Invalid (0)" in resp.text
+    assert "Leads (0)" in resp.text
+
+
 def test_job_expand(client, conn):
     sid, jid = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")

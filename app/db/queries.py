@@ -245,6 +245,16 @@ def get_jobs(
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
+def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    counts = {"new": 0, "accepted": 0, "rejected": 0, "invalid": 0, "lead": 0}
+    for status, n in conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall():
+        counts[status] = n
+    counts["lead"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE content_type = ?", ("lead",)
+    ).fetchone()[0]
+    return counts
+
+
 def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     sql = f"SELECT {_BEST_SCORE_SELECT} {_BEST_SCORE_JOIN} WHERE jobs.id = ?"
     return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
