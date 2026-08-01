@@ -134,6 +134,18 @@ def test_get_jobs_filter_by_status(conn):
     assert result[0]["id"] == j1
 
 
+def test_get_job_counts(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    j3 = q.insert_job(conn, source_id=source_id, url="http://job/3", title="T3", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "accepted", "note")
+    q.update_job_feedback(conn, j2, "rejected", "note")
+    q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
+    counts = q.get_job_counts(conn)
+    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "invalid": 0, "lead": 1}
+
+
 def test_get_recent_feedback_notes(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
