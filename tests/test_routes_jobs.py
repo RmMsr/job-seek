@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from app.db import queries as q
 
 
@@ -111,3 +112,16 @@ def test_job_expand_feedback_form_has_no_forced_selection_when_unscored(client, 
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
     assert "selected" not in resp.text
+
+
+def test_backfill_headlines_streams_progress_and_updates_jobs(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    with patch("app.pipeline.summarize", return_value=("AI Title", "Great hook", "Full summary")):
+        resp = client.post("/jobs/backfill-headlines")
+
+    assert resp.status_code == 200
+    assert "Backfilling 1 job(s)" in resp.text
+    assert "Backfill complete" in resp.text
+    job = q.get_job(conn, jid)
+    assert job["title"] == "AI Title"
+    assert job["headline"] == "Great hook"
