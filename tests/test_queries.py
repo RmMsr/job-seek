@@ -124,6 +124,26 @@ def test_update_job_feedback(conn):
     assert job["feedback_note"] == "Great match"
 
 
+def test_update_job_feedback_persists_scenario_id(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, jid, "accepted", "good fit", feedback_scenario_id=scenario_id)
+    job = q.get_job(conn, jid)
+    assert job["feedback_scenario_id"] == scenario_id
+
+
+def test_get_job_exposes_best_scenario_id(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_a = q.insert_scenario(conn, "A", "")
+    scenario_b = q.insert_scenario(conn, "B", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_a, 0.4, "ok", "h1")
+    q.upsert_job_score(conn, jid, scenario_b, 0.8, "great", "h2")
+    job = q.get_job(conn, jid)
+    assert job["best_scenario_id"] == scenario_b
+
+
 def test_get_jobs_filter_by_status(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
@@ -152,7 +172,7 @@ def test_get_recent_feedback_notes(conn):
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior")
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
     assert "too junior" in notes
 
@@ -164,7 +184,8 @@ def test_get_recent_feedback_notes_scoped_to_scenario(conn):
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, j1, scenario_a, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior")
+    q.upsert_job_score(conn, j1, scenario_b, 0.9, "reasoning", "hash2")  # scores higher for B...
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_a)  # ...but tagged to A
     assert q.get_recent_feedback_notes(conn, scenario_a) == ["too junior"]
     assert q.get_recent_feedback_notes(conn, scenario_b) == []
 

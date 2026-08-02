@@ -200,15 +200,23 @@ def get_job_score_hashes(conn: sqlite3.Connection, scenario_id: int) -> dict[int
     return {r["job_id"]: r["scenario_version_hash"] for r in rows}
 
 
-def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
+def update_job_feedback(
+    conn: sqlite3.Connection,
+    job_id: int,
+    status: str,
+    note: str,
+    feedback_scenario_id: int | None = None,
+) -> None:
     conn.execute(
-        "UPDATE jobs SET status = ?, feedback_note = ? WHERE id = ?", (status, note, job_id)
+        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_scenario_id = ? WHERE id = ?",
+        (status, note, feedback_scenario_id, job_id),
     )
     conn.commit()
 
 
 _BEST_SCORE_SELECT = """
     jobs.*,
+    best.scenario_id AS best_scenario_id,
     best.relevance_score AS best_score,
     best.score_reasoning AS best_score_reasoning,
     scenarios.name AS best_scenario_name
@@ -264,10 +272,10 @@ def get_recent_feedback_notes(
     conn: sqlite3.Connection, scenario_id: int, limit: int = 20
 ) -> list[str]:
     rows = conn.execute(
-        """SELECT jobs.feedback_note FROM jobs
-        JOIN job_scores ON job_scores.job_id = jobs.id AND job_scores.scenario_id = ?
-        WHERE jobs.feedback_note IS NOT NULL AND jobs.feedback_note != ''
-        ORDER BY jobs.fetched_at DESC LIMIT ?""",
+        """SELECT feedback_note FROM jobs
+        WHERE feedback_scenario_id = ?
+        AND feedback_note IS NOT NULL AND feedback_note != ''
+        ORDER BY fetched_at DESC LIMIT ?""",
         (scenario_id, limit),
     ).fetchall()
     return [r["feedback_note"] for r in rows]
