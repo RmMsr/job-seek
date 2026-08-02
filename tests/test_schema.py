@@ -62,7 +62,16 @@ def test_init_db_migration_preserves_referencing_jobs_with_fk_enforced(conn):
         CREATE TABLE jobs (
             id INTEGER PRIMARY KEY,
             source_id INTEGER NOT NULL REFERENCES sources(id),
-            url TEXT NOT NULL UNIQUE
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT
         );
         """
     )
@@ -207,3 +216,82 @@ def test_init_db_migrates_jobs_scores_to_job_scores_table(conn):
     # Idempotent: running init_db again on the now-migrated DB doesn't duplicate or error.
     init_db(conn)
     assert conn.execute("SELECT COUNT(*) FROM job_scores").fetchone()[0] == 1
+
+
+def test_jobs_table_has_feedback_scenario_id_column(conn):
+    init_db(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert "feedback_scenario_id" in cols
+
+
+def test_init_db_migrates_jobs_adds_feedback_scenario_id_with_backfill(conn):
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE scenarios (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT
+        );
+        CREATE TABLE job_scores (
+            id INTEGER PRIMARY KEY,
+            job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+            relevance_score REAL NOT NULL,
+            score_reasoning TEXT NOT NULL DEFAULT '',
+            scenario_version_hash TEXT NOT NULL,
+            evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(job_id, scenario_id)
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO scenarios (name) VALUES ('Scenario A')")  # id 1
+    conn.execute("INSERT INTO scenarios (name) VALUES ('Scenario B')")  # id 2
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, status, feedback_note) "
+        "VALUES (1, 'http://job/1', 'accepted', 'good fit')"
+    )  # id 1, has feedback, scored against both scenarios
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/2')")  # id 2, no feedback
+    conn.execute(
+        "INSERT INTO job_scores (job_id, scenario_id, relevance_score, scenario_version_hash) "
+        "VALUES (1, 1, 0.4, 'h1')"
+    )
+    conn.execute(
+        "INSERT INTO job_scores (job_id, scenario_id, relevance_score, scenario_version_hash) "
+        "VALUES (1, 2, 0.9, 'h2')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    rows = {r["id"]: r["feedback_scenario_id"] for r in conn.execute("SELECT id, feedback_scenario_id FROM jobs")}
+    assert rows[1] == 2  # backfilled to the higher-scoring scenario
+    assert rows[2] is None  # no feedback, stays untagged
+
+    # Idempotent: running init_db again doesn't change the backfilled value.
+    init_db(conn)
+    assert conn.execute("SELECT feedback_scenario_id FROM jobs WHERE id = 1").fetchone()[0] == 2
