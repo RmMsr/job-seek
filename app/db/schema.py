@@ -144,42 +144,28 @@ def _migrate_jobs_scores_to_table(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_jobs_add_feedback_scenario_id(conn: sqlite3.Connection) -> None:
+    # Purely additive column, no CHECK/constraint change and nothing to drop
+    # unlike the rebuilds above, so a plain ALTER TABLE suffices instead of a
+    # full jobs_new/copy/drop/rename cycle. foreign_keys is toggled off only
+    # because SQLite refuses to ALTER TABLE ADD COLUMN ... REFERENCES on a
+    # non-empty table while FK enforcement is on.
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
     ).fetchone()
     if row is None or "feedback_scenario_id" in row[0]:
         return
     conn.execute("PRAGMA foreign_keys = OFF")
-    conn.executescript(
+    conn.execute("ALTER TABLE jobs ADD COLUMN feedback_scenario_id INTEGER REFERENCES scenarios(id)")
+    conn.execute(
         """
-        CREATE TABLE jobs_new (
-            id INTEGER PRIMARY KEY,
-            source_id INTEGER NOT NULL REFERENCES sources(id),
-            url TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL DEFAULT '',
-            company TEXT NOT NULL DEFAULT '',
-            raw_text TEXT NOT NULL DEFAULT '',
-            simplified_content TEXT NOT NULL DEFAULT '',
-            summary TEXT NOT NULL DEFAULT '',
-            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
-            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
-            feedback_note TEXT,
-            feedback_scenario_id INTEGER REFERENCES scenarios(id)
-        );
-        INSERT INTO jobs_new (id, source_id, url, title, company, raw_text, simplified_content, summary, content_type, fetched_at, status, feedback_note)
-        SELECT id, source_id, url, title, company, raw_text, simplified_content, summary, content_type, fetched_at, status, feedback_note
-        FROM jobs;
-        UPDATE jobs_new
+        UPDATE jobs
         SET feedback_scenario_id = (
             SELECT scenario_id FROM job_scores
-            WHERE job_scores.job_id = jobs_new.id
+            WHERE job_scores.job_id = jobs.id
             ORDER BY relevance_score DESC, scenario_id ASC
             LIMIT 1
         )
-        WHERE feedback_note IS NOT NULL AND feedback_note != '';
-        DROP TABLE jobs;
-        ALTER TABLE jobs_new RENAME TO jobs;
+        WHERE feedback_note IS NOT NULL AND feedback_note != ''
         """
     )
     conn.commit()
