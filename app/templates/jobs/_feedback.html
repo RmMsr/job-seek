@@ -1,17 +1,22 @@
-<div class="job-row" id="job-{{ job.id }}">
-  <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-    <strong>{{ job.title or "(no title)" }}</strong>
+{% import "jobs/_macros.html" as macros %}
+<article class="job-row" id="job-{{ job.id }}">
+  {{ macros.meta_tags(job) }}
+  <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
+  {% if job.headline %}
+    <p class="job-hook">{{ job.headline }}</p>
+  {% endif %}
+  <p>
     {% if job.company %}<span>· {{ job.company }}</span>{% endif %}
     <a href="{{ job.url }}" target="_blank" rel="noopener">↗ original</a>
-  </div>
+  </p>
   {% if job.summary %}
-    <div style="margin-top:0.5rem;">{{ job.summary | markdown }}</div>
+    <section aria-label="Summary">{{ job.summary | markdown }}</section>
   {% endif %}
   {% if job.best_score_reasoning %}
-    <div style="margin-top:0.4rem; font-size:0.9em; color:#666;">
-      <span class="tag">{{ job.best_scenario_name }}</span>
+    <section class="score-box" aria-label="Score reasoning">
+      {{ macros.score_scenario(job) }}
       {{ job.best_score_reasoning | markdown }}
-    </div>
+    </section>
   {% endif %}
   <form class="feedback-form" style="margin-top:0.75rem;"
     hx-post="/jobs/{{ job.id }}/feedback"
@@ -20,11 +25,11 @@
     <label>Scenario:
       <select name="feedback_scenario_id" required>
         {% for s in scenarios %}
-          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}</option>
+          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}{% if s.id == job.best_scenario_id %} (Best fit){% endif %}</option>
         {% endfor %}
       </select>
     </label>
-    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <div class="actions" role="group" aria-label="Decision">
       <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
       <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject</button>
       <button type="submit" name="status" value="invalid" class="btn btn-invalid">Invalid</button>
@@ -33,4 +38,4 @@
       <textarea name="note" required placeholder="Why accepting/rejecting? What should change?"></textarea>
     </label>
   </form>
-</div>
+</article>

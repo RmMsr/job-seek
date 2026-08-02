@@ -190,3 +190,43 @@ def test_job_list_tags_are_semantic_definition_list(client, conn):
     assert '<dt class="sr-only">Scenario</dt>' in resp.text
     assert '<dt class="sr-only">Content type</dt>' in resp.text
     assert '<dt class="sr-only">Source</dt>' in resp.text
+
+
+def test_job_expand_has_full_meta_parity_with_card(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert '<dl class="job-tags">' in resp.text
+    assert "90%" in resp.text  # score badge, not just reasoning text
+    assert "Remote ML" in resp.text
+    assert "job_posting" in resp.text
+    assert "finn.no" in resp.text
+    assert '<h3 class="job-title">ML Eng</h3>' in resp.text
+
+
+def test_job_expand_score_box_repeats_score_scenario_with_reasoning(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'class="score-box"' in resp.text
+    assert resp.text.count("90%") == 2  # once in top meta row, once in the score box
+    assert resp.text.count("Remote ML") == 3  # meta row + score box + best-fit dropdown option
+    assert "Good match" in resp.text
+
+
+def test_job_expand_no_score_box_when_unscored(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="No Score", company="Acme", raw_text="r")
+    q.insert_scenario(conn, "First", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'class="score-box"' not in resp.text
+
+
+def test_job_expand_scenario_dropdown_marks_best_fit(client, conn):
+    sid, jid, best_scenario_id = _seed(conn)
+    other_id = q.insert_scenario(conn, "Other Scenario", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'<option value="{best_scenario_id}" selected>Remote ML (Best fit)</option>' in resp.text
+    assert f'<option value="{other_id}" >Other Scenario</option>' in resp.text
