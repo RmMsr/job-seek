@@ -295,3 +295,52 @@ def test_init_db_migrates_jobs_adds_feedback_scenario_id_with_backfill(conn):
     # Idempotent: running init_db again doesn't change the backfilled value.
     init_db(conn)
     assert conn.execute("SELECT feedback_scenario_id FROM jobs WHERE id = 1").fetchone()[0] == 2
+
+
+def test_jobs_table_has_headline_column(conn):
+    init_db(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert "headline" in cols
+
+
+def test_init_db_migrates_jobs_adds_headline_column(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT,
+            feedback_scenario_id INTEGER REFERENCES scenarios(id)
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute("SELECT title, headline FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["title"] == "Existing Title"
+    assert row["headline"] == ""
+
+    # Idempotent: running init_db again doesn't error or duplicate columns.
+    init_db(conn)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("headline") == 1

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     raw_text TEXT NOT NULL DEFAULT '',
     simplified_content TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
+    headline TEXT NOT NULL DEFAULT '',
     content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
@@ -172,8 +173,21 @@ def _migrate_jobs_add_feedback_scenario_id(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_jobs_add_headline(conn: sqlite3.Connection) -> None:
+    # Purely additive column, no CHECK/constraint change and nothing to drop,
+    # so a plain ALTER TABLE suffices instead of a full jobs_new/copy/drop/rename cycle.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "headline" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN headline TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
     _migrate_jobs_scores_to_table(conn)
     _migrate_jobs_add_feedback_scenario_id(conn)
+    _migrate_jobs_add_headline(conn)
