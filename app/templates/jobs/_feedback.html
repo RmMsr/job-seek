@@ -22,10 +22,10 @@
     hx-post="/jobs/{{ job.id }}/feedback"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
-    <label>Scenario:
+    <label>Scenario (best fit shown, change if needed):
       <select name="feedback_scenario_id" required>
         {% for s in scenarios %}
-          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}{% if s.id == job.best_scenario_id %} (Best fit){% endif %}</option>
+          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}</option>
         {% endfor %}
       </select>
     </label>

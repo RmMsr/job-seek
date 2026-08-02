@@ -223,10 +223,12 @@ def test_job_expand_no_score_box_when_unscored(client, conn):
     assert 'class="score-box"' not in resp.text
 
 
-def test_job_expand_scenario_dropdown_marks_best_fit(client, conn):
+def test_job_expand_scenario_label_indicates_best_fit(client, conn):
     sid, jid, best_scenario_id = _seed(conn)
     other_id = q.insert_scenario(conn, "Other Scenario", "")
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'<option value="{best_scenario_id}" selected>Remote ML (Best fit)</option>' in resp.text
+    assert "best fit" in resp.text.lower()
+    # options carry the plain scenario name (no per-option marker) and remain freely selectable
+    assert f'<option value="{best_scenario_id}" selected>Remote ML</option>' in resp.text
     assert f'<option value="{other_id}" >Other Scenario</option>' in resp.text
