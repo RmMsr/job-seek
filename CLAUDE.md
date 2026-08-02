@@ -14,3 +14,9 @@ For non-trivial feature work, default to this pipeline unless told otherwise:
 4. **Implement via a single background subagent** that works through the plan task-by-task (TDD, commit after each task per "Commit frequently" above) inside the same worktree, and reports back only once — when the whole plan is done or it's stuck. If it hits a genuine design question the spec/plan doesn't answer, it should ask directly (e.g. via AskUserQuestion) rather than guessing.
 
 This is the default; skip steps only when the user explicitly asks for something lighter-weight.
+
+## Database migrations
+
+This is a personal app running on only one or a very few instances, all kept up to date with development. Backwards compatibility and uninterrupted operation are **not** priorities.
+
+Prefer a simple hard-downtime migration (drop/rebuild, accept a brief outage, edit the row data directly) over conditional upgrade paths, dual-schema compatibility shims, or migration chains that branch on "which old shape is this DB in." If a schema change needs data carried forward, write the one migration that assumes the current known shape — don't build in defensive handling for hypothetical older shapes that don't exist in practice.
