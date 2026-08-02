@@ -115,6 +115,53 @@ def test_update_job_pipeline(conn):
     assert job["best_score"] is None
 
 
+def test_update_job_pipeline_sets_title_and_headline(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Scraped Title", company="C", raw_text="r")
+    q.update_job_pipeline(
+        conn, jid,
+        simplified_content="clean text",
+        content_type="job_posting",
+        title="AI Title",
+        summary="Good role",
+        headline="Great hook",
+    )
+    job = q.get_job(conn, jid)
+    assert job["title"] == "AI Title"
+    assert job["headline"] == "Great hook"
+
+
+def test_update_job_pipeline_leaves_title_unchanged_when_not_passed(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Scraped Title", company="C", raw_text="r")
+    q.update_job_pipeline(
+        conn, jid,
+        simplified_content="clean text",
+        content_type="irrelevant",
+    )
+    job = q.get_job(conn, jid)
+    assert job["title"] == "Scraped Title"
+    assert job["headline"] == ""
+
+
+def test_get_jobs_missing_headline_filters_correctly(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    # Eligible: job_posting, has simplified_content, no headline yet.
+    jid_missing = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid_missing, simplified_content="clean", content_type="job_posting", summary="S1")
+    # Not eligible: already has a headline.
+    jid_has_headline = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid_has_headline, simplified_content="clean", content_type="job_posting", summary="S2", headline="Already done")
+    # Not eligible: irrelevant content type.
+    jid_irrelevant = q.insert_job(conn, source_id=source_id, url="http://job/3", title="T3", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid_irrelevant, simplified_content="clean", content_type="irrelevant")
+    # Not eligible: no simplified_content.
+    jid_unsimplified = q.insert_job(conn, source_id=source_id, url="http://job/4", title="T4", company="C", raw_text="r")
+
+    missing = q.get_jobs_missing_headline(conn)
+    assert [j["id"] for j in missing] == [jid_missing]
+
+
 def test_update_job_feedback(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")

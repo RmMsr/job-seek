@@ -151,15 +151,19 @@ def update_job_pipeline(
     *,
     simplified_content: str,
     content_type: str,
+    title: str | None = None,
     summary: str = "",
+    headline: str = "",
 ) -> None:
     conn.execute(
         """UPDATE jobs SET
             simplified_content = ?,
             content_type = ?,
-            summary = ?
+            title = COALESCE(?, title),
+            summary = ?,
+            headline = ?
         WHERE id = ?""",
-        (simplified_content, content_type, summary, job_id),
+        (simplified_content, content_type, title, summary, headline, job_id),
     )
     conn.commit()
 
@@ -251,6 +255,17 @@ def get_jobs(
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY best.relevance_score DESC NULLS LAST, jobs.fetched_at DESC"
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
+
+
+def get_jobs_missing_headline(conn: sqlite3.Connection) -> list[dict]:
+    sql = """
+        SELECT * FROM jobs
+        WHERE headline = ''
+          AND content_type IN ('job_posting', 'lead')
+          AND simplified_content != ''
+        ORDER BY fetched_at
+    """
+    return _rows_to_dicts(conn.execute(sql).fetchall())
 
 
 def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
