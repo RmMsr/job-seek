@@ -56,7 +56,7 @@ def test_run_fetch_new_job_stored(conn, source):
     choice = MagicMock()
     choice.message.content = '{"type": "job_posting", "reason": "full description"}'
     summarize_choice = MagicMock()
-    summarize_choice.message.content = "Good ML role"
+    summarize_choice.message.content = '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}'
     evaluate_choice = MagicMock()
     evaluate_choice.message.content = '{"score": 0.9, "reasoning": "Great match"}'
     call_count = [0]
@@ -131,7 +131,7 @@ def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
     client = _mock_client(
         '{"type": "job_posting", "reason": "full description"}',
-        "Good ML role",
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
@@ -158,7 +158,7 @@ def test_run_fetch_scores_against_every_scenario(conn, source):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
     client = _mock_client(
         '{"type": "job_posting", "reason": "full description"}',
-        "Good ML role",
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
@@ -178,7 +178,7 @@ def test_run_fetch_with_no_scenarios_still_summarizes(conn):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
     client = _mock_client(
         '{"type": "job_posting", "reason": "full description"}',
-        "Good ML role",
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
@@ -191,3 +191,35 @@ def test_run_fetch_with_no_scenarios_still_summarizes(conn):
     assert job["summary"] == "Good ML role"
     assert job["best_score"] is None
     assert not any("Scored" in m for m in messages)
+
+
+def test_run_fetch_stores_ai_title_and_headline(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="scraped title", company="Acme", raw_text="<p>hi</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["title"] == "ML Engineer - Remote @ Acme"
+    assert job["headline"] == "Great remote ML role"
+
+
+def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="scraped title", company="Acme", raw_text="<p>hi</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "", "headline": "", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["title"] == "scraped title"
+    assert job["headline"] == ""

@@ -210,7 +210,7 @@ def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
         resp = client.post(f"/scenarios/{sid}/reevaluate")
 
@@ -230,7 +230,7 @@ def test_reevaluate_skips_jobs_already_current(client, conn):
     job_id = q.get_jobs(conn)[0]["id"]
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate:
         client.post(f"/scenarios/{sid}/reevaluate")
         resp = client.post(f"/scenarios/{sid}/reevaluate")
@@ -249,7 +249,7 @@ def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.pipeline.summarize", return_value="Updated summary"), \
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
         resp = client.post("/scenarios/reevaluate")
 
@@ -258,3 +258,19 @@ def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
     assert "All scenarios re-evaluated: 2 job(s) updated across 2 scenario(s)" in resp.text
     assert q.get_job_score(conn, job_id, sid_a) is not None
     assert q.get_job_score(conn, job_id, sid_b) is not None
+
+
+def test_reevaluate_keeps_existing_title_when_ai_title_empty(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+
+    with patch("app.pipeline.summarize", return_value=("", "", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+        client.post(f"/scenarios/{sid}/reevaluate")
+
+    job = q.get_job(conn, job_id)
+    assert job["title"] == "ML Eng"
+    assert job["summary"] == "Updated summary"

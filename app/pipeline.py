@@ -83,11 +83,13 @@ def run_fetch(
             yield _progress(f"[{i}/{jobs_found}] Classified as {content_type}: {raw.url}")
 
             if content_type in ("job_posting", "lead"):
-                job_summary = summarize(client, model, simplified)
+                ai_title, headline, job_summary = summarize(client, model, simplified)
                 q.update_job_pipeline(
                     conn, job_id,
                     simplified_content=simplified,
                     content_type=content_type,
+                    title=ai_title or raw.title,
+                    headline=headline,
                     summary=job_summary,
                 )
                 for scenario in scenarios:
@@ -132,12 +134,17 @@ def run_reevaluate(
     yield _progress(msg)
 
     for i, job in enumerate(to_evaluate, start=1):
-        new_summary = summarize(client, model, job["simplified_content"]) if job["simplified_content"] else job["summary"]
+        if job["simplified_content"]:
+            ai_title, headline, new_summary = summarize(client, model, job["simplified_content"])
+        else:
+            ai_title, headline, new_summary = job["title"], job["headline"], job["summary"]
         score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
         q.update_job_pipeline(
             conn, job["id"],
             simplified_content=job["simplified_content"],
             content_type=job["content_type"],
+            title=ai_title or job["title"],
+            headline=headline,
             summary=new_summary,
         )
         q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, current_hash)
