@@ -125,3 +125,37 @@ def test_backfill_headlines_streams_progress_and_updates_jobs(client, conn):
     job = q.get_job(conn, jid)
     assert job["title"] == "AI Title"
     assert job["headline"] == "Great hook"
+
+
+def test_job_list_card_is_clickable_and_has_no_details_button(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/expand"' in resp.text
+    assert "Details" not in resp.text
+    assert 'role="button"' in resp.text
+
+
+def test_job_list_shows_headline_when_present(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_pipeline(
+        conn, jid,
+        simplified_content="clean", content_type="job_posting",
+        summary="Great role", headline="Fully remote, $180k+",
+    )
+    resp = client.get("/")
+    assert "Fully remote, $180k+" in resp.text
+
+
+def test_job_list_falls_back_to_summary_when_no_headline(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # _seed sets summary="Great role", no headline
+    resp = client.get("/")
+    assert "Great role" in resp.text
+
+
+def test_job_list_row_omits_company_but_expand_keeps_it(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # _seed sets company="Acme"
+    resp = client.get("/")
+    assert "· Acme" not in resp.text
+    resp2 = client.get(f"/jobs/{jid}/expand")
+    assert "· Acme" in resp2.text

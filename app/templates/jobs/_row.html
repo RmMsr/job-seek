@@ -1,4 +1,8 @@
-<div class="job-row" id="job-{{ job.id }}">
+<div class="job-row" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer"
+  hx-get="/jobs/{{ job.id }}/expand"
+  hx-target="#job-{{ job.id }}"
+  hx-swap="outerHTML"
+  hx-trigger="click, keyup[key=='Enter']">
   <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
     {% set score = job.best_score %}
     {% if score is not none %}
@@ -14,17 +18,10 @@
     <span class="tag">{{ job.content_type or "unknown" }}</span>
     <span class="tag">{{ job.source_name or "" }}</span>
     <strong>{{ job.title or "(no title)" }}</strong>
-    {% if job.company %}<span>· {{ job.company }}</span>{% endif %}
   </div>
-  {% if job.summary %}
+  {% if job.headline %}
+    <div style="margin-top:0.4rem; color:#444;">{{ job.headline }}</div>
+  {% elif job.summary %}
     <div style="margin-top:0.4rem; color:#444;">{{ job.summary | markdown_text | truncate(200) }}</div>
   {% endif %}
-  <div style="margin-top:0.4rem;">
-    <button class="btn"
-      hx-get="/jobs/{{ job.id }}/expand"
-      hx-target="#job-{{ job.id }}"
-      hx-swap="outerHTML">
-      Details
-    </button>
-  </div>
 </div>
