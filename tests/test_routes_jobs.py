@@ -165,3 +165,28 @@ def test_job_list_shows_backfill_button(client, conn):
     resp = client.get("/")
     assert resp.status_code == 200
     assert 'data-progress-url="/jobs/backfill-headlines"' in resp.text
+
+
+def test_job_list_title_is_heading_in_its_own_block(client, conn):
+    _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<h3 class="job-title">ML Eng</h3>' in resp.text
+
+
+def test_job_list_card_is_article(client, conn):
+    _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<article class="job-row"' in resp.text
+
+
+def test_job_list_tags_are_semantic_definition_list(client, conn):
+    _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<dl class="job-tags">' in resp.text
+    assert '<dt class="sr-only">Score</dt>' in resp.text
+    assert '<dt class="sr-only">Scenario</dt>' in resp.text
+    assert '<dt class="sr-only">Content type</dt>' in resp.text
+    assert '<dt class="sr-only">Source</dt>' in resp.text

@@ -1,27 +1,14 @@
-<div class="job-row" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer"
+{% import "jobs/_macros.html" as macros %}
+<article class="job-row" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer"
   hx-get="/jobs/{{ job.id }}/expand"
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML"
   hx-trigger="click, keyup[key=='Enter']">
-  <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-    {% set score = job.best_score %}
-    {% if score is not none %}
-      {% if score >= 0.7 %}
-        <span class="score-badge score-high">{{ "%.0f"|format(score * 100) }}%</span>
-      {% elif score >= 0.4 %}
-        <span class="score-badge score-mid">{{ "%.0f"|format(score * 100) }}%</span>
-      {% else %}
-        <span class="score-badge score-low">{{ "%.0f"|format(score * 100) }}%</span>
-      {% endif %}
-      <span class="tag">{{ job.best_scenario_name }}</span>
-    {% endif %}
-    <span class="tag">{{ job.content_type or "unknown" }}</span>
-    <span class="tag">{{ job.source_name or "" }}</span>
-    <strong>{{ job.title or "(no title)" }}</strong>
-  </div>
+  {{ macros.meta_tags(job) }}
+  <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
   {% if job.headline %}
-    <div style="margin-top:0.4rem; color:#444;">{{ job.headline }}</div>
+    <p class="job-hook">{{ job.headline }}</p>
   {% elif job.summary %}
-    <div style="margin-top:0.4rem; color:#444;">{{ job.summary | markdown_text | truncate(200) }}</div>
+    <p class="job-hook">{{ job.summary | markdown_text | truncate(200) }}</p>
   {% endif %}
-</div>
+</article>
