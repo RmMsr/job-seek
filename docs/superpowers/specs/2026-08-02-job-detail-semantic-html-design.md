@@ -53,7 +53,7 @@ Restructure from a single flex `<div>` to:
   <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
   {% if job.headline %}<p class="job-hook">{{ job.headline }}</p>{% endif %}
   <p>
-    {% if job.company %}{{ job.company }} · {% endif %}
+    {% if job.company %}<span>· {{ job.company }}</span>{% endif %}
     <a href="{{ job.url }}" target="_blank" rel="noopener">↗ original</a>
   </p>
 
