@@ -9,7 +9,6 @@
   <a href="/?status=invalid">Invalid ({{ counts.invalid }})</a>
   <a href="/?content_type=lead">Leads ({{ counts.lead }})</a>
 </div>
-<button class="btn" data-progress-url="/jobs/backfill-headlines" style="margin-bottom:1rem;">Backfill titles &amp; headlines</button>
 {% if jobs %}
   {% for job in jobs %}
     {% include "jobs/_row.html" %}

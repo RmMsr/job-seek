@@ -1,11 +1,9 @@
 from __future__ import annotations
 import sqlite3
-import openai
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_ai_client, get_model
+from fastapi.responses import HTMLResponse
+from app.deps import get_db
 from app.db import queries as q
-from app.pipeline import run_backfill_headlines
 from app.template_env import templates
 
 router = APIRouter()
@@ -54,20 +52,3 @@ def job_feedback(
 ):
     q.update_job_feedback(conn, job_id, status, note, feedback_scenario_id)
     return HTMLResponse(content="", status_code=200)
-
-
-@router.post("/jobs/backfill-headlines")
-def backfill_headlines(
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    def stream():
-        gen = run_backfill_headlines(conn, client, model)
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration:
-            pass
-
-    return StreamingResponse(stream(), media_type="text/plain")

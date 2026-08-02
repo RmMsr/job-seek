@@ -257,17 +257,6 @@ def get_jobs(
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
-def get_jobs_missing_headline(conn: sqlite3.Connection) -> list[dict]:
-    sql = """
-        SELECT * FROM jobs
-        WHERE headline = ''
-          AND content_type IN ('job_posting', 'lead')
-          AND simplified_content != ''
-        ORDER BY fetched_at
-    """
-    return _rows_to_dicts(conn.execute(sql).fetchall())
-
-
 def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
     counts = {"new": 0, "accepted": 0, "rejected": 0, "invalid": 0, "lead": 0}
     for status, n in conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall():
