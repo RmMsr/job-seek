@@ -152,3 +152,27 @@ def run_reevaluate(
 
     yield _progress(f"Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
     return len(to_evaluate)
+
+
+def run_backfill_headlines(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+) -> Generator[str, None, int]:
+    jobs = q.get_jobs_missing_headline(conn)
+    yield _progress(f"Backfilling {len(jobs)} job(s) missing a headline")
+
+    for i, job in enumerate(jobs, start=1):
+        ai_title, headline, new_summary = summarize(client, model, job["simplified_content"])
+        q.update_job_pipeline(
+            conn, job["id"],
+            simplified_content=job["simplified_content"],
+            content_type=job["content_type"],
+            title=ai_title or job["title"],
+            headline=headline,
+            summary=new_summary,
+        )
+        yield _progress(f"[{i}/{len(jobs)}] Backfilled: {job['title'] or job['url']}")
+
+    yield _progress(f"Backfill complete: {len(jobs)} job(s) updated")
+    return len(jobs)

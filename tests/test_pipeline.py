@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
-from app.pipeline import run_fetch, FetchResult, _make_fetcher
+from app.pipeline import run_fetch, FetchResult, _make_fetcher, run_backfill_headlines
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.base import RawJob
 
@@ -223,3 +223,33 @@ def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
     job = q.get_jobs(conn)[0]
     assert job["title"] == "scraped title"
     assert job["headline"] == ""
+
+
+def test_run_backfill_headlines_updates_jobs_missing_headline(conn, source):
+    job_id = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="scraped title", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="Old summary")
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "New summary"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+
+    messages, count = _drain(run_backfill_headlines(conn, client, "llama3.2"))
+
+    assert count == 1
+    job = q.get_job(conn, job_id)
+    assert job["title"] == "ML Engineer - Remote @ Acme"
+    assert job["headline"] == "Great remote ML role"
+    assert job["summary"] == "New summary"
+    assert any("Backfilling 1 job(s)" in m for m in messages)
+    assert any("Backfill complete" in m for m in messages)
+
+
+def test_run_backfill_headlines_skips_jobs_that_already_have_one(conn, source):
+    job_id = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="S", headline="Already has one")
+    client = MagicMock()
+
+    messages, count = _drain(run_backfill_headlines(conn, client, "llama3.2"))
+
+    assert count == 0
+    assert client.chat.completions.create.call_count == 0
