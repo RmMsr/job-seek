@@ -159,3 +159,9 @@ def test_job_list_row_omits_company_but_expand_keeps_it(client, conn):
     assert "· Acme" not in resp.text
     resp2 = client.get(f"/jobs/{jid}/expand")
     assert "· Acme" in resp2.text
+
+
+def test_job_list_shows_backfill_button(client, conn):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert 'data-progress-url="/jobs/backfill-headlines"' in resp.text
