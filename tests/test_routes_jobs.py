@@ -8,7 +8,7 @@ def _seed(conn):
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Great role")
     scenario_id = q.insert_scenario(conn, "Remote ML", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.9, "Good match", "hash1")
-    return sid, jid
+    return sid, jid, scenario_id
 
 
 def test_job_list_returns_200(client, conn):
@@ -25,7 +25,7 @@ def test_job_list_empty(client, conn):
 
 
 def test_job_list_filter_accepted(client, conn):
-    sid, jid = _seed(conn)
+    sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "accepted", "great")
     resp = client.get("/?status=accepted")
     assert resp.status_code == 200
@@ -35,7 +35,7 @@ def test_job_list_filter_accepted(client, conn):
 
 
 def test_job_list_filter_bar_shows_counts(client, conn):
-    sid, jid = _seed(conn)
+    sid, jid, scenario_id = _seed(conn)
     resp = client.get("/")
     assert resp.status_code == 200
     assert "New (1)" in resp.text
@@ -46,7 +46,7 @@ def test_job_list_filter_bar_shows_counts(client, conn):
 
 
 def test_job_expand(client, conn):
-    sid, jid = _seed(conn)
+    sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
     assert "Accept" in resp.text
@@ -54,12 +54,29 @@ def test_job_expand(client, conn):
 
 
 def test_job_feedback_updates_status(client, conn):
-    sid, jid = _seed(conn)
-    resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": "good fit"})
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "accepted", "note": "good fit", "feedback_scenario_id": scenario_id},
+    )
     assert resp.status_code == 200
     job = q.get_job(conn, jid)
     assert job["status"] == "accepted"
     assert job["feedback_note"] == "good fit"
+    assert job["feedback_scenario_id"] == scenario_id
+
+
+def test_job_feedback_can_target_non_default_scenario(client, conn):
+    sid, jid, best_scenario_id = _seed(conn)
+    other_scenario_id = q.insert_scenario(conn, "Other Scenario", "")
+    resp = client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "rejected", "note": "not a fit here", "feedback_scenario_id": other_scenario_id},
+    )
+    assert resp.status_code == 200
+    job = q.get_job(conn, jid)
+    assert job["feedback_scenario_id"] == other_scenario_id
+    assert job["feedback_scenario_id"] != best_scenario_id
 
 
 def test_job_list_shows_scenario_tag_for_best_score(client, conn):
@@ -70,8 +87,27 @@ def test_job_list_shows_scenario_tag_for_best_score(client, conn):
 
 
 def test_job_expand_shows_scenario_tag_with_reasoning(client, conn):
-    sid, jid = _seed(conn)
+    sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
     assert "Good match" in resp.text
     assert "Remote ML" in resp.text
+
+
+def test_job_expand_feedback_form_defaults_to_best_scenario(client, conn):
+    sid, jid, best_scenario_id = _seed(conn)
+    q.insert_scenario(conn, "Other Scenario", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert "Other Scenario" in resp.text  # every scenario is listed
+    assert f'<option value="{best_scenario_id}" selected>' in resp.text
+
+
+def test_job_expand_feedback_form_has_no_forced_selection_when_unscored(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="No Score", company="Acme", raw_text="r")
+    q.insert_scenario(conn, "First", "")
+    q.insert_scenario(conn, "Second", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert "selected" not in resp.text

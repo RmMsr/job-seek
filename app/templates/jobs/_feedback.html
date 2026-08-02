@@ -17,6 +17,13 @@
     hx-post="/jobs/{{ job.id }}/feedback"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
+    <label>Scenario:
+      <select name="feedback_scenario_id" required>
+        {% for s in scenarios %}
+          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
       <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
       <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject</button>

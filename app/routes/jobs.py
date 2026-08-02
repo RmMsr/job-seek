@@ -37,7 +37,8 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job = q.get_job(conn, job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
-    return templates.TemplateResponse(request, "jobs/_feedback.html", {"job": job})
+    scenarios = q.get_scenarios(conn)
+    return templates.TemplateResponse(request, "jobs/_feedback.html", {"job": job, "scenarios": scenarios})
 
 
 @router.post("/jobs/{job_id}/feedback", response_class=HTMLResponse)
@@ -46,7 +47,8 @@ def job_feedback(
     request: Request,
     status: str = Form(...),
     note: str = Form(...),
+    feedback_scenario_id: int = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    q.update_job_feedback(conn, job_id, status, note)
+    q.update_job_feedback(conn, job_id, status, note, feedback_scenario_id)
     return HTMLResponse(content="", status_code=200)
