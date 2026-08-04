@@ -28,14 +28,14 @@ class FetchResult:
     error: str | None
 
 
-def _make_fetcher(source: dict, profile_dir: str):
+def _make_fetcher(source: dict, profile_dir: str, conn: sqlite3.Connection):
     ft = source["fetcher_type"]
     if ft == "http":
         return HttpFetcher(source)
     if ft == "slack":
         return SlackFetcher(source, profile_dir)
     if ft == "finn_listing":
-        return FinnListingFetcher(source)
+        return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
     return PlaywrightFetcher(source, profile_dir)
 
 
@@ -54,7 +54,7 @@ def run_fetch(
     run_id = q.start_fetch_run(conn, source["id"])
     yield _progress(f"Starting fetch for '{source['name']}' ({source['fetcher_type']})")
     try:
-        fetcher = _make_fetcher(source, profile_dir)
+        fetcher = _make_fetcher(source, profile_dir, conn)
         raw_jobs: list[RawJob] = fetcher.fetch()
         jobs_found = len(raw_jobs)
         jobs_new = 0
@@ -75,6 +75,7 @@ def run_fetch(
                 title=raw.title,
                 company=raw.company,
                 raw_text=raw.raw_text,
+                published_at=raw.published_at,
             )
             jobs_new += 1
             simplified = simplify(raw.raw_text)
@@ -114,24 +115,39 @@ def run_fetch(
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=0, jobs_new=0, error=str(exc))
 
 
-def run_reevaluate(
-    conn: sqlite3.Connection,
-    client: openai.OpenAI,
-    model: str,
-    scenario: dict,
-) -> Generator[str, None, int]:
-    profile = q.get_profile(conn)
+def _eligible_for_reevaluation(conn: sqlite3.Connection, scenario: dict) -> tuple[list[dict], int, list[dict], str]:
     criteria = q.get_criteria(conn, scenario["id"])
     current_hash = compute_version_hash(scenario, criteria)
     eligible = [j for j in q.get_jobs(conn, status="new") if j["content_type"] in ("job_posting", "lead")]
     existing_hashes = q.get_job_score_hashes(conn, scenario["id"])
     to_evaluate = [j for j in eligible if existing_hashes.get(j["id"]) != current_hash]
     skipped = len(eligible) - len(to_evaluate)
+    return to_evaluate, skipped, criteria, current_hash
+
+
+def count_jobs_needing_reevaluation(conn: sqlite3.Connection, scenario: dict) -> int:
+    to_evaluate, _, _, _ = _eligible_for_reevaluation(conn, scenario)
+    return len(to_evaluate)
+
+
+def run_reevaluate(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    scenario: dict,
+    *,
+    job_offset: int = 0,
+    job_total: int | None = None,
+    scenario_label: str = "",
+) -> Generator[str, None, int]:
+    profile = q.get_profile(conn)
+    to_evaluate, skipped, criteria, current_hash = _eligible_for_reevaluation(conn, scenario)
+    total = job_total if job_total is not None else len(to_evaluate)
 
     msg = f"Re-evaluating {len(to_evaluate)} job(s) for scenario '{scenario['name']}'"
     if skipped:
         msg += f", skipping {skipped} already current"
-    yield _progress(msg)
+    yield _progress(scenario_label + msg)
 
     for i, job in enumerate(to_evaluate, start=1):
         if job["simplified_content"]:
@@ -148,7 +164,7 @@ def run_reevaluate(
             summary=new_summary,
         )
         q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, current_hash)
-        yield _progress(f"[{i}/{len(to_evaluate)}] Re-scored {score}: {job['title'] or job['url']}")
+        yield _progress(f"{scenario_label}[{job_offset + i}/{total}] Re-scored {score}: {job['title'] or job['url']}")
 
-    yield _progress(f"Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
+    yield _progress(f"{scenario_label}Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
     return len(to_evaluate)

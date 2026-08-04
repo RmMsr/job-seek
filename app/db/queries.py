@@ -136,13 +136,19 @@ def insert_job(
     title: str,
     company: str,
     raw_text: str,
+    published_at: str | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO jobs (source_id, url, title, company, raw_text) VALUES (?, ?, ?, ?, ?)",
-        (source_id, url, title, company, raw_text),
+        "INSERT INTO jobs (source_id, url, title, company, raw_text, published_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (source_id, url, title, company, raw_text, published_at),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def get_all_job_urls(conn: sqlite3.Connection) -> frozenset[str]:
+    rows = conn.execute("SELECT url FROM jobs").fetchall()
+    return frozenset(r["url"] for r in rows)
 
 
 def update_job_pipeline(

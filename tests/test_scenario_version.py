@@ -14,6 +14,14 @@ def test_hash_changes_with_description():
     assert h1 != h2
 
 
+def test_hash_changes_with_name():
+    description = "Remote ML roles"
+    criteria = [{"text": "Must be remote", "weight": "must"}]
+    h1 = compute_version_hash({"name": "A", "description": description}, criteria)
+    h2 = compute_version_hash({"name": "B", "description": description}, criteria)
+    assert h1 != h2
+
+
 def test_hash_changes_with_criteria():
     scenario = {"description": "Remote ML roles"}
     h1 = compute_version_hash(scenario, [{"text": "Must be remote", "weight": "must"}])
@@ -30,3 +38,7 @@ def test_hash_unaffected_by_criteria_order():
 
 def test_hash_handles_missing_description_key():
     assert compute_version_hash({}, []) == compute_version_hash({"description": ""}, [])
+
+
+def test_hash_handles_missing_name_key():
+    assert compute_version_hash({}, []) == compute_version_hash({"name": ""}, [])

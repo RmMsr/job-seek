@@ -49,3 +49,17 @@ def test_classify_sends_slack_hint():
     call_args = client.chat.completions.create.call_args
     prompt = str(call_args)
     assert "slack" in prompt.lower() or "lead" in prompt.lower()
+
+
+def test_classify_caps_max_tokens():
+    client = _mock_client('{"type": "job_posting", "reason": "Full job description present"}')
+    classify(client, "llama3.2", "content")
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["max_tokens"] == 120
+
+
+def test_classify_disables_model_thinking():
+    client = _mock_client('{"type": "job_posting", "reason": "Full job description present"}')
+    classify(client, "llama3.2", "content")
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

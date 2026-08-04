@@ -26,5 +26,9 @@
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   <dt class="sr-only">Source</dt>
   <dd><span class="tag">{{ job.source_name or "" }}</span></dd>
+  {% if job.published_at %}
+  <dt class="sr-only">Published</dt>
+  <dd><span class="tag">{{ job.published_at | time_ago }}</span></dd>
+  {% endif %}
 </dl>
 {% endmacro %}

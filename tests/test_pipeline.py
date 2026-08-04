@@ -86,6 +86,24 @@ def test_run_fetch_new_job_stored(conn, source):
     assert jobs[0]["content_type"] == "job_posting"
 
 
+def test_run_fetch_stores_published_at(conn, source):
+    raw_jobs = [RawJob(
+        url="http://example.com/job/1", title="T", company="C", raw_text="r",
+        published_at="2026-07-01T00:00:00+00:00",
+    )]
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"type": "irrelevant", "reason": "x"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["published_at"] == "2026-07-01T00:00:00+00:00"
+
+
 def test_run_fetch_skips_existing_url(conn, source):
     q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="text")]
@@ -145,9 +163,26 @@ def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
     assert messages == [r.message for r in caplog.records]
 
 
-def test_make_fetcher_dispatches_finn_listing():
+def test_make_fetcher_dispatches_finn_listing(conn):
     source = {"id": 1, "name": "finn.no", "url": "http://x", "fetcher_type": "finn_listing"}
-    assert isinstance(_make_fetcher(source, "browser-profile"), FinnListingFetcher)
+    fetcher = _make_fetcher(source, "browser-profile", conn)
+    assert isinstance(fetcher, FinnListingFetcher)
+
+
+def test_make_fetcher_finn_listing_passes_known_urls(conn):
+    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")
+    source = {"id": 1, "name": "finn.no", "url": "http://x", "fetcher_type": "finn_listing"}
+
+    fetcher = _make_fetcher(source, "browser-profile", conn)
+
+    assert fetcher._known_urls == frozenset({"http://known/1"})
+
+
+def test_make_fetcher_http_ignores_conn(conn):
+    source = {"id": 1, "name": "test", "url": "http://x", "fetcher_type": "http"}
+    fetcher = _make_fetcher(source, "browser-profile", conn)
+    assert type(fetcher).__name__ == "HttpFetcher"
 
 
 def test_run_fetch_scores_against_every_scenario(conn, source):

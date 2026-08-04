@@ -43,3 +43,10 @@ def test_evaluate_strips_markdown_code_fence():
     score, reasoning = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
     assert score == pytest.approx(0.6)
     assert reasoning == "Decent match"
+
+
+def test_evaluate_disables_model_thinking():
+    client = _mock_client('{"score": 0.6, "reasoning": "Decent match"}')
+    evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

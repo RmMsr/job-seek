@@ -92,6 +92,34 @@ def test_url_exists(conn):
     assert q.url_exists(conn, "http://job/1")
 
 
+def test_insert_job_stores_published_at(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "finn_listing")
+    jid = q.insert_job(
+        conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r",
+        published_at="2026-07-01T00:00:00+00:00",
+    )
+    job = q.get_job(conn, jid)
+    assert job["published_at"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_insert_job_published_at_defaults_to_none(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    job = q.get_job(conn, jid)
+    assert job["published_at"] is None
+
+
+def test_get_all_job_urls_empty(conn):
+    assert q.get_all_job_urls(conn) == frozenset()
+
+
+def test_get_all_job_urls_returns_all_urls(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C2", raw_text="r2")
+    assert q.get_all_job_urls(conn) == frozenset({"http://job/1", "http://job/2"})
+
+
 def test_insert_and_get_job(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="Acme", raw_text="raw")

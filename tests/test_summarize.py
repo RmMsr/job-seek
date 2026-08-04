@@ -47,3 +47,10 @@ def test_summarize_returns_empty_strings_on_api_error():
     client.chat.completions.create.side_effect = Exception("boom")
     result = summarize(client, "llama3.2", "content")
     assert result == ("", "", "")
+
+
+def test_summarize_disables_model_thinking():
+    client = _mock_client('{"title": "T", "headline": "H", "summary": "S"}')
+    summarize(client, "llama3.2", "content")
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}

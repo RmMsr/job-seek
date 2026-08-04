@@ -33,6 +33,12 @@ def classify(
                 {"role": "user", "content": simplified_content[:4000]},
             ],
             temperature=0,
+            max_tokens=120,  # response is a short JSON label + one-sentence reason
+            # This model emits a hidden chain-of-thought (reasoning_content) by default,
+            # which dominates latency for a task this simple. Disabling it via the chat
+            # template is the only thing that actually suppresses it (a system-prompt
+            # instruction not to reason is ignored by the model).
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
         data = json.loads(extract_json(resp.choices[0].message.content))
         content_type = data.get("type", "error")

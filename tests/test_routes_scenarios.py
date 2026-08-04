@@ -260,6 +260,38 @@ def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
     assert q.get_job_score(conn, job_id, sid_b) is not None
 
 
+def test_reevaluate_all_scenarios_shows_global_job_position(client, conn):
+    sid_a = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid_a, "Must be remote", "must")
+    sid_b = q.insert_scenario(conn, "Robotics", "")
+    q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+        resp = client.post("/scenarios/reevaluate")
+
+    assert "[Scenario 1/2: Remote ML] [1/2] Re-scored" in resp.text
+    assert "[Scenario 2/2: Robotics] [2/2] Re-scored" in resp.text
+
+
+def test_reevaluate_single_scenario_route_unaffected_by_global_labeling(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+        resp = client.post(f"/scenarios/{sid}/reevaluate")
+
+    assert "[1/1] Re-scored" in resp.text
+    assert "Scenario 1/1" not in resp.text
+
+
 def test_reevaluate_keeps_existing_title_when_ai_title_empty(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")

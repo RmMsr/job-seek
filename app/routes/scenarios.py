@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
 from app.ai.refine import propose_criteria, match_removal_target
-from app.pipeline import run_reevaluate
+from app.pipeline import run_reevaluate, count_jobs_needing_reevaluation
 from app.template_env import templates
 import openai
 
@@ -48,15 +48,27 @@ def reevaluate_all_scenarios(
     scenarios = q.get_scenarios(conn)
 
     def stream():
-        yield f"Re-evaluating {len(scenarios)} scenario(s)\n"
+        # Cheap DB-only reads, no LLM calls: precompute per-scenario counts so
+        # per-job progress lines can report position against the grand total,
+        # not just each scenario's own count.
+        counts = [count_jobs_needing_reevaluation(conn, s) for s in scenarios]
+        job_total = sum(counts)
+
+        yield f"Re-evaluating {len(scenarios)} scenario(s), {job_total} job(s) total\n"
         total_updated = 0
-        for scenario in scenarios:
-            gen = run_reevaluate(conn, client, model, scenario)
+        job_offset = 0
+        for idx, scenario in enumerate(scenarios, start=1):
+            label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
+            gen = run_reevaluate(
+                conn, client, model, scenario,
+                job_offset=job_offset, job_total=job_total, scenario_label=label,
+            )
             try:
                 while True:
                     yield next(gen) + "\n"
             except StopIteration as stop:
                 total_updated += stop.value
+                job_offset += counts[idx - 1]
         yield f"All scenarios re-evaluated: {total_updated} job(s) updated across {len(scenarios)} scenario(s)\n"
 
     return StreamingResponse(stream(), media_type="text/plain")

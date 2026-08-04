@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 import pytest
 from app.db import queries as q
 
@@ -22,6 +23,25 @@ def test_job_list_empty(client, conn):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "No jobs found" in resp.text
+
+
+def test_job_list_shows_published_date(client, conn):
+    published = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "finn_listing")
+    q.insert_job(
+        conn, source_id=sid, url="http://finn.no/job/1", title="ML Eng", company="Acme", raw_text="r",
+        published_at=published,
+    )
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "5 days ago" in resp.text
+
+
+def test_job_list_omits_published_date_when_unknown(client, conn):
+    _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "days ago" not in resp.text
 
 
 def test_job_list_filter_accepted(client, conn):
