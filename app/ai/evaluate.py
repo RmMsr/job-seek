@@ -6,13 +6,18 @@ from app.ai.json_utils import extract_json
 _SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario, and a job summary,
 return a relevance score from 0.0 to 1.0 and a brief reasoning.
 
-The scenario's name and description define what this search is fundamentally about — a job must
-genuinely align with that core theme to score high, regardless of how well it satisfies individual
-criteria. Treat the criteria list as additional guidance that refines the score within that theme,
-not a substitute for it: 'must' = deal-breaker if missing, 'prefer' = nice to have, 'avoid' = negative
-signal. A job that fits the scenario's theme well but lacks a 'prefer' criterion should still score
-reasonably; a job that doesn't fit the scenario's theme at all should score low even if it happens
-to satisfy several criteria.
+A high score requires two largely independent things to both be true: the job genuinely fits the
+scenario's theme (its name and description define what this search is fundamentally about), and
+the job is a genuinely good fit for this specific candidate's profile — their actual background,
+skill level, and stated constraints. A job that nails the scenario's theme but is a poor fit for
+this candidate (wrong seniority, missing core skills the role clearly requires, a mismatch the
+profile rules out) should not score high, and neither should a job that suits the candidate well
+but doesn't fit the scenario's theme at all.
+
+Treat the criteria list as additional guidance that refines the score within that theme, not a
+substitute for it: 'must' = deal-breaker if missing, 'prefer' = nice to have, 'avoid' = negative
+signal. Missing a 'prefer' criterion shouldn't sink an otherwise strong match; missing a 'must'
+criterion should.
 
 Respond with exactly: {"score": <float>, "reasoning": "<2-3 sentences>"}"""
 
