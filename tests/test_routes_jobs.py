@@ -289,3 +289,86 @@ def test_job_list_row_has_bulk_select_checkbox(client, conn):
     assert resp.status_code == 200
     assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
     assert 'onclick="event.stopPropagation()"' in resp.text
+
+
+def test_job_bulk_feedback_updates_multiple_jobs(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="Also good")
+    q.upsert_job_score(conn, j2, scenario_id, 0.6, "Decent match", "hash2")
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={
+            "job_ids": [j1, j2],
+            "status": "rejected",
+            "feedback_scenario_id": "",
+            "status_filter": "",
+            "content_type_filter": "",
+        },
+    )
+    assert resp.status_code == 200
+    assert q.get_job(conn, j1)["status"] == "rejected"
+    assert q.get_job(conn, j2)["status"] == "rejected"
+
+
+def test_job_bulk_feedback_defaults_to_each_jobs_own_best_scenario(client, conn):
+    sid, j1, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other", "")
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="Also good")
+    q.upsert_job_score(conn, j2, scenario_b, 0.6, "Decent match", "hash2")
+    client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [j1, j2], "status": "invalid", "feedback_scenario_id": "", "status_filter": "", "content_type_filter": ""},
+    )
+    assert q.get_job(conn, j1)["feedback_scenario_id"] == scenario_a
+    assert q.get_job(conn, j2)["feedback_scenario_id"] == scenario_b
+
+
+def test_job_bulk_feedback_explicit_scenario_overrides_all(client, conn):
+    sid, j1, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other", "")
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="Also good")
+    q.upsert_job_score(conn, j2, scenario_b, 0.6, "Decent match", "hash2")
+    client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [j1, j2], "status": "rejected", "feedback_scenario_id": scenario_b, "status_filter": "", "content_type_filter": ""},
+    )
+    assert q.get_job(conn, j1)["feedback_scenario_id"] == scenario_b
+    assert q.get_job(conn, j2)["feedback_scenario_id"] == scenario_b
+
+
+def test_job_bulk_feedback_note_is_optional(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [j1], "status": "accepted", "feedback_scenario_id": "", "status_filter": "", "content_type_filter": ""},
+    )
+    assert resp.status_code == 200
+    assert q.get_job(conn, j1)["feedback_note"] is None
+
+
+def test_job_bulk_feedback_returns_filtered_content_reflecting_removed_jobs(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [j1], "status": "rejected", "feedback_scenario_id": "", "status_filter": "", "content_type_filter": ""},
+    )
+    assert resp.status_code == 200
+    assert "ML Eng" not in resp.text
+    assert "No jobs found" in resp.text
+
+
+def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, j1, "accepted", "", feedback_scenario_id=scenario_id)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="Also good")
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [j2], "status": "accepted", "feedback_scenario_id": "", "status_filter": "accepted", "content_type_filter": ""},
+    )
+    assert resp.status_code == 200
+    assert "ML Eng" in resp.text
+    assert "Data Eng" in resp.text
