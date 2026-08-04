@@ -11,7 +11,13 @@ _SYSTEM = (
     'key requirements, compensation if mentioned, notable perks or red flags>"}. '
     "For title: use the role as given in the posting, or a concise generated one if "
     "unclear; include location with remote/hybrid/onsite status; include the "
-    "organization name. Be factual and brief. No invented details."
+    "organization name. Be factual and brief. No invented details. "
+    "For summary: cover the same checklist fields every time, but spend the words on "
+    "what's actually specific to this posting — unusual scope or impact, concrete "
+    "technical/domain details, notable team or organization context — rather than "
+    "restating generic advertised-sounding phrasing (e.g. 'competitive salary', "
+    "'fast-paced environment', 'collaborative team'). Where a field has nothing "
+    "distinctive to report, state it in a short plain clause instead of padding it."
 )
 
 
