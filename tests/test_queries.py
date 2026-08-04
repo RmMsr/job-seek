@@ -247,6 +247,21 @@ def test_get_recent_feedback_notes_scoped_to_scenario(conn):
     assert q.get_recent_feedback_notes(conn, scenario_b) == []
 
 
+def test_get_recent_feedback_notes_excludes_invalid_status(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "invalid", "expired listing", feedback_scenario_id=scenario_id)
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j2, scenario_id, 0.5, "reasoning", "hash2")
+    q.update_job_feedback(conn, j2, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    notes = q.get_recent_feedback_notes(conn, scenario_id)
+    assert notes == ["too junior"]
+
+
 def test_fetch_run_lifecycle(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     run_id = q.start_fetch_run(conn, source_id)

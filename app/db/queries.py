@@ -284,6 +284,7 @@ def get_recent_feedback_notes(
     rows = conn.execute(
         """SELECT feedback_note FROM jobs
         WHERE feedback_scenario_id = ?
+        AND status != 'invalid'
         AND feedback_note IS NOT NULL AND feedback_note != ''
         ORDER BY fetched_at DESC LIMIT ?""",
         (scenario_id, limit),
