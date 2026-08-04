@@ -385,6 +385,14 @@ def test_job_list_bulk_form_reflects_active_filter(client, conn):
     assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
 
 
+def test_base_page_includes_bulk_bar_visibility_and_count_script(client, conn):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert ':has(input[name="job_ids"]:checked)' in resp.text
+    assert "bulk-count" in resp.text
+    assert "bulk-clear" in resp.text
+
+
 def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
     sid, j1, scenario_id = _seed(conn)
     q.update_job_feedback(conn, j1, "accepted", "", feedback_scenario_id=scenario_id)
