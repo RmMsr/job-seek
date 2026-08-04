@@ -289,6 +289,15 @@ def test_job_list_row_has_bulk_select_checkbox(client, conn):
     assert resp.status_code == 200
     assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
     assert 'onclick="event.stopPropagation()"' in resp.text
+    assert '<label class="job-select-wrap">' in resp.text
+
+
+def test_job_expand_has_bulk_select_checkbox(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
+    assert '<label class="job-select-wrap">' in resp.text
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):

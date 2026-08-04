@@ -14,8 +14,10 @@
     .score-mid { background: #fff3cd; color: #856404; }
     .score-low { background: #f8d7da; color: #721c24; }
     .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.8em; background: #e9ecef; }
-    .job-row { border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; }
+    .job-row { border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; position: relative; }
     .job-row:hover { background: #f8f9fa; }
+    .job-select-wrap { position: absolute; top: 0; right: 0; padding: 0.75rem; cursor: pointer; line-height: 0; }
+    .job-select-wrap input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
     .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     dl.job-tags { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin:0; }
     dl.job-tags dt, dl.job-tags dd { margin:0; }
@@ -33,10 +35,18 @@
     .btn-invalid { background: #e9ecef; border-color: #6c757d; }
     .filter-bar { margin-bottom: 1rem; }
     .filter-bar a { margin-right: 0.5rem; }
-    .bulk-bar { display: none; position: sticky; bottom: 0; gap: 0.75rem; align-items: center;
-      background: #fff; border-top: 2px solid #0066cc; padding: 0.75rem; margin: 1rem -1rem 0; }
-    #jobs-content:has(input[name="job_ids"]:checked) .bulk-bar { display: flex; flex-wrap: wrap; }
-    .bulk-bar select, .bulk-bar textarea { max-width: 240px; }
+    body:has(input[name="job_ids"]:checked) { padding-bottom: 11rem; }
+    .bulk-bar { display: none; position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 100%; max-width: 960px; box-sizing: border-box; z-index: 10;
+      grid-template-columns: minmax(180px, auto) 1fr; grid-template-rows: auto auto auto; gap: 0.5rem 1rem;
+      background: #fff; border-top: 2px solid #0066cc; box-shadow: 0 -2px 8px rgba(0,0,0,0.08); padding: 0.75rem 1rem; }
+    #jobs-content:has(input[name="job_ids"]:checked) .bulk-bar { display: grid; }
+    .bulk-bar-header { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.75rem; }
+    .bulk-scenario { grid-column: 1; grid-row: 2; }
+    .bulk-scenario select { width: 100%; }
+    .bulk-bar .actions { grid-column: 1; grid-row: 3; margin-top: 0; align-self: start; }
+    .bulk-note { grid-column: 2; grid-row: 2 / span 2; display: flex; flex-direction: column; }
+    .bulk-note textarea { flex: 1; width: 100%; min-height: 60px; box-sizing: border-box; resize: vertical; }
   </style>
 </head>
 <body>

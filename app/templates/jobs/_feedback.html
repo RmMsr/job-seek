@@ -1,5 +1,9 @@
 {% import "jobs/_macros.html" as macros %}
 <article class="job-row" id="job-{{ job.id }}">
+  <label class="job-select-wrap">
+    <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+      aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
+  </label>
   <div role="button" tabindex="0" style="cursor:pointer"
     hx-get="/jobs/{{ job.id }}/collapse"
     hx-target="#job-{{ job.id }}"
