@@ -360,6 +360,31 @@ def test_job_bulk_feedback_returns_filtered_content_reflecting_removed_jobs(clie
     assert "No jobs found" in resp.text
 
 
+def test_job_list_has_persistent_bulk_form_shell(client, conn):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML">' in resp.text
+    assert '<input type="hidden" name="status_filter" value="new">' in resp.text
+
+
+def test_job_list_bulk_bar_has_scenario_select_and_actions(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Keep each job's own scenario" in resp.text
+    assert 'form="bulk-form" name="status" value="accepted"' in resp.text
+    assert 'form="bulk-form" name="status" value="rejected"' in resp.text
+    assert 'form="bulk-form" name="status" value="invalid"' in resp.text
+    assert 'title="Does not match your criteria — feeds back into scenario tuning."' in resp.text
+    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria."' in resp.text
+
+
+def test_job_list_bulk_form_reflects_active_filter(client, conn):
+    resp = client.get("/?status=accepted")
+    assert resp.status_code == 200
+    assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
+
+
 def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
     sid, j1, scenario_id = _seed(conn)
     q.update_job_feedback(conn, j1, "accepted", "", feedback_scenario_id=scenario_id)

@@ -2,6 +2,10 @@
 {% block title %}Jobs — Job Seek{% endblock %}
 {% block content %}
 <h1>Jobs</h1>
+<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML">
+  <input type="hidden" name="status_filter" value="{{ status or '' }}">
+  <input type="hidden" name="content_type_filter" value="{{ content_type or '' }}">
+</form>
 <div id="jobs-content">
   {% include "jobs/_content.html" %}
 </div>
