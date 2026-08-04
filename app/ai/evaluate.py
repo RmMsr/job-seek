@@ -6,18 +6,18 @@ from app.ai.json_utils import extract_json
 _SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario, and a job summary,
 return a relevance score from 0.0 to 1.0 and a brief reasoning.
 
-A high score requires two largely independent things to both be true: the job genuinely fits the
-scenario's theme (its name and description define what this search is fundamentally about), and
-the job is a genuinely good fit for this specific candidate's profile — their actual background,
-skill level, and stated constraints. A job that nails the scenario's theme but is a poor fit for
-this candidate (wrong seniority, missing core skills the role clearly requires, a mismatch the
-profile rules out) should not score high, and neither should a job that suits the candidate well
-but doesn't fit the scenario's theme at all.
+Weigh these signals in priority order, each one narrowing the one before it:
 
-Treat the criteria list as additional guidance that refines the score within that theme, not a
-substitute for it: 'must' = deal-breaker if missing, 'prefer' = nice to have, 'avoid' = negative
-signal. Missing a 'prefer' criterion shouldn't sink an otherwise strong match; missing a 'must'
-criterion should.
+1. Scenario name — the single strongest signal of what this search is about. A job that doesn't
+   fit the name's theme at all should score low no matter what else matches.
+2. Scenario description — elaborates and refines the name's theme. Use it to interpret borderline
+   cases, not to override a job that clearly does or doesn't match the name.
+3. 'must' criteria and the candidate's profile — both act as hard qualifiers, not fine-tuning: a
+   job missing a 'must' criterion, or one this candidate is clearly unqualified for or a poor
+   personal fit for (wrong seniority, missing core skills the role clearly requires, a mismatch
+   the profile rules out), should score low even if it fits the scenario's theme well.
+4. 'prefer' / 'avoid' criteria — fine-tune the score within everything above. A missing 'prefer'
+   or a triggered 'avoid' should nudge the score, not sink or save it on their own.
 
 Respond with exactly: {"score": <float>, "reasoning": "<2-3 sentences>"}"""
 
