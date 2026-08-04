@@ -252,3 +252,11 @@ def test_job_expand_note_field_is_optional(client, conn):
     assert resp.status_code == 200
     assert "Note (optional)" in resp.text
     assert '<textarea name="note" required' not in resp.text
+
+
+def test_job_expand_reject_invalid_buttons_have_tooltips(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'title="Does not match your criteria — feeds back into scenario tuning."' in resp.text
+    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria."' in resp.text
