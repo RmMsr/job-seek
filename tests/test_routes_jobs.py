@@ -425,6 +425,13 @@ def test_base_page_includes_bulk_bar_visibility_and_count_script(client, conn):
     assert "bulk-clear" in resp.text
 
 
+def test_base_page_includes_drag_select_script(client, conn):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "dragStartCheckbox" in resp.text
+    assert "rowCheckbox" in resp.text
+
+
 def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
     sid, j1, scenario_id = _seed(conn)
     q.update_job_feedback(conn, j1, "accepted", "", feedback_scenario_id=scenario_id)

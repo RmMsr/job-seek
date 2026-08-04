@@ -179,5 +179,51 @@
       document.body.addEventListener("htmx:afterSwap", updateCount);
     })();
   </script>
+  <script>
+    (function () {
+      var mouseIsDown = false;
+      var dragging = false;
+      var dragStartCheckbox = null;
+      var paintValue = null;
+
+      function rowCheckbox(el) {
+        var row = el.closest(".job-row");
+        return row ? row.querySelector(".job-select") : null;
+      }
+
+      function setChecked(cb, value) {
+        if (cb.checked !== value) {
+          cb.checked = value;
+          cb.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+
+      document.body.addEventListener("mousedown", function (evt) {
+        if (!evt.target.closest(".job-select-wrap")) return;
+        mouseIsDown = true;
+        dragStartCheckbox = rowCheckbox(evt.target);
+      });
+
+      document.body.addEventListener("mouseover", function (evt) {
+        if (!mouseIsDown || !dragStartCheckbox) return;
+        var cb = rowCheckbox(evt.target);
+        if (!cb) return;
+        if (!dragging) {
+          if (cb === dragStartCheckbox) return;
+          dragging = true;
+          paintValue = !dragStartCheckbox.checked;
+          setChecked(dragStartCheckbox, paintValue);
+        }
+        setChecked(cb, paintValue);
+      });
+
+      document.addEventListener("mouseup", function () {
+        mouseIsDown = false;
+        dragging = false;
+        dragStartCheckbox = null;
+        paintValue = null;
+      });
+    })();
+  </script>
 </body>
 </html>
