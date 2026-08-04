@@ -10,12 +10,12 @@
         hx-target="#criteria-{{ scenario_id }}"
         hx-swap="outerHTML"
         style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
-    <input type="text" name="text" placeholder="Criterion text" required style="flex:1; min-width:200px;">
     <select name="weight">
       <option value="must">must</option>
       <option value="prefer">prefer</option>
       <option value="avoid">avoid</option>
     </select>
+    <input type="text" name="text" placeholder="Criterion text" required style="flex:1; min-width:200px;">
     <button type="submit" class="btn">Add</button>
   </form>
 </div>

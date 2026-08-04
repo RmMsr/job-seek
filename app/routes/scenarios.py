@@ -14,6 +14,31 @@ logger = logging.getLogger("job_seek")
 
 router = APIRouter()
 
+_WEIGHT_ORDER = {"must": 0, "prefer": 1, "avoid": 2}
+
+
+def _parse_job_ids(raw: str | None) -> list[int]:
+    if not raw:
+        return []
+    return [int(part) for part in raw.split(",") if part.strip().isdigit()]
+
+
+def _resolve_proposals(proposals: list, existing: list[dict]) -> list[dict]:
+    resolved = []
+    for p in proposals:
+        if p.action == "remove":
+            criterion_id = match_removal_target(p.text, existing)
+            if criterion_id is None:
+                continue
+            criterion = next(c for c in existing if c["id"] == criterion_id)
+            resolved.append({"text": p.text, "weight": criterion["weight"], "action": "remove", "criterion_id": criterion_id})
+        else:
+            if match_removal_target(p.text, existing) is not None:
+                continue
+            resolved.append({"text": p.text, "weight": p.weight, "action": "add", "criterion_id": None})
+    resolved.sort(key=lambda r: _WEIGHT_ORDER.get(r["weight"], 3))
+    return resolved
+
 
 def _scenarios_context(conn: sqlite3.Connection) -> dict:
     scenarios = q.get_scenarios(conn)
@@ -70,6 +95,39 @@ def reevaluate_all_scenarios(
                 total_updated += stop.value
                 job_offset += counts[idx - 1]
         yield f"All scenarios re-evaluated: {total_updated} job(s) updated across {len(scenarios)} scenario(s)\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
+@router.post("/scenarios/refine")
+def refine_all_scenarios(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    scenarios = q.get_scenarios(conn)
+
+    def stream():
+        yield f"Refining criteria for {len(scenarios)} scenario(s)\n"
+        for idx, scenario in enumerate(scenarios, start=1):
+            label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
+            yield label + "Requesting criteria proposals from LLM\n"
+            existing = q.get_criteria(conn, scenario["id"])
+            job_ids = q.get_recent_feedback_job_ids(conn, scenario["id"])
+            notes = q.get_recent_feedback_notes(conn, scenario["id"])
+            proposals = propose_criteria(client, model, scenario, existing, notes)
+            resolved = _resolve_proposals(proposals, existing)
+            yield label + f"Received {len(resolved)} proposal(s)\n"
+            html = templates.get_template("scenarios/_proposals.html").render(
+                request=request,
+                proposals=resolved,
+                scenario_id=scenario["id"],
+                feedback_job_ids=",".join(str(i) for i in job_ids),
+            )
+            chunk = f'<div id="proposals-area-{scenario["id"]}" style="margin-top:0.75rem; width:100%;">{html}</div>'
+            yield "HTML:" + chunk.replace("\n", "") + "\n"
+        yield f"Refined criteria proposals for {len(scenarios)} scenario(s)\n"
 
     return StreamingResponse(stream(), media_type="text/plain")
 
@@ -163,12 +221,6 @@ def update_criterion(
     return templates.TemplateResponse(request, "scenarios/_criterion.html", {"c": criterion})
 
 
-@router.delete("/criteria/{criterion_id}/remove-proposal", response_class=HTMLResponse)
-def remove_criterion_via_proposal(criterion_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    q.delete_criterion(conn, criterion_id)
-    return HTMLResponse(content=f'<li id="criterion-{criterion_id}" hx-swap-oob="delete"></li>')
-
-
 @router.post("/scenarios/{scenario_id}/refine")
 def refine_criteria(
     scenario_id: int,
@@ -179,6 +231,7 @@ def refine_criteria(
 ):
     scenario = _get_scenario_or_404(conn, scenario_id)
     existing = q.get_criteria(conn, scenario_id)
+    job_ids = q.get_recent_feedback_job_ids(conn, scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
 
     def stream():
@@ -189,17 +242,12 @@ def refine_criteria(
         msg = f"Received {len(proposals)} proposal(s)"
         logger.info(msg)
         yield msg + "\n"
-        resolved = []
-        for p in proposals:
-            if p.action == "remove":
-                criterion_id = match_removal_target(p.text, existing)
-                if criterion_id is None:
-                    continue
-                resolved.append({"text": p.text, "weight": p.weight, "action": "remove", "criterion_id": criterion_id})
-            else:
-                resolved.append({"text": p.text, "weight": p.weight, "action": "add", "criterion_id": None})
+        resolved = _resolve_proposals(proposals, existing)
         html = templates.get_template("scenarios/_proposals.html").render(
-            request=request, proposals=resolved, scenario_id=scenario_id
+            request=request,
+            proposals=resolved,
+            scenario_id=scenario_id,
+            feedback_job_ids=",".join(str(i) for i in job_ids),
         )
         yield "HTML:" + html.replace("\n", "")
 
@@ -212,19 +260,30 @@ async def accept_proposals(
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
 ):
+    # One atomic apply for the whole batch: each row carries its proposed
+    # kind (add/remove, fixed by the LLM) and whether its checkbox was left
+    # checked. Unchecked rows are simply skipped — an HTML checkbox that
+    # isn't checked is omitted from form data entirely, so "apply_{i}" only
+    # appears in the form when that row should be applied.
     form = await request.form()
     i = 0
-    while f"text_{i}" in form:
-        text = form[f"text_{i}"]
-        weight = form[f"weight_{i}"]
-        q.insert_criterion(conn, scenario_id, text, weight, source="feedback")
+    while f"kind_{i}" in form:
+        if f"apply_{i}" in form:
+            kind = form[f"kind_{i}"]
+            if kind == "add":
+                q.insert_criterion(conn, scenario_id, form[f"text_{i}"], form[f"weight_{i}"], source="feedback")
+            elif kind == "remove":
+                q.delete_criterion(conn, int(form[f"criterion_id_{i}"]))
         i += 1
+    # The whole batch was reviewed in one go, regardless of which individual
+    # rows were applied vs skipped, so its feedback is fully handled now.
+    q.mark_feedback_handled(conn, _parse_job_ids(form.get("feedback_job_ids")))
     criteria = q.get_criteria(conn, scenario_id)
-    return templates.TemplateResponse(
-        request,
-        "scenarios/_criteria.html",
-        {"criteria": criteria, "scenario_id": scenario_id},
+    html = templates.get_template("scenarios/_criteria.html").render(
+        request=request, criteria=criteria, scenario_id=scenario_id
     )
+    html += f'<div id="proposals-area-{scenario_id}" hx-swap-oob="true" style="margin-top:0.75rem; width:100%;"></div>'
+    return HTMLResponse(content=html)
 
 
 @router.post("/scenarios/{scenario_id}/reevaluate")

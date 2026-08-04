@@ -89,7 +89,12 @@ def get_scenario(conn: sqlite3.Connection, scenario_id: int) -> dict | None:
 def get_criteria(conn: sqlite3.Connection, scenario_id: int) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
-            "SELECT * FROM criteria WHERE scenario_id = ? ORDER BY created_at", (scenario_id,)
+            """
+            SELECT * FROM criteria WHERE scenario_id = ?
+            ORDER BY CASE weight WHEN 'must' THEN 0 WHEN 'prefer' THEN 1 WHEN 'avoid' THEN 2 ELSE 3 END,
+                     created_at
+            """,
+            (scenario_id,),
         ).fetchall()
     )
 
@@ -218,7 +223,7 @@ def update_job_feedback(
     feedback_scenario_id: int | None = None,
 ) -> None:
     conn.execute(
-        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_scenario_id = ? WHERE id = ?",
+        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_scenario_id = ?, feedback_handled_at = NULL WHERE id = ?",
         (status, note, feedback_scenario_id, job_id),
     )
     conn.commit()
@@ -280,18 +285,47 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
 
 
+def _recent_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            """SELECT id, status, feedback_note FROM jobs
+            WHERE feedback_scenario_id = ?
+            AND status != 'invalid'
+            AND feedback_note IS NOT NULL AND feedback_note != ''
+            AND feedback_handled_at IS NULL
+            ORDER BY fetched_at DESC LIMIT ?""",
+            (scenario_id, limit),
+        ).fetchall()
+    )
+
+
 def get_recent_feedback_notes(
     conn: sqlite3.Connection, scenario_id: int, limit: int = 20
-) -> list[str]:
-    rows = conn.execute(
-        """SELECT feedback_note FROM jobs
-        WHERE feedback_scenario_id = ?
-        AND status != 'invalid'
-        AND feedback_note IS NOT NULL AND feedback_note != ''
-        ORDER BY fetched_at DESC LIMIT ?""",
-        (scenario_id, limit),
-    ).fetchall()
-    return [r["feedback_note"] for r in rows]
+) -> list[dict]:
+    # Includes each note's job status (accepted/rejected) since the same
+    # note text means opposite things depending on the outcome, and the LLM
+    # needs that to interpret feedback correctly rather than guess.
+    return [
+        {"status": r["status"], "feedback_note": r["feedback_note"]}
+        for r in _recent_feedback_rows(conn, scenario_id, limit)
+    ]
+
+
+def get_recent_feedback_job_ids(
+    conn: sqlite3.Connection, scenario_id: int, limit: int = 20
+) -> list[int]:
+    return [r["id"] for r in _recent_feedback_rows(conn, scenario_id, limit)]
+
+
+def mark_feedback_handled(conn: sqlite3.Connection, job_ids: list[int]) -> None:
+    if not job_ids:
+        return
+    placeholders = ",".join("?" * len(job_ids))
+    conn.execute(
+        f"UPDATE jobs SET feedback_handled_at = datetime('now') WHERE id IN ({placeholders})",
+        job_ids,
+    )
+    conn.commit()
 
 
 # --- Fetch runs ---

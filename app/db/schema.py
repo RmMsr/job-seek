@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
     feedback_note TEXT,
-    feedback_scenario_id INTEGER REFERENCES scenarios(id)
+    feedback_scenario_id INTEGER REFERENCES scenarios(id),
+    feedback_handled_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_scores (
@@ -197,6 +198,17 @@ def _migrate_jobs_add_published_at(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_add_feedback_handled_at(conn: sqlite3.Connection) -> None:
+    # Purely additive column, same shape as the headline/published_at migrations above.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "feedback_handled_at" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN feedback_handled_at TEXT")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -204,3 +216,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_feedback_scenario_id(conn)
     _migrate_jobs_add_headline(conn)
     _migrate_jobs_add_published_at(conn)
+    _migrate_jobs_add_feedback_handled_at(conn)

@@ -1,30 +1,29 @@
 {% if proposals %}
-<p><strong>Proposed criteria changes.</strong> Review each one below:</p>
-{% for p in proposals %}
-<div id="proposal-{{ loop.index0 }}" style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
-  {% if p.action == "remove" %}
-  <span class="tag">remove</span>
-  <span style="flex:1;">{{ p.text | markdown_inline }}</span>
-  <button class="btn btn-reject" style="font-size:0.85em;"
-    hx-delete="/criteria/{{ p.criterion_id }}/remove-proposal"
-    hx-target="#proposal-{{ loop.index0 }}"
-    hx-swap="outerHTML">Remove</button>
-  {% else %}
-  <form hx-post="/scenarios/{{ scenario_id }}/criteria"
-        hx-target="#criteria-{{ scenario_id }}"
-        hx-swap="outerHTML"
-        style="display:flex; gap:0.5rem; flex:1; align-items:center;">
-    <select name="weight">
+<form hx-post="/scenarios/{{ scenario_id }}/refine/accept"
+      hx-target="#criteria-{{ scenario_id }}"
+      hx-swap="outerHTML">
+  <input type="hidden" name="feedback_job_ids" value="{{ feedback_job_ids | default('') }}">
+  <p><strong>Proposed criteria changes.</strong> Uncheck any you don't want, then apply.</p>
+  {% for p in proposals %}
+  <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
+    <input type="checkbox" name="apply_{{ loop.index0 }}" checked>
+    <input type="hidden" name="kind_{{ loop.index0 }}" value="{{ p.action }}">
+    {% if p.action == "remove" %}
+    <input type="hidden" name="criterion_id_{{ loop.index0 }}" value="{{ p.criterion_id }}">
+    <span class="tag">{{ p.weight }}</span>
+    <span style="flex:1; text-decoration:line-through; color:#888;">{{ p.text | markdown_inline }}</span>
+    {% else %}
+    <select name="weight_{{ loop.index0 }}">
       <option value="must" {% if p.weight == "must" %}selected{% endif %}>must</option>
       <option value="prefer" {% if p.weight == "prefer" %}selected{% endif %}>prefer</option>
       <option value="avoid" {% if p.weight == "avoid" %}selected{% endif %}>avoid</option>
     </select>
-    <input type="text" name="text" value="{{ p.text }}" style="flex:1; min-width:200px;">
-    <button type="submit" class="btn btn-accept" style="font-size:0.85em;">Add</button>
-  </form>
-  {% endif %}
-</div>
-{% endfor %}
+    <input type="text" name="text_{{ loop.index0 }}" value="{{ p.text }}" style="flex:1; min-width:200px;">
+    {% endif %}
+  </div>
+  {% endfor %}
+  <button type="submit" class="btn btn-accept">Apply changes</button>
+</form>
 {% else %}
 <p>No changes proposed based on current feedback.</p>
 {% endif %}

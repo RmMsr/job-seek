@@ -85,6 +85,7 @@
 
         var url = el.getAttribute("data-progress-url");
         var targetSelector = el.getAttribute("data-progress-target");
+        var oobMode = el.hasAttribute("data-progress-oob");
         var progressEl = document.createElement("span");
         progressEl.style.marginLeft = "0.5rem";
         progressEl.style.color = "#666";
@@ -121,7 +122,9 @@
             return;
           }
           progressEl.remove();
-          if (targetSelector) {
+          if (oobMode) {
+            // Each HTML: chunk was already applied as it streamed in via applyOob().
+          } else if (targetSelector) {
             var target = document.querySelector(targetSelector);
             if (target && htmlChunk != null) {
               target.innerHTML = htmlChunk;
@@ -132,10 +135,30 @@
           }
         }
 
+        function applyOob(chunk) {
+          // htmx's OOB swap machinery only fires while htmx is settling a
+          // response it fetched itself (hx-get/hx-post/etc) — htmx.process()
+          // on manually-inserted content does NOT trigger it. So instead of
+          // relying on hx-swap-oob, find the real target by the id embedded
+          // in the chunk and replace it directly.
+          var match = /id="([^"]+)"/.exec(chunk);
+          if (!match) return;
+          var existing = document.getElementById(match[1]);
+          if (!existing) return;
+          existing.outerHTML = chunk;
+          var replaced = document.getElementById(match[1]);
+          if (replaced && window.htmx) window.htmx.process(replaced);
+        }
+
         function handleLine(line) {
           if (!line) return;
           if (line.indexOf("HTML:") === 0) {
-            htmlChunk = line.slice(5);
+            var chunk = line.slice(5);
+            if (oobMode) {
+              applyOob(chunk);
+            } else {
+              htmlChunk = chunk;
+            }
           } else {
             lastLine = line;
             if (revealed) tick();

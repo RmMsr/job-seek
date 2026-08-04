@@ -56,6 +56,21 @@ def test_criteria_insert_and_delete(conn):
     assert q.get_criteria(conn, sid) == []
 
 
+def test_get_criteria_orders_must_prefer_avoid(conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    # Insert out of weight order to prove sorting isn't just created_at passthrough.
+    q.insert_criterion(conn, sid, "Avoid startups", "avoid")
+    q.insert_criterion(conn, sid, "Prefer Python", "prefer")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    q.insert_criterion(conn, sid, "Must pay well", "must")
+
+    criteria = q.get_criteria(conn, sid)
+
+    assert [c["weight"] for c in criteria] == ["must", "must", "prefer", "avoid"]
+    # Within the same weight, original (created_at) order is preserved.
+    assert [c["text"] for c in criteria if c["weight"] == "must"] == ["Must be remote", "Must pay well"]
+
+
 def test_get_criterion(conn):
     sid = q.insert_scenario(conn, "A", "")
     cid = q.insert_criterion(conn, sid, "Must be remote", "must")
@@ -231,7 +246,20 @@ def test_get_recent_feedback_notes(conn):
     q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
     q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
-    assert "too junior" in notes
+    assert {"status": "rejected", "feedback_note": "too junior"} in notes
+
+
+def test_get_recent_feedback_notes_reports_accepted_status(conn):
+    # Same note text means opposite things depending on outcome, so the
+    # status must reflect what was actually recorded, not always "rejected".
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "accepted", "great senior role", feedback_scenario_id=scenario_id)
+    notes = q.get_recent_feedback_notes(conn, scenario_id)
+    assert notes == [{"status": "accepted", "feedback_note": "great senior role"}]
 
 
 def test_get_recent_feedback_notes_scoped_to_scenario(conn):
@@ -243,7 +271,7 @@ def test_get_recent_feedback_notes_scoped_to_scenario(conn):
     q.upsert_job_score(conn, j1, scenario_a, 0.5, "reasoning", "hash1")
     q.upsert_job_score(conn, j1, scenario_b, 0.9, "reasoning", "hash2")  # scores higher for B...
     q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_a)  # ...but tagged to A
-    assert q.get_recent_feedback_notes(conn, scenario_a) == ["too junior"]
+    assert q.get_recent_feedback_notes(conn, scenario_a) == [{"status": "rejected", "feedback_note": "too junior"}]
     assert q.get_recent_feedback_notes(conn, scenario_b) == []
 
 
@@ -259,7 +287,55 @@ def test_get_recent_feedback_notes_excludes_invalid_status(conn):
     q.upsert_job_score(conn, j2, scenario_id, 0.5, "reasoning", "hash2")
     q.update_job_feedback(conn, j2, "rejected", "too junior", feedback_scenario_id=scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
-    assert notes == ["too junior"]
+    assert notes == [{"status": "rejected", "feedback_note": "too junior"}]
+
+
+def test_get_recent_feedback_notes_excludes_handled(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    q.mark_feedback_handled(conn, [j1])
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
+
+
+def test_get_recent_feedback_job_ids(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    assert q.get_recent_feedback_job_ids(conn, scenario_id) == [j1]
+
+
+def test_mark_feedback_handled_excludes_from_future_calls(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    q.mark_feedback_handled(conn, [j1])
+    assert q.get_recent_feedback_job_ids(conn, scenario_id) == []
+
+
+def test_update_job_feedback_resets_handled_state(conn):
+    # Re-submitting feedback on a job is fresh input the LLM hasn't seen yet,
+    # even if its prior feedback had already been handled.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
+    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    q.mark_feedback_handled(conn, [j1])
+    q.update_job_feedback(conn, j1, "rejected", "actually, too senior", feedback_scenario_id=scenario_id)
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [
+        {"status": "rejected", "feedback_note": "actually, too senior"}
+    ]
 
 
 def test_fetch_run_lifecycle(conn):

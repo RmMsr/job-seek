@@ -13,7 +13,10 @@ def _mock_client(response_text: str) -> MagicMock:
 
 _SCENARIO = {"name": "Remote ML", "description": "Looking for remote ML roles"}
 _EXISTING = [{"text": "Must be remote", "weight": "must"}]
-_NOTES = ["Rejected because it required on-site work", "Too junior, needs senior level"]
+_NOTES = [
+    {"status": "rejected", "feedback_note": "required on-site work"},
+    {"status": "rejected", "feedback_note": "too junior, needs senior level"},
+]
 
 
 def test_propose_criteria_returns_proposals():
@@ -46,6 +49,41 @@ def test_propose_criteria_strips_markdown_code_fence():
     proposals = propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
     assert len(proposals) == 1
     assert proposals[0].text == "Must be senior level"
+
+
+def test_propose_criteria_disables_model_thinking():
+    response = '[{"text": "Must be senior level", "weight": "must", "action": "add"}]'
+    client = _mock_client(response)
+    propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_propose_criteria_tags_notes_with_outcome():
+    # Same note text means opposite things depending on accept/reject, so
+    # the prompt must carry that distinction rather than a flat note list.
+    response = "[]"
+    client = _mock_client(response)
+    notes = [
+        {"status": "rejected", "feedback_note": "too junior"},
+        {"status": "accepted", "feedback_note": "great senior role"},
+    ]
+    propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, notes)
+    call_args = client.chat.completions.create.call_args
+    user_content = call_args.kwargs["messages"][1]["content"]
+    assert "[REJECTED] too junior" in user_content
+    assert "[ACCEPTED] great senior role" in user_content
+
+
+def test_propose_criteria_uses_zero_temperature():
+    # Repeated refine calls against the same criteria/feedback should give
+    # consistent proposals rather than flip-flopping between calls due to
+    # sampling noise.
+    response = '[{"text": "Must be senior level", "weight": "must", "action": "add"}]'
+    client = _mock_client(response)
+    propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, _NOTES)
+    call_args = client.chat.completions.create.call_args
+    assert call_args.kwargs["temperature"] == 0
 
 
 _EXISTING_WITH_IDS = [

@@ -9,7 +9,10 @@
 </form>
 
 {% if scenarios %}
-<button class="btn" data-progress-url="/scenarios/reevaluate" style="margin-bottom:1.5rem;">Re-evaluate all scenarios</button>
+<div style="margin-bottom:1.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <button class="btn" data-progress-url="/scenarios/refine" data-progress-oob="1">Get suggestions for all scenarios</button>
+  <button class="btn" data-progress-url="/scenarios/reevaluate">Re-evaluate all scenarios</button>
+</div>
 {% endif %}
 
 {% for scenario in scenarios %}
