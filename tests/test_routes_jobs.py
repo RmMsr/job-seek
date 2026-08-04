@@ -275,3 +275,9 @@ def test_job_expand_header_is_collapsible(client, conn):
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
     assert f'hx-get="/jobs/{jid}/collapse"' in resp.text
+
+
+def test_job_list_has_swappable_content_wrapper(client, conn):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<div id="jobs-content">' in resp.text

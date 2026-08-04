@@ -2,18 +2,7 @@
 {% block title %}Jobs — Job Seek{% endblock %}
 {% block content %}
 <h1>Jobs</h1>
-<div class="filter-bar">
-  <a href="/">New ({{ counts.new }})</a>
-  <a href="/?status=accepted">Accepted ({{ counts.accepted }})</a>
-  <a href="/?status=rejected">Rejected ({{ counts.rejected }})</a>
-  <a href="/?status=invalid">Invalid ({{ counts.invalid }})</a>
-  <a href="/?content_type=lead">Leads ({{ counts.lead }})</a>
+<div id="jobs-content">
+  {% include "jobs/_content.html" %}
 </div>
-{% if jobs %}
-  {% for job in jobs %}
-    {% include "jobs/_row.html" %}
-  {% endfor %}
-{% else %}
-  <p>No jobs found.</p>
-{% endif %}
 {% endblock %}
