@@ -14,13 +14,13 @@ def _seed(conn):
 
 def test_job_list_returns_200(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "ML Eng" in resp.text
 
 
 def test_job_list_empty(client, conn):
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "No jobs found" in resp.text
 
@@ -32,14 +32,14 @@ def test_job_list_shows_published_date(client, conn):
         conn, source_id=sid, url="http://finn.no/job/1", title="ML Eng", company="Acme", raw_text="r",
         published_at=published,
     )
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "5 days ago" in resp.text
 
 
 def test_job_list_omits_published_date_when_unknown(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "days ago" not in resp.text
 
@@ -47,16 +47,16 @@ def test_job_list_omits_published_date_when_unknown(client, conn):
 def test_job_list_filter_accepted(client, conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "accepted", "great")
-    resp = client.get("/?status=accepted")
+    resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
     assert "ML Eng" in resp.text
-    resp2 = client.get("/")
+    resp2 = client.get("/jobs")
     assert "ML Eng" not in resp2.text
 
 
 def test_job_list_filter_bar_shows_counts(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "New (1)" in resp.text
     assert "Accepted (0)" in resp.text
@@ -106,7 +106,7 @@ def test_job_list_shows_feedback_scenario_tag_when_overridden(client, conn):
         f"/jobs/{jid}/feedback",
         data={"status": "rejected", "note": "not a fit here", "feedback_scenario_id": other_scenario_id},
     )
-    resp = client.get("/?status=rejected")
+    resp = client.get("/jobs?status=rejected")
     assert resp.status_code == 200
     assert '<span class="tag tag-feedback">→ Other Scenario</span>' in resp.text
 
@@ -117,14 +117,14 @@ def test_job_list_omits_feedback_scenario_tag_when_matching_best(client, conn):
         f"/jobs/{jid}/feedback",
         data={"status": "rejected", "note": "not a fit here", "feedback_scenario_id": best_scenario_id},
     )
-    resp = client.get("/?status=rejected")
+    resp = client.get("/jobs?status=rejected")
     assert resp.status_code == 200
     assert '<span class="tag tag-feedback">' not in resp.text
 
 
 def test_job_list_shows_scenario_tag_for_best_score(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "Remote ML" in resp.text
 
@@ -158,7 +158,7 @@ def test_job_expand_feedback_form_has_no_forced_selection_when_unscored(client, 
 
 def test_job_list_card_is_clickable_and_has_no_details_button(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert f'hx-get="/jobs/{jid}/expand"' in resp.text
     assert "Details" not in resp.text
@@ -172,19 +172,19 @@ def test_job_list_shows_headline_when_present(client, conn):
         simplified_content="clean", content_type="job_posting",
         summary="Great role", headline="Fully remote, $180k+",
     )
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert "Fully remote, $180k+" in resp.text
 
 
 def test_job_list_falls_back_to_summary_when_no_headline(client, conn):
     sid, jid, scenario_id = _seed(conn)  # _seed sets summary="Great role", no headline
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert "Great role" in resp.text
 
 
 def test_job_list_row_omits_company_but_expand_keeps_it(client, conn):
     sid, jid, scenario_id = _seed(conn)  # _seed sets company="Acme"
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert "· Acme" not in resp.text
     resp2 = client.get(f"/jobs/{jid}/expand")
     assert "· Acme" in resp2.text
@@ -192,21 +192,21 @@ def test_job_list_row_omits_company_but_expand_keeps_it(client, conn):
 
 def test_job_list_title_is_heading_in_its_own_block(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<h3 class="job-title">ML Eng</h3>' in resp.text
 
 
 def test_job_list_card_is_article(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<article class="job-row"' in resp.text
 
 
 def test_job_list_tags_are_semantic_definition_list(client, conn):
     _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<dl class="job-tags">' in resp.text
     assert '<dt class="sr-only">Score</dt>' in resp.text
@@ -301,14 +301,14 @@ def test_job_expand_header_is_collapsible(client, conn):
 
 
 def test_job_list_has_swappable_content_wrapper(client, conn):
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<div id="jobs-content">' in resp.text
 
 
 def test_job_list_row_has_bulk_select_checkbox(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
     assert 'onclick="event.stopPropagation()"' in resp.text
@@ -393,7 +393,7 @@ def test_job_bulk_feedback_returns_filtered_content_reflecting_removed_jobs(clie
 
 
 def test_job_list_has_persistent_bulk_form_shell(client, conn):
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML">' in resp.text
     assert '<input type="hidden" name="status_filter" value="new">' in resp.text
@@ -401,7 +401,7 @@ def test_job_list_has_persistent_bulk_form_shell(client, conn):
 
 def test_job_list_bulk_bar_has_scenario_select_and_actions(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "Keep each job's own scenario" in resp.text
     assert 'form="bulk-form" name="status" value="accepted"' in resp.text
@@ -412,13 +412,13 @@ def test_job_list_bulk_bar_has_scenario_select_and_actions(client, conn):
 
 
 def test_job_list_bulk_form_reflects_active_filter(client, conn):
-    resp = client.get("/?status=accepted")
+    resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
     assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
 
 
 def test_base_page_includes_bulk_bar_visibility_and_count_script(client, conn):
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert ':has(input[name="job_ids"]:checked)' in resp.text
     assert "bulk-count" in resp.text
@@ -426,7 +426,7 @@ def test_base_page_includes_bulk_bar_visibility_and_count_script(client, conn):
 
 
 def test_base_page_includes_drag_select_script(client, conn):
-    resp = client.get("/")
+    resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "dragStartCheckbox" in resp.text
     assert "rowCheckbox" in resp.text

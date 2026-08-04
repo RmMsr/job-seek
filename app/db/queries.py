@@ -330,3 +330,17 @@ def get_recent_fetch_runs(conn: sqlite3.Connection) -> list[dict]:
             "ORDER BY fr.started_at DESC LIMIT 50"
         ).fetchall()
     )
+
+
+def has_completed_fetch_run(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM fetch_runs WHERE completed_at IS NOT NULL LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
+def get_last_fetch_completed_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT MAX(completed_at) FROM fetch_runs WHERE completed_at IS NOT NULL"
+    ).fetchone()
+    return row[0] if row and row[0] else None

@@ -22,7 +22,7 @@ def _get_filtered_jobs(conn: sqlite3.Connection, status: str | None, content_typ
     return q.get_jobs(conn, status=status, content_type=content_type)
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/jobs", response_class=HTMLResponse)
 def job_list(
     request: Request,
     status: str | None = None,

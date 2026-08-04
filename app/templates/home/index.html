@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Job Seek{% endblock %}
+{% block content %}
+
+{% if not config_status.ok %}
+<div class="config-banner">
+  {% if not config_status.exists %}
+    <strong>No config.toml found.</strong>
+    Copy <code>config-template.toml</code> to <code>config.toml</code> and edit it before using Job Seek.
+  {% else %}
+    <strong>config.toml has no inference provider configured.</strong>
+    Set <code>llm.endpoint</code> and <code>llm.model</code> in <code>config.toml</code>.
+  {% endif %}
+</div>
+{% endif %}
+
+{% if config_status.ok %}
+  {% if onboarding_complete %}
+  <div class="actionable-block">
+    <a href="/jobs">{{ jobs_new }} job{{ 's' if jobs_new != 1 else '' }} awaiting review</a>
+    <span>Last fetch: {{ last_fetch_at | time_ago if last_fetch_at else "never" }}</span>
+  </div>
+  {% else %}
+  <ul class="checklist">
+    {% for item in checklist %}
+    <li class="{{ 'done' if item.done else 'todo' }}">
+      <a href="{{ item.href }}">{{ '✓' if item.done else '○' }} {{ item.label }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+{% endif %}
+
+<section class="how-it-works">
+  <h2>How it works</h2>
+  <ol>
+    <li><strong>Sources</strong> — Job boards, Slack communities, and listing pages you register on the Sources page.</li>
+    <li><strong>Fetch</strong> — Pulls new postings from each source, skipping URLs already seen.</li>
+    <li><strong>Classify</strong> — An LLM tags each posting as a job posting, a lead, irrelevant, or an error.</li>
+    <li><strong>Summarize</strong> — Job postings and leads get an AI-written title, headline, and summary.</li>
+    <li><strong>Score</strong> — For each active scenario, the summary is evaluated against your <strong>Profile</strong> (who you are — skills, interests, constraints, set once) and that scenario's <strong>Criteria</strong> (what you're looking for right now — must/prefer/avoid, refined over time) to produce a relevance score and reasoning.</li>
+    <li><strong>Triage</strong> — The Jobs list surfaces everything sorted by score. You accept, reject, or mark invalid, each with a short note.</li>
+    <li><strong>Refine</strong> — Your notes accumulate as feedback. The Scenarios page can propose criteria updates based on what you've been accepting and rejecting — closing the loop back into Score.</li>
+  </ol>
+</section>
+{% endblock %}

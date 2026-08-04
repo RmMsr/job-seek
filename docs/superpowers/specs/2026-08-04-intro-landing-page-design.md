@@ -79,13 +79,21 @@ def check_config_status(path: str = "config.toml") -> ConfigStatus:
     )
 ```
 
-`home.py`'s route calls `check_config_status()` first, with no FastAPI
-`Depends`. If `not status.ok`, render the page with a prominent banner and
-skip the DB-dependent sections (onboarding checklist / actionable block)
-entirely — only the static "How it works" section renders alongside the
-banner. If `status.ok`, get a DB connection by calling `get_db()` as a plain
-generator (`next(get_db())`, closed in `finally`) rather than as a FastAPI
-dependency, so the config check stays in control of what happens on failure.
+`home.py`'s route calls `check_config_status()` directly (not through
+`Depends`) to decide what banner, if any, to show. For the DB connection, it
+uses a new `get_db_optional()` dependency in `app/deps.py` — like `get_db()`
+but yields `None` instead of raising when config is missing/invalid, so it's
+safe to wire up via ordinary `Depends(get_db_optional)` without crashing
+before the route body runs. `get_db()` and `get_db_optional()` share a small
+`_open_db(config)` helper to avoid duplicating the connection-setup logic.
+Using a real dependency (rather than calling `get_db()` manually) matters
+for testability too: `tests/conftest.py`'s `client` fixture swaps in the
+in-memory test DB via `app.dependency_overrides`, which only intercepts
+parameters resolved through `Depends()`.
+
+If `conn is None` (config invalid), skip the DB-dependent sections
+(onboarding checklist / actionable block) entirely — only the banner and the
+static "How it works" section render.
 
 Banner copy, one line each depending on which check failed:
 - Not `exists`: "No `config.toml` found. Copy `config-template.toml` to

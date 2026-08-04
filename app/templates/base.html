@@ -48,11 +48,22 @@
     .bulk-bar .actions { grid-column: 1; grid-row: 3; margin-top: 0; align-self: start; }
     .bulk-note { grid-column: 2; grid-row: 2 / span 2; display: flex; flex-direction: column; }
     .bulk-note textarea { flex: 1; width: 100%; min-height: 60px; box-sizing: border-box; resize: vertical; }
+    .config-banner { background: #f8d7da; color: #58151c; border: 2px solid #dc3545; border-radius: 6px;
+      padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 1.05rem; }
+    .config-banner strong { display: block; margin-bottom: 0.25rem; }
+    .checklist { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+    .checklist li { padding: 0.4rem 0; }
+    .checklist li.done a { color: #155724; }
+    .checklist li.todo a { color: #0066cc; font-weight: bold; }
+    .actionable-block { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
+      margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid #dee2e6; border-radius: 6px; background: #f8f9fa; }
+    .how-it-works ol { padding-left: 1.25rem; }
+    .how-it-works li { margin-bottom: 0.5rem; }
   </style>
 </head>
 <body>
   <nav>
-    <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Jobs</a>
+    <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
     <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
