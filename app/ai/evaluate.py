@@ -3,8 +3,14 @@ import json
 import openai
 from app.ai.json_utils import extract_json
 
-_SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario with criteria,
-and a job summary, return a relevance score from 0.0 to 1.0 and a brief reasoning.
+_SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario, and a job summary,
+return a relevance score from 0.0 to 1.0 and a brief reasoning.
+
+The criteria list is what defines fit — score against it directly. The scenario's name and
+description are background context for interpreting the criteria, not independent requirements:
+a job can score well even if its wording doesn't overlap with the scenario's name or description,
+as long as it satisfies the criteria. Only let the name/description narrow your reading of a
+criterion when that criterion is genuinely ambiguous without it.
 
 Criteria weights: 'must' = deal-breaker if missing, 'prefer' = nice to have, 'avoid' = negative signal.
 
