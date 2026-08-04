@@ -232,3 +232,23 @@ def test_job_expand_scenario_label_indicates_best_fit(client, conn):
     # options carry the plain scenario name (no per-option marker) and remain freely selectable
     assert f'<option value="{best_scenario_id}" selected>Remote ML</option>' in resp.text
     assert f'<option value="{other_id}" >Other Scenario</option>' in resp.text
+
+
+def test_job_feedback_without_note_succeeds(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "accepted", "feedback_scenario_id": scenario_id},
+    )
+    assert resp.status_code == 200
+    job = q.get_job(conn, jid)
+    assert job["status"] == "accepted"
+    assert job["feedback_note"] is None
+
+
+def test_job_expand_note_field_is_optional(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert "Note (optional)" in resp.text
+    assert '<textarea name="note" required' not in resp.text

@@ -46,7 +46,7 @@ def job_feedback(
     job_id: int,
     request: Request,
     status: str = Form(...),
-    note: str = Form(...),
+    note: str | None = Form(None),
     feedback_scenario_id: int = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
 ):
