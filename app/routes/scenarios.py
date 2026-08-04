@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import sqlite3
+from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
@@ -106,10 +107,11 @@ def update_scenario(
     request: Request,
     name: str = Form(...),
     description: str = Form(""),
+    boosted: Optional[str] = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     _get_scenario_or_404(conn, scenario_id)
-    q.update_scenario(conn, scenario_id, name=name, description=description)
+    q.update_scenario(conn, scenario_id, name=name, description=description, boosted=boosted is not None)
     scenario = q.get_scenario(conn, scenario_id)
     return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
 

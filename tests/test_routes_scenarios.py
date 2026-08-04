@@ -34,6 +34,57 @@ def test_update_scenario(client, conn):
     assert "Remote ML v2" in resp.text
 
 
+def test_update_scenario_route_persists_boosted_checkbox(client, conn):
+    sid = q.insert_scenario(conn, "ai_expert", "fallback")
+    resp = client.post(
+        f"/scenarios/{sid}",
+        data={"name": "ai_expert", "description": "fallback", "boosted": "on"},
+    )
+    assert resp.status_code == 200
+    scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
+    assert scenario["boosted"] == 1
+
+
+def test_update_scenario_route_unchecking_boosted_clears_flag(client, conn):
+    sid = q.insert_scenario(conn, "ai_expert", "fallback")
+    client.post(f"/scenarios/{sid}", data={"name": "ai_expert", "description": "fallback", "boosted": "on"})
+    resp = client.post(f"/scenarios/{sid}", data={"name": "ai_expert", "description": "fallback"})
+    assert resp.status_code == 200
+    scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
+    assert scenario["boosted"] == 0
+
+
+def test_edit_scenario_form_checkbox_checked_when_boosted(client, conn):
+    sid = q.insert_scenario(conn, "ai_expert", "fallback")
+    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
+    resp = client.get(f"/scenarios/{sid}/edit")
+    assert resp.status_code == 200
+    assert '<input type="checkbox" name="boosted" checked>' in resp.text
+
+
+def test_edit_scenario_form_checkbox_unchecked_by_default(client, conn):
+    sid = q.insert_scenario(conn, "A", "")
+    resp = client.get(f"/scenarios/{sid}/edit")
+    assert resp.status_code == 200
+    assert '<input type="checkbox" name="boosted" checked>' not in resp.text
+    assert 'name="boosted"' in resp.text
+
+
+def test_scenario_header_shows_boosted_tag(client, conn):
+    sid = q.insert_scenario(conn, "ai_expert", "fallback")
+    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
+    resp = client.get(f"/scenarios/{sid}")
+    assert resp.status_code == 200
+    assert "Boosted" in resp.text
+
+
+def test_scenario_header_omits_boosted_tag_when_not_boosted(client, conn):
+    sid = q.insert_scenario(conn, "A", "")
+    resp = client.get(f"/scenarios/{sid}")
+    assert resp.status_code == 200
+    assert "Boosted" not in resp.text
+
+
 def test_cancel_scenario_edit_returns_display_header(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "Remote ML roles")
     resp = client.get(f"/scenarios/{sid}")
