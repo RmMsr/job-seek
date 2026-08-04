@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    active INTEGER NOT NULL DEFAULT 0,
+    boosted INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -197,6 +197,20 @@ def _migrate_jobs_add_published_at(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_scenarios_boosted_flag(conn: sqlite3.Connection) -> None:
+    # Replaces the vestigial "active" column (unused since the active-scenario
+    # concept was removed) with "boosted", which drives the fallback-scoring
+    # bonus in app/db/queries.py.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+    ).fetchone()
+    if row is None or "boosted" in row[0]:
+        return
+    conn.execute("ALTER TABLE scenarios DROP COLUMN active")
+    conn.execute("ALTER TABLE scenarios ADD COLUMN boosted INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -204,3 +218,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_feedback_scenario_id(conn)
     _migrate_jobs_add_headline(conn)
     _migrate_jobs_add_published_at(conn)
+    _migrate_scenarios_boosted_flag(conn)

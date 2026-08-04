@@ -394,3 +394,42 @@ def test_init_db_migrates_jobs_adds_published_at_column(conn):
     init_db(conn)
     cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
     assert cols.count("published_at") == 1
+
+
+def test_scenarios_table_has_boosted_column_not_active(conn):
+    init_db(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(scenarios)").fetchall()}
+    assert "boosted" in cols
+    assert "active" not in cols
+
+
+def test_init_db_migrates_scenarios_replaces_active_with_boosted(conn):
+    conn.executescript(
+        """
+        CREATE TABLE scenarios (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO scenarios (name, description, active) VALUES ('ai_expert', 'fallback', 1)")
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute("SELECT name, description, boosted FROM scenarios WHERE name = 'ai_expert'").fetchone()
+    assert row["name"] == "ai_expert"
+    assert row["description"] == "fallback"
+    assert row["boosted"] == 0  # migration doesn't guess which scenarios should be boosted
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scenarios)").fetchall()}
+    assert "boosted" in cols
+    assert "active" not in cols
+
+    # Idempotent: running init_db again doesn't error or duplicate columns.
+    init_db(conn)
+    cols_list = [r[1] for r in conn.execute("PRAGMA table_info(scenarios)").fetchall()]
+    assert cols_list.count("boosted") == 1
