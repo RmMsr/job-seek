@@ -78,11 +78,11 @@ The first time you fetch a source that requires login (e.g. Slack), a browser wi
 
 ### Fetching jobs
 
-Go to `/fetch` and click **Fetch** next to a source (or **Fetch all**). Progress is shown inline. New jobs appear on the main list at `/` once the run completes.
+Go to `/fetch` and click **Fetch** next to a source (or **Fetch all**). Progress is shown inline. New jobs appear on the main list at `/jobs` once the run completes.
 
 ### Triaging
 
-The main list (`/`) shows unreviewed jobs sorted by relevance score. Click a row to expand it, read the summary and score reasoning, then choose:
+The main list (`/jobs`) shows unreviewed jobs sorted by relevance score. Click a row to expand it, read the summary and score reasoning, then choose:
 
 - **Accept** — worth following up
 - **Reject** — not a fit
