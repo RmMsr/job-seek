@@ -260,3 +260,18 @@ def test_job_expand_reject_invalid_buttons_have_tooltips(client, conn):
     assert resp.status_code == 200
     assert 'title="Does not match your criteria — feeds back into scenario tuning."' in resp.text
     assert 'title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria."' in resp.text
+
+
+def test_job_collapse_returns_row_view(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/collapse")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/expand"' in resp.text
+    assert f'id="job-{jid}"' in resp.text
+
+
+def test_job_expand_header_is_collapsible(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/collapse"' in resp.text
