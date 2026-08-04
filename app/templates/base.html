@@ -7,7 +7,8 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 1rem; }
-    nav a { margin-right: 1rem; text-decoration: none; color: #0066cc; }
+    nav { margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 1px solid #dee2e6; }
+    nav a { margin-right: 1.5rem; text-decoration: none; color: #0066cc; }
     nav a.active { font-weight: bold; color: #000; }
     .score-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
     .score-high { background: #d4edda; color: #155724; }
@@ -59,10 +60,13 @@
       margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid #dee2e6; border-radius: 6px; background: #f8f9fa; }
     .how-it-works ol { padding-left: 1.25rem; }
     .how-it-works li { margin-bottom: 0.5rem; }
+    .how-it-works li ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
+    .how-it-works li ol li { color: #444; }
   </style>
 </head>
 <body>
   <nav>
+    <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Start</a>
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
     <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
