@@ -5,6 +5,10 @@
         style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
     <input type="text" name="name" value="{{ scenario.name }}" required>
     <input type="text" name="description" value="{{ scenario.description }}" style="flex:1; min-width:200px;">
+    <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.9em;"
+           title="Boosted scenarios get a flat +20 point bonus when picking a job's best match">
+      <input type="checkbox" name="boosted" {% if scenario.boosted %}checked{% endif %}> Boosted
+    </label>
     <button type="submit" class="btn">Save</button>
     <button type="button" class="btn"
       hx-get="/scenarios/{{ scenario.id }}"

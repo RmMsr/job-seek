@@ -46,6 +46,76 @@ def test_update_scenario(conn):
     assert scenarios[sid]["description"] == "new description"
 
 
+def test_update_scenario_persists_boosted(conn):
+    sid = q.insert_scenario(conn, "ai_expert", "fallback")
+    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
+    scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
+    assert scenario["boosted"] == 1
+
+
+def test_update_scenario_boosted_defaults_false(conn):
+    sid = q.insert_scenario(conn, "A", "")
+    q.update_scenario(conn, sid, name="A", description="")
+    scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
+    assert scenario["boosted"] == 0
+
+
+def test_boosted_scenario_wins_within_bonus_margin(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    boosted_id = q.insert_scenario(conn, "ai_expert", "")
+    q.update_scenario(conn, boosted_id, name="ai_expert", description="", boosted=True)
+    specific_id = q.insert_scenario(conn, "Backend Roles", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, boosted_id, 0.5, "generic fit", "h1")
+    q.upsert_job_score(conn, jid, specific_id, 0.6, "decent fit", "h2")  # 0.6 < 0.5 + 0.2
+
+    job = q.get_job(conn, jid)
+
+    assert job["best_scenario_id"] == boosted_id
+    assert job["best_score"] == pytest.approx(0.5)  # raw score, not 0.5 + bonus
+    assert job["best_score_reasoning"] == "generic fit"
+
+
+def test_specific_scenario_wins_when_it_clears_bonus_margin(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    boosted_id = q.insert_scenario(conn, "ai_expert", "")
+    q.update_scenario(conn, boosted_id, name="ai_expert", description="", boosted=True)
+    specific_id = q.insert_scenario(conn, "Backend Roles", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, boosted_id, 0.5, "generic fit", "h1")
+    q.upsert_job_score(conn, jid, specific_id, 0.75, "strong fit", "h2")  # 0.75 > 0.5 + 0.2
+
+    job = q.get_job(conn, jid)
+
+    assert job["best_scenario_id"] == specific_id
+    assert job["best_score"] == pytest.approx(0.75)
+
+
+def test_get_job_scores_returns_all_scenarios_ordered_by_raw_score(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_a = q.insert_scenario(conn, "A", "")
+    scenario_b = q.insert_scenario(conn, "B", "")
+    q.update_scenario(conn, scenario_b, name="B", description="", boosted=True)
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_a, 0.7, "a reasoning", "h1")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "b reasoning", "h2")
+
+    scores = q.get_job_scores(conn, jid)
+
+    assert [s["scenario_id"] for s in scores] == [scenario_a, scenario_b]  # raw score order, not boosted order
+    assert scores[0]["scenario_name"] == "A"
+    assert scores[0]["scenario_boosted"] == 0
+    assert scores[0]["score_reasoning"] == "a reasoning"
+    assert scores[1]["scenario_name"] == "B"
+    assert scores[1]["scenario_boosted"] == 1
+
+
+def test_get_job_scores_empty_for_unscored_job(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    assert q.get_job_scores(conn, jid) == []
+
+
 def test_criteria_insert_and_delete(conn):
     sid = q.insert_scenario(conn, "A", "")
     cid = q.insert_criterion(conn, sid, "Must be remote", "must")

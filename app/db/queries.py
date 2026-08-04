@@ -72,10 +72,10 @@ def insert_scenario(conn: sqlite3.Connection, name: str, description: str) -> in
     return cur.lastrowid
 
 
-def update_scenario(conn: sqlite3.Connection, scenario_id: int, name: str, description: str) -> None:
+def update_scenario(conn: sqlite3.Connection, scenario_id: int, name: str, description: str, boosted: bool = False) -> None:
     conn.execute(
-        "UPDATE scenarios SET name = ?, description = ? WHERE id = ?",
-        (name, description, scenario_id),
+        "UPDATE scenarios SET name = ?, description = ?, boosted = ? WHERE id = ?",
+        (name, description, int(boosted), scenario_id),
     )
     conn.commit()
 
@@ -238,12 +238,19 @@ _BEST_SCORE_SELECT = """
     feedback_scenarios.name AS feedback_scenario_name
 """
 
-_BEST_SCORE_JOIN = """
+BOOST_BONUS = 0.2  # flat bonus added to a boosted scenario's score when picking a job's best match
+
+_BEST_SCORE_JOIN = f"""
     FROM jobs
     LEFT JOIN (
-        SELECT job_id, scenario_id, relevance_score, score_reasoning,
-               ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY relevance_score DESC, scenario_id ASC) AS rn
+        SELECT job_scores.job_id, job_scores.scenario_id, job_scores.relevance_score, job_scores.score_reasoning,
+               ROW_NUMBER() OVER (
+                   PARTITION BY job_scores.job_id
+                   ORDER BY job_scores.relevance_score + CASE WHEN s.boosted THEN {BOOST_BONUS} ELSE 0 END DESC,
+                            job_scores.scenario_id ASC
+               ) AS rn
         FROM job_scores
+        JOIN scenarios s ON s.id = job_scores.scenario_id
     ) best ON best.job_id = jobs.id AND best.rn = 1
     LEFT JOIN scenarios ON scenarios.id = best.scenario_id
     LEFT JOIN scenarios AS feedback_scenarios ON feedback_scenarios.id = jobs.feedback_scenario_id
@@ -295,6 +302,21 @@ def _recent_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int
             AND feedback_handled_at IS NULL
             ORDER BY fetched_at DESC LIMIT ?""",
             (scenario_id, limit),
+        ).fetchall()
+    )
+
+
+def get_job_scores(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT job_scores.*, scenarios.name AS scenario_name, scenarios.boosted AS scenario_boosted
+            FROM job_scores
+            JOIN scenarios ON scenarios.id = job_scores.scenario_id
+            WHERE job_scores.job_id = ?
+            ORDER BY job_scores.relevance_score DESC
+            """,
+            (job_id,),
         ).fetchall()
     )
 

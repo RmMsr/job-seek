@@ -227,14 +227,44 @@ def test_job_expand_has_full_meta_parity_with_card(client, conn):
     assert '<h3 class="job-title">ML Eng</h3>' in resp.text
 
 
-def test_job_expand_score_box_repeats_score_scenario_with_reasoning(client, conn):
-    sid, jid, scenario_id = _seed(conn)
+def test_job_expand_shows_tab_per_scored_scenario(client, conn):
+    sid, jid, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other Scenario", "")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
+
     resp = client.get(f"/jobs/{jid}/expand")
+
     assert resp.status_code == 200
-    assert 'class="score-box"' in resp.text
-    assert resp.text.count("90%") == 2  # once in top meta row, once in the score box
-    assert resp.text.count("Remote ML") == 3  # meta row + score box + best-fit dropdown option
-    assert "Good match" in resp.text
+    assert 'class="score-box' in resp.text
+    assert "Remote ML" in resp.text
+    assert "Other Scenario" in resp.text
+    assert "Good match" in resp.text  # scenario_a's reasoning, from _seed
+    assert "weaker fit" in resp.text  # scenario_b's reasoning
+    assert resp.text.count("90%") == 2  # top meta row + scenario_a's tab card
+    assert "40%" in resp.text  # scenario_b's tab card
+
+
+def test_job_expand_best_scenario_tab_is_checked(client, conn):
+    sid, jid, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other Scenario", "")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert f'id="score-tab-{jid}-{scenario_a}"' in resp.text
+    assert f'id="score-tab-{jid}-{scenario_a}" name="score-tab-{jid}" class="score-tab-input" checked' in resp.text
+    assert f'id="score-tab-{jid}-{scenario_b}" name="score-tab-{jid}" class="score-tab-input" checked' not in resp.text
+
+
+def test_job_expand_shows_boosted_indicator_for_boosted_scenario(client, conn):
+    sid, jid, scenario_a = _seed(conn)
+    q.update_scenario(conn, scenario_a, name="Remote ML", description="", boosted=True)
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert "Boosted scenario" in resp.text  # title attribute on the indicator icon
 
 
 def test_job_expand_no_score_box_when_unscored(client, conn):
@@ -243,7 +273,7 @@ def test_job_expand_no_score_box_when_unscored(client, conn):
     q.insert_scenario(conn, "First", "")
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert 'class="score-box"' not in resp.text
+    assert 'class="score-box' not in resp.text
 
 
 def test_job_expand_scenario_label_indicates_best_fit(client, conn):
