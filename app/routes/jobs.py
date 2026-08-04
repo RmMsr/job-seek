@@ -45,7 +45,8 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
-    return templates.TemplateResponse(request, "jobs/_feedback.html", {"job": job, "scenarios": scenarios})
+    job_scores = q.get_job_scores(conn, job_id)
+    return templates.TemplateResponse(request, "jobs/_feedback.html", {"job": job, "scenarios": scenarios, "job_scores": job_scores})
 
 
 @router.get("/jobs/{job_id}/collapse", response_class=HTMLResponse)

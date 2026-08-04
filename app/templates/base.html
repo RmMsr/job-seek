@@ -27,6 +27,12 @@
     .job-hook { margin:0.25rem 0 0; color:#444; }
     .score-box { margin-top:0.75rem; padding:0.75rem; border:1px solid #dee2e6; border-radius:6px; background:#f8f9fa; }
     .score-box dl.job-tags { margin-bottom:0.5rem; }
+    .score-tabs { display:flex; flex-wrap:wrap; }
+    .score-tab-input { position:absolute; opacity:0; width:0; height:0; }
+    .score-tab-card { display:flex; align-items:center; gap:0.3rem; padding:0.3rem 0.6rem; margin:0 0.3rem 0.5rem 0; border:1px solid #dee2e6; border-radius:6px; cursor:pointer; background:#fff; }
+    .score-tab-input:checked + .score-tab-card { border-color:#0d6efd; background:#eaf2ff; }
+    .score-tab-panel { display:none; width:100%; order:1; }
+    .score-tab-input:checked + .score-tab-card + .score-tab-panel { display:block; }
     .feedback-form .actions { margin-top:0.75rem; }
     .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
     .feedback-form label { display: block; margin-top: 0.5rem; }
