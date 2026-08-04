@@ -281,3 +281,11 @@ def test_job_list_has_swappable_content_wrapper(client, conn):
     resp = client.get("/")
     assert resp.status_code == 200
     assert '<div id="jobs-content">' in resp.text
+
+
+def test_job_list_row_has_bulk_select_checkbox(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
+    assert 'onclick="event.stopPropagation()"' in resp.text

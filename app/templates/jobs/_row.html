@@ -4,6 +4,8 @@
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML"
   hx-trigger="click, keyup[key=='Enter']">
+  <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+    aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
   {{ macros.meta_tags(job) }}
   <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
   {% if job.headline %}
