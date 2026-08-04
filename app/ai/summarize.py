@@ -7,17 +7,20 @@ _SYSTEM = (
     "Summarize this job posting. Respond with exactly this JSON shape: "
     '{"title": "<Role - Location (remote/hybrid/onsite) @ Organization>", '
     '"headline": "<one punchy sentence on the most compelling or notable detail>", '
-    '"summary": "<concise markdown covering role, company, location/remote status, '
-    'key requirements, compensation if mentioned, notable perks or red flags>"}. '
+    '"summary": "<markdown with a bullet list, then a short paragraph>"}. '
     "For title: use the role as given in the posting, or a concise generated one if "
     "unclear; include location with remote/hybrid/onsite status; include the "
     "organization name. Be factual and brief. No invented details. "
-    "For summary: cover the same checklist fields every time, but spend the words on "
-    "what's actually specific to this posting — unusual scope or impact, concrete "
-    "technical/domain details, notable team or organization context — rather than "
-    "restating generic advertised-sounding phrasing (e.g. 'competitive salary', "
-    "'fast-paced environment', 'collaborative team'). Where a field has nothing "
-    "distinctive to report, state it in a short plain clause instead of padding it."
+    "For summary, always produce both of these parts, in this order: "
+    "(1) a bullet list of the standard fields — role, company, location/remote status, "
+    "key requirements, compensation if mentioned, notable perks or red flags — one line "
+    "each, kept factual and brief, included every time even if terse; "
+    "(2) after the list, a short added paragraph on what's actually distinctive about "
+    "this specific posting — unusual scope or impact, concrete technical/domain details, "
+    "notable team or organization context — instead of generic advertised-sounding filler "
+    "(e.g. 'competitive salary', 'fast-paced environment', 'collaborative team'). If "
+    "nothing about the posting is genuinely distinctive, say so in one honest sentence "
+    "rather than padding it."
 )
 
 
