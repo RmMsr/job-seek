@@ -99,6 +99,29 @@ def test_job_feedback_can_target_non_default_scenario(client, conn):
     assert job["feedback_scenario_id"] != best_scenario_id
 
 
+def test_job_list_shows_feedback_scenario_tag_when_overridden(client, conn):
+    sid, jid, best_scenario_id = _seed(conn)
+    other_scenario_id = q.insert_scenario(conn, "Other Scenario", "")
+    client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "rejected", "note": "not a fit here", "feedback_scenario_id": other_scenario_id},
+    )
+    resp = client.get("/?status=rejected")
+    assert resp.status_code == 200
+    assert '<span class="tag tag-feedback">→ Other Scenario</span>' in resp.text
+
+
+def test_job_list_omits_feedback_scenario_tag_when_matching_best(client, conn):
+    sid, jid, best_scenario_id = _seed(conn)
+    client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "rejected", "note": "not a fit here", "feedback_scenario_id": best_scenario_id},
+    )
+    resp = client.get("/?status=rejected")
+    assert resp.status_code == 200
+    assert '<span class="tag tag-feedback">' not in resp.text
+
+
 def test_job_list_shows_scenario_tag_for_best_score(client, conn):
     _seed(conn)
     resp = client.get("/")

@@ -229,7 +229,8 @@ _BEST_SCORE_SELECT = """
     best.scenario_id AS best_scenario_id,
     best.relevance_score AS best_score,
     best.score_reasoning AS best_score_reasoning,
-    scenarios.name AS best_scenario_name
+    scenarios.name AS best_scenario_name,
+    feedback_scenarios.name AS feedback_scenario_name
 """
 
 _BEST_SCORE_JOIN = """
@@ -240,6 +241,7 @@ _BEST_SCORE_JOIN = """
         FROM job_scores
     ) best ON best.job_id = jobs.id AND best.rn = 1
     LEFT JOIN scenarios ON scenarios.id = best.scenario_id
+    LEFT JOIN scenarios AS feedback_scenarios ON feedback_scenarios.id = jobs.feedback_scenario_id
 """
 
 
