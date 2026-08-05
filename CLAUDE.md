@@ -4,11 +4,35 @@
 
 Commit after each completed implementation increment (e.g. each task in a plan going green), not in one large batch at the end of a session. Small, incremental commits are preferred over large diffs.
 
+## Always work in a worktree
+
+Every change — however small — happens in an isolated git worktree, never directly on `main`. Use the `superpowers:using-git-worktrees` skill (native `EnterWorktree`/`ExitWorktree` tools) to set it up. This applies regardless of size: a one-line fix gets a worktree just like a multi-day feature. Only the *process* around the change (brainstorm → spec → plan vs. just diving in) scales with size — see "Default feature workflow" below.
+
+A fresh worktree won't have `config.toml` or `job-seek.db` (both gitignored) — copy `config.toml` from the main checkout before running the app there. See "Manual testing / dev server" for `job-seek.db`.
+
+## Manual testing / dev server
+
+If a change benefits from being exercised by hand rather than just the test suite, run the dev server **against a throwaway copy of `job-seek.db`**, never the live one — manual test actions (accepting/rejecting jobs, resetting/reprocessing, anything that calls the LLM) shouldn't mutate real job data. Use the `run-dev-server` skill for the exact recipe — it copies the DB into the worktree (which is already an isolated directory, so this is cheap and safe) and starts the server with `--reload`.
+
+Stop the dev server once manual testing is done; the throwaway DB copy is gitignored and gets discarded with the worktree at cleanup.
+
+## Finishing a change
+
+Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR:
+
+```bash
+cd <main checkout>
+git merge --squash <branch>
+git commit
+```
+
+Then clean up: remove the worktree and delete the branch (same cleanup `finishing-a-development-branch` does for its "merge locally" option — just use `git merge --squash` there instead of a plain merge).
+
 ## Default feature workflow
 
 For non-trivial feature work, default to this pipeline unless told otherwise:
 
-1. **Brainstorm** (`superpowers:brainstorming`) in a dedicated git worktree — explore the codebase, ask clarifying questions one at a time, present the design in sections, get approval.
+1. **Brainstorm** (`superpowers:brainstorming`) — explore the codebase, ask clarifying questions one at a time, present the design in sections, get approval.
 2. **Write the spec** to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
 3. **Write the plan** (`superpowers:writing-plans`) to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`, commit it.
 4. **Implement via a single background subagent** that works through the plan task-by-task (TDD, commit after each task per "Commit frequently" above) inside the same worktree, and reports back only once — when the whole plan is done or it's stuck. If it hits a genuine design question the spec/plan doesn't answer, it should ask directly (e.g. via AskUserQuestion) rather than guessing.
