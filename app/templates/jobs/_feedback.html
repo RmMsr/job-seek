@@ -64,8 +64,10 @@
     <summary>Advanced&hellip;</summary>
     <button type="button" class="btn btn-reset"
       data-progress-url="/jobs/{{ job.id }}/reset"
+      data-progress-display="#reset-progress-{{ job.id }}"
       title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">
       Reset to new
     </button>
   </details>
+  <div class="reset-progress" id="reset-progress-{{ job.id }}" aria-live="polite"></div>
 </article>

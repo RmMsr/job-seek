@@ -147,7 +147,11 @@ def job_bulk_feedback(
     jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter))
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
+    effective_status = status_filter if (status_filter is not None or content_type_filter is not None) else "new"
     return templates.TemplateResponse(
         request, "jobs/_content.html",
-        {"jobs": jobs, "counts": counts, "scenarios": scenarios},
+        {
+            "jobs": jobs, "counts": counts, "scenarios": scenarios,
+            "status": effective_status, "content_type": content_type_filter,
+        },
     )

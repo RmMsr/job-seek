@@ -37,20 +37,26 @@
     .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
     .feedback-form label { display: block; margin-top: 0.5rem; }
     .feedback-form textarea { width: 100%; min-height: 60px; }
-    .btn { padding: 6px 14px; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; }
+    .btn, select { padding: 6px 14px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font: inherit; }
+    .btn { cursor: pointer; }
     .btn-accept { background: #d4edda; border-color: #28a745; }
     .btn-reject { background: #f8d7da; border-color: #dc3545; }
     .btn-invalid { background: #e9ecef; border-color: #6c757d; }
-    .job-advanced { margin-top: 0.5rem; }
+    .job-advanced { display: inline-flex; align-items: center; gap: 0.5rem; }
+    .feedback-form + .job-advanced { margin-top: 0.5rem; }
     .job-advanced summary { cursor: pointer; color: #888; font-size: 0.85em; user-select: none; }
-    .job-advanced .btn-reset { margin-top: 0.5rem; }
-    .btn-reset { background: #fff; border-color: #ddd; color: #888; font-size: 0.85em; padding: 4px 10px; }
-    .filter-bar { margin-bottom: 1rem; }
+    .btn-reset { background: #e2e3e5; border-color: #6c757d; }
+    .reset-progress { grid-column: 1 / -1; color: #666; font-size: 0.85em; }
+    .reset-progress:empty { display: none; }
+    .filter-bar { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
     .filter-bar a { margin-right: 0.5rem; }
+    .filter-bar a.active { font-weight: bold; text-decoration: underline; }
+    .select-all { display: flex; align-items: center; gap: 0.4rem; color: #444; white-space: nowrap; }
+    .select-all input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
     body:has(input[name="job_ids"]:checked) { padding-bottom: 11rem; }
     .bulk-bar { display: none; position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 10;
-      grid-template-columns: minmax(180px, auto) 1fr; grid-template-rows: auto auto auto; gap: 0.5rem 1rem;
+      grid-template-columns: minmax(180px, auto) 1fr; grid-template-rows: auto auto auto auto; gap: 0.5rem 1rem;
       background: #fff; border-top: 2px solid #0066cc; box-shadow: 0 -2px 8px rgba(0,0,0,0.08); padding: 0.75rem 1rem; }
     #jobs-content:has(input[name="job_ids"]:checked) .bulk-bar { display: grid; }
     .bulk-bar-header { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.75rem; }
@@ -103,11 +109,17 @@
           body = new URLSearchParams();
           checked.forEach(function (cb) { body.append("job_ids", cb.value); });
         }
+        var displaySelector = el.getAttribute("data-progress-display");
+        var displayTarget = displaySelector ? document.querySelector(displaySelector) : null;
         var progressEl = document.createElement("span");
-        progressEl.style.marginLeft = "0.5rem";
-        progressEl.style.color = "#666";
         progressEl.hidden = true;
-        el.insertAdjacentElement("afterend", progressEl);
+        if (displayTarget) {
+          displayTarget.appendChild(progressEl);
+        } else {
+          progressEl.style.marginLeft = "0.5rem";
+          progressEl.style.color = "#666";
+          el.insertAdjacentElement("afterend", progressEl);
+        }
 
         var start = Date.now();
         var revealed = false;
@@ -215,14 +227,32 @@
   </script>
   <script>
     (function () {
+      function jobCheckboxes() {
+        return document.querySelectorAll('input[name="job_ids"]');
+      }
+      function syncSelectAll() {
+        var all = jobCheckboxes();
+        var checkedCount = document.querySelectorAll('input[name="job_ids"]:checked').length;
+        document.querySelectorAll(".select-all-checkbox").forEach(function (sa) {
+          sa.checked = all.length > 0 && checkedCount === all.length;
+          sa.indeterminate = checkedCount > 0 && checkedCount < all.length;
+        });
+      }
       function updateCount() {
         var checked = document.querySelectorAll('input[name="job_ids"]:checked');
         document.querySelectorAll(".bulk-count").forEach(function (el) {
           el.textContent = checked.length + " selected";
         });
+        syncSelectAll();
       }
       document.body.addEventListener("change", function (evt) {
         if (evt.target.name === "job_ids") updateCount();
+      });
+      document.body.addEventListener("change", function (evt) {
+        if (!evt.target.classList.contains("select-all-checkbox")) return;
+        var checked = evt.target.checked;
+        jobCheckboxes().forEach(function (cb) { cb.checked = checked; });
+        updateCount();
       });
       document.body.addEventListener("click", function (evt) {
         if (!evt.target.classList.contains("bulk-clear")) return;
@@ -232,6 +262,7 @@
         updateCount();
       });
       document.body.addEventListener("htmx:afterSwap", updateCount);
+      updateCount();
     })();
   </script>
   <script>

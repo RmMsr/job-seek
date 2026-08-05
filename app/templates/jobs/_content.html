@@ -1,17 +1,26 @@
 <div class="filter-bar">
-  <a href="/jobs">New ({{ counts.new }})</a>
-  <a href="/jobs?status=accepted">Accepted ({{ counts.accepted }})</a>
-  <a href="/jobs?status=rejected">Rejected ({{ counts.rejected }})</a>
-  <a href="/jobs?status=invalid">Invalid ({{ counts.invalid }})</a>
-  <a href="/jobs?content_type=lead">Leads ({{ counts.lead }})</a>
+  <div class="filter-links">
+    <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}>New ({{ counts.new }})</a>
+    <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}>Accepted ({{ counts.accepted }})</a>
+    <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}>Rejected ({{ counts.rejected }})</a>
+    <a href="/jobs?status=invalid" {% if status == "invalid" %}class="active"{% endif %}>Invalid ({{ counts.invalid }})</a>
+    <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}>Leads ({{ counts.lead }})</a>
+  </div>
+  {% if jobs %}
+    <label class="select-all">
+      <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
+      Select all
+    </label>
+  {% endif %}
 </div>
 <div class="bulk-bar">
   <div class="bulk-bar-header">
     <span class="bulk-count"></span>
-    <button type="button" class="bulk-clear">Clear selection</button>
+    <button type="button" class="btn bulk-clear">Clear selection</button>
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
       <button type="button" class="btn btn-reset" data-progress-url="/jobs/bulk-reset" data-progress-jobs
+        data-progress-display="#bulk-reset-progress"
         title="Wipe the simplified content, classification, summary and scores for each selected job, then immediately rerun the full pipeline from the original posting text.">
         Reset to new
       </button>
@@ -33,6 +42,7 @@
   <label class="bulk-note">Note (optional):
     <textarea name="note" form="bulk-form" placeholder="Optional note for all selected jobs"></textarea>
   </label>
+  <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>
 </div>
 {% if jobs %}
   {% for job in jobs %}
