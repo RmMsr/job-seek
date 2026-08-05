@@ -1,9 +1,11 @@
 from __future__ import annotations
 import sqlite3
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
-from app.deps import get_db
+import openai
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
+from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
+from app.pipeline import run_reprocess_job
 from app.template_env import templates
 
 router = APIRouter()
@@ -68,6 +70,58 @@ def job_feedback(
 ):
     q.update_job_feedback(conn, job_id, status, note, feedback_scenario_id)
     return HTMLResponse(content="", status_code=200)
+
+
+@router.post("/jobs/{job_id}/reset")
+def job_reset(
+    job_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    job = q.get_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    def stream():
+        gen = run_reprocess_job(conn, client, model, job, scenarios, profile)
+        try:
+            while True:
+                yield next(gen) + "\n"
+        except StopIteration:
+            pass
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
+@router.post("/jobs/bulk-reset")
+def job_bulk_reset(
+    job_ids: list[int] = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    def stream():
+        yield f"Resetting {len(job_ids)} job(s)\n"
+        for idx, job_id in enumerate(job_ids, start=1):
+            job = q.get_job(conn, job_id)
+            if not job:
+                continue
+            prefix = f"[{idx}/{len(job_ids)}] "
+            gen = run_reprocess_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
+            try:
+                while True:
+                    yield next(gen) + "\n"
+            except StopIteration:
+                pass
+        yield f"Reset complete: {len(job_ids)} job(s) reprocessed\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
 
 
 @router.post("/jobs/bulk-feedback", response_class=HTMLResponse)

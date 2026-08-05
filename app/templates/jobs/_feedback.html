@@ -60,4 +60,9 @@
       <textarea name="note" placeholder="Why accepting/rejecting? What should change?"></textarea>
     </label>
   </form>
+  <button type="button" class="btn btn-reset" style="margin-top:0.5rem;"
+    data-progress-url="/jobs/{{ job.id }}/reset"
+    title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">
+    Reset &amp; reprocess
+  </button>
 </article>

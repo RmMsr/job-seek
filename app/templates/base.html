@@ -41,6 +41,7 @@
     .btn-accept { background: #d4edda; border-color: #28a745; }
     .btn-reject { background: #f8d7da; border-color: #dc3545; }
     .btn-invalid { background: #e9ecef; border-color: #6c757d; }
+    .btn-reset { background: #fff; border-color: #6c757d; color: #444; }
     .filter-bar { margin-bottom: 1rem; }
     .filter-bar a { margin-right: 0.5rem; }
     body:has(input[name="job_ids"]:checked) { padding-bottom: 11rem; }
@@ -92,6 +93,13 @@
         var url = el.getAttribute("data-progress-url");
         var targetSelector = el.getAttribute("data-progress-target");
         var oobMode = el.hasAttribute("data-progress-oob");
+        var body = null;
+        if (el.hasAttribute("data-progress-jobs")) {
+          var checked = document.querySelectorAll('input[name="job_ids"]:checked');
+          if (!checked.length) return;
+          body = new URLSearchParams();
+          checked.forEach(function (cb) { body.append("job_ids", cb.value); });
+        }
         var progressEl = document.createElement("span");
         progressEl.style.marginLeft = "0.5rem";
         progressEl.style.color = "#666";
@@ -171,7 +179,7 @@
           }
         }
 
-        fetch(url, { method: "POST" }).then(function (response) {
+        fetch(url, { method: "POST", body: body }).then(function (response) {
           var reader = response.body.getReader();
           var decoder = new TextDecoder();
           var buffer = "";

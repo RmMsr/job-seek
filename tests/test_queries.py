@@ -275,6 +275,31 @@ def test_update_job_feedback_persists_scenario_id(conn):
     assert job["feedback_scenario_id"] == scenario_id
 
 
+def test_reset_job_clears_pipeline_output_and_scores(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(
+        conn, jid, simplified_content="clean", content_type="job_posting",
+        title="AI Title", headline="hook", summary="summary text",
+    )
+    q.upsert_job_score(conn, jid, scenario_id, 0.8, "great", "h1")
+    q.update_job_feedback(conn, jid, "accepted", "note", feedback_scenario_id=scenario_id)
+
+    q.reset_job(conn, jid)
+
+    job = q.get_job(conn, jid)
+    assert job["status"] == "new"
+    assert job["content_type"] is None
+    assert job["simplified_content"] == ""
+    assert job["summary"] == ""
+    assert job["headline"] == ""
+    assert job["feedback_note"] is None
+    assert job["feedback_scenario_id"] is None
+    assert job["raw_text"] == "r"
+    assert q.get_job_scores(conn, jid) == []
+
+
 def test_get_job_exposes_best_scenario_id(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_a = q.insert_scenario(conn, "A", "")

@@ -215,6 +215,24 @@ def get_job_score_hashes(conn: sqlite3.Connection, scenario_id: int) -> dict[int
     return {r["job_id"]: r["scenario_version_hash"] for r in rows}
 
 
+def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute(
+        """UPDATE jobs SET
+            status = 'new',
+            content_type = NULL,
+            simplified_content = '',
+            summary = '',
+            headline = '',
+            feedback_note = NULL,
+            feedback_scenario_id = NULL,
+            feedback_handled_at = NULL
+        WHERE id = ?""",
+        (job_id,),
+    )
+    conn.execute("DELETE FROM job_scores WHERE job_id = ?", (job_id,))
+    conn.commit()
+
+
 def update_job_feedback(
     conn: sqlite3.Connection,
     job_id: int,

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from unittest.mock import patch
 import pytest
 from app.db import queries as q
 
@@ -351,6 +352,45 @@ def test_job_expand_has_bulk_select_checkbox(client, conn):
     assert resp.status_code == 200
     assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' in resp.text
     assert '<label class="job-select-wrap">' in resp.text
+
+
+def _fake_run_reprocess_job(conn, client, model, job, scenarios, profile, progress_prefix=""):
+    yield f"{progress_prefix}Reprocessing: {job['url']}"
+    q.reset_job(conn, job["id"])
+    yield f"{progress_prefix}Reset complete: {job['url']}"
+
+
+def test_job_reset_streams_progress_and_resets_job(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "rejected", "not a fit")
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post(f"/jobs/{jid}/reset")
+
+    assert resp.status_code == 200
+    assert "Reprocessing" in resp.text
+    assert "Reset complete" in resp.text
+    assert q.get_job(conn, jid)["status"] == "new"
+
+
+def test_job_reset_unknown_job_returns_404(client, conn):
+    resp = client.post("/jobs/999/reset")
+    assert resp.status_code == 404
+
+
+def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "note")
+    q.update_job_feedback(conn, j2, "invalid", "note")
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
+
+    assert resp.status_code == 200
+    assert resp.text.count("Reprocessing") == 2
+    assert q.get_job(conn, j1)["status"] == "new"
+    assert q.get_job(conn, j2)["status"] == "new"
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):

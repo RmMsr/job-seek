@@ -44,6 +44,44 @@ def _progress(msg: str) -> str:
     return msg
 
 
+def _ingest_posting(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job_id: int,
+    raw_text: str,
+    fallback_title: str,
+    is_slack: bool,
+    profile: str,
+    scenarios: list[dict],
+    *,
+    url: str,
+    progress_prefix: str = "",
+) -> Generator[str, None, None]:
+    simplified = simplify(raw_text)
+    content_type, _ = classify(client, model, simplified, is_slack=is_slack)
+    yield _progress(f"{progress_prefix}Classified as {content_type}: {url}")
+
+    if content_type in ("job_posting", "lead"):
+        ai_title, headline, job_summary = summarize(client, model, simplified)
+        q.update_job_pipeline(
+            conn, job_id,
+            simplified_content=simplified,
+            content_type=content_type,
+            title=ai_title or fallback_title,
+            headline=headline,
+            summary=job_summary,
+        )
+        for scenario in scenarios:
+            criteria = q.get_criteria(conn, scenario["id"])
+            score, reasoning = evaluate(client, model, profile, scenario, criteria, job_summary)
+            version_hash = compute_version_hash(scenario, criteria)
+            q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
+            yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {url}")
+    else:
+        q.update_job_pipeline(conn, job_id, simplified_content=simplified, content_type=content_type)
+
+
 def run_fetch(
     source: dict,
     conn: sqlite3.Connection,
@@ -78,33 +116,11 @@ def run_fetch(
                 published_at=raw.published_at,
             )
             jobs_new += 1
-            simplified = simplify(raw.raw_text)
             is_slack = source["fetcher_type"] == "slack"
-            content_type, _ = classify(client, model, simplified, is_slack=is_slack)
-            yield _progress(f"[{i}/{jobs_found}] Classified as {content_type}: {raw.url}")
-
-            if content_type in ("job_posting", "lead"):
-                ai_title, headline, job_summary = summarize(client, model, simplified)
-                q.update_job_pipeline(
-                    conn, job_id,
-                    simplified_content=simplified,
-                    content_type=content_type,
-                    title=ai_title or raw.title,
-                    headline=headline,
-                    summary=job_summary,
-                )
-                for scenario in scenarios:
-                    criteria = q.get_criteria(conn, scenario["id"])
-                    score, reasoning = evaluate(client, model, profile, scenario, criteria, job_summary)
-                    version_hash = compute_version_hash(scenario, criteria)
-                    q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
-                    yield _progress(f"[{i}/{jobs_found}] Scored {score} for '{scenario['name']}': {raw.url}")
-            else:
-                q.update_job_pipeline(
-                    conn, job_id,
-                    simplified_content=simplified,
-                    content_type=content_type,
-                )
+            yield from _ingest_posting(
+                conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
+                url=raw.url, progress_prefix=f"[{i}/{jobs_found}] ",
+            )
 
         q.complete_fetch_run(conn, run_id, jobs_found=jobs_found, jobs_new=jobs_new)
         yield _progress(f"Fetch complete for '{source['name']}': {jobs_new} new / {jobs_found} found")
@@ -113,6 +129,27 @@ def run_fetch(
         q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error=str(exc))
         yield _progress(f"Fetch failed for '{source['name']}': {exc}")
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=0, jobs_new=0, error=str(exc))
+
+
+def run_reprocess_job(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job: dict,
+    scenarios: list[dict],
+    profile: str,
+    *,
+    progress_prefix: str = "",
+) -> Generator[str, None, None]:
+    source = q.get_source(conn, job["source_id"])
+    is_slack = bool(source and source["fetcher_type"] == "slack")
+    q.reset_job(conn, job["id"])
+    yield _progress(f"{progress_prefix}Reprocessing: {job['url']}")
+    yield from _ingest_posting(
+        conn, client, model, job["id"], job["raw_text"], job["title"], is_slack, profile, scenarios,
+        url=job["url"], progress_prefix=progress_prefix,
+    )
+    yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
 
 
 def _eligible_for_reevaluation(conn: sqlite3.Connection, scenario: dict) -> tuple[list[dict], int, list[dict], str]:

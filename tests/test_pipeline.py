@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
-from app.pipeline import run_fetch, FetchResult, _make_fetcher
+from app.pipeline import run_fetch, run_reprocess_job, FetchResult, _make_fetcher
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.base import RawJob
 
@@ -37,14 +37,14 @@ def _drain(gen):
 def _mock_client(classify_resp, summarize_resp, evaluate_resp):
     client = MagicMock()
     def create(**kwargs):
-        system = kwargs["messages"][0]["content"]
+        system = kwargs["messages"][0]["content"].lower()
         choice = MagicMock()
-        if "classify" in system.lower() or "job_posting" in system.lower() or "lead" in system.lower():
+        if "you classify" in system:
             choice.message.content = classify_resp
-        elif "summarize" in system.lower() or "summary" in system.lower():
-            choice.message.content = summarize_resp
-        else:
+        elif "you evaluate" in system:
             choice.message.content = evaluate_resp
+        else:
+            choice.message.content = summarize_resp
         return MagicMock(choices=[choice])
     client.chat.completions.create.side_effect = create
     return client
@@ -242,6 +242,64 @@ def test_run_fetch_stores_ai_title_and_headline(conn, source):
     job = q.get_jobs(conn)[0]
     assert job["title"] == "ML Engineer - Remote @ Acme"
     assert job["headline"] == "Great remote ML role"
+
+
+def test_run_reprocess_job_reruns_full_pipeline(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="stale title", company="Acme", raw_text="<p>We are hiring</p>",
+    )
+    q.update_job_pipeline(
+        conn, jid, simplified_content="stale simplified", content_type="job_posting",
+        headline="stale headline", summary="stale summary",
+    )
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    q.upsert_job_score(conn, jid, scenario_id, 0.1, "stale reasoning", "stale-hash")
+    q.update_job_feedback(conn, jid, "rejected", "not a fit")
+
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    messages, _ = _drain(run_reprocess_job(conn, client, "llama3.2", job, scenarios, profile))
+
+    updated = q.get_job(conn, jid)
+    assert updated["status"] == "new"
+    assert updated["feedback_note"] is None
+    assert updated["simplified_content"] != "stale simplified"
+    assert updated["summary"] == "Good ML role"
+    assert updated["headline"] == "Great remote ML role"
+    assert updated["title"] == "ML Engineer - Remote @ Acme"
+    score = q.get_job_score(conn, jid, scenario_id)
+    assert score["relevance_score"] == 0.9
+    assert any("Reprocessing" in m for m in messages)
+    assert any("Scored 0.9" in m for m in messages)
+
+
+def test_run_reprocess_job_non_posting_skips_scoring(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="meetup announcement",
+    )
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"type": "irrelevant", "reason": "not a job"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    _drain(run_reprocess_job(conn, client, "llama3.2", job, scenarios, profile))
+
+    updated = q.get_job(conn, jid)
+    assert updated["content_type"] == "irrelevant"
+    assert updated["summary"] == ""
+    assert q.get_job_scores(conn, jid) == []
 
 
 def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
