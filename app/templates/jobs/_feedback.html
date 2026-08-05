@@ -44,6 +44,9 @@
     hx-post="/jobs/{{ job.id }}/feedback"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
+    <label>Note (optional):
+      <textarea name="note" placeholder="Why accepting/rejecting? What should change?"></textarea>
+    </label>
     <label>Scenario (best fit shown, change if needed):
       <select name="feedback_scenario_id" required>
         {% for s in scenarios %}
@@ -56,13 +59,13 @@
       <button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria — feeds back into scenario tuning.">Reject</button>
       <button type="submit" name="status" value="invalid" class="btn btn-invalid" title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria.">Invalid</button>
     </div>
-    <label>Note (optional):
-      <textarea name="note" placeholder="Why accepting/rejecting? What should change?"></textarea>
-    </label>
   </form>
-  <button type="button" class="btn btn-reset" style="margin-top:0.5rem;"
-    data-progress-url="/jobs/{{ job.id }}/reset"
-    title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">
-    Reset &amp; reprocess
-  </button>
+  <details class="job-advanced">
+    <summary>Advanced&hellip;</summary>
+    <button type="button" class="btn btn-reset"
+      data-progress-url="/jobs/{{ job.id }}/reset"
+      title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">
+      Reset to new
+    </button>
+  </details>
 </article>

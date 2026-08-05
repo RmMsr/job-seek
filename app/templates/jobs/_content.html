@@ -9,6 +9,13 @@
   <div class="bulk-bar-header">
     <span class="bulk-count"></span>
     <button type="button" class="bulk-clear">Clear selection</button>
+    <details class="job-advanced">
+      <summary>Advanced&hellip;</summary>
+      <button type="button" class="btn btn-reset" data-progress-url="/jobs/bulk-reset" data-progress-jobs
+        title="Wipe the simplified content, classification, summary and scores for each selected job, then immediately rerun the full pipeline from the original posting text.">
+        Reset to new
+      </button>
+    </details>
   </div>
   <label class="bulk-scenario">Scenario:
     <select name="feedback_scenario_id" form="bulk-form">
@@ -22,10 +29,6 @@
     <button type="submit" form="bulk-form" name="status" value="accepted" class="btn btn-accept">Accept</button>
     <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria — feeds back into scenario tuning.">Reject</button>
     <button type="submit" form="bulk-form" name="status" value="invalid" class="btn btn-invalid" title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria.">Invalid</button>
-    <button type="button" class="btn btn-reset" data-progress-url="/jobs/bulk-reset" data-progress-jobs
-      title="Wipe the simplified content, classification, summary and scores for each selected job, then immediately rerun the full pipeline from the original posting text.">
-      Reset &amp; reprocess
-    </button>
   </div>
   <label class="bulk-note">Note (optional):
     <textarea name="note" form="bulk-form" placeholder="Optional note for all selected jobs"></textarea>
