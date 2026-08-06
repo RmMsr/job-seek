@@ -302,7 +302,24 @@ def test_get_job_counts(conn):
     q.update_job_feedback(conn, j2, "rejected", "note")
     q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
     counts = q.get_job_counts(conn)
-    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "invalid": 0, "lead": 1}
+    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "invalid": 0, "lead": 1, "not_relevant": 0}
+
+
+def test_get_job_counts_splits_new_from_not_relevant(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    passed = q.insert_job(conn, source_id=source_id, url="http://job/passed", title="Passed", company="C", raw_text="r")
+    failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
+    q.update_job_pipeline(conn, passed, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, failed, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, passed, scenario_id, 0.9, "", "hash1")
+    q.upsert_job_score(conn, failed, scenario_id, 0.3, "", "hash2")
+
+    counts = q.get_job_counts(conn)
+
+    assert counts["new"] == 1
+    assert counts["not_relevant"] == 1
+    assert counts["new"] + counts["not_relevant"] == 2  # raw status='new' total
 
 
 def test_get_recent_feedback_notes(conn):
@@ -448,22 +465,24 @@ def test_get_jobs_excludes_scenario_below_its_own_gate_threshold(conn):
     assert job["passed_gate_count"] is None
 
 
-def test_get_jobs_gate_passed_only_excludes_below_threshold(conn):
+def test_get_jobs_gate_status_passed_excludes_below_threshold(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     below = q.insert_job(conn, source_id=source_id, url="http://job/below", title="Below", company="C", raw_text="r")
     above = q.insert_job(conn, source_id=source_id, url="http://job/above", title="Above", company="C", raw_text="r")
+    q.update_job_pipeline(conn, below, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, above, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, below, scenario_id, 0.5, "", "hash1")
     q.upsert_job_score(conn, above, scenario_id, 0.9, "", "hash2")
 
     all_jobs = q.get_jobs(conn)
     assert {j["title"] for j in all_jobs} == {"Below", "Above"}
 
-    passed_only = q.get_jobs(conn, gate_passed_only=True)
+    passed_only = q.get_jobs(conn, gate_status="passed")
     assert [j["title"] for j in passed_only] == ["Above"]
 
 
-def test_get_jobs_gate_passed_only_keeps_never_scored_jobs(conn):
+def test_get_jobs_gate_status_passed_keeps_never_scored_jobs(conn):
     # A job with zero job_scores rows (e.g. no scenarios existed at fetch
     # time) hasn't failed a gate — it was never gated at all — so it must
     # stay visible, unlike a job that was scored and failed every scenario.
@@ -471,11 +490,42 @@ def test_get_jobs_gate_passed_only_keeps_never_scored_jobs(conn):
     scenario_id = q.insert_scenario(conn, "A", "")
     scored_and_failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
     never_scored = q.insert_job(conn, source_id=source_id, url="http://job/unscored", title="Unscored", company="C", raw_text="r")
+    q.update_job_pipeline(conn, scored_and_failed, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, scored_and_failed, scenario_id, 0.5, "", "hash1")  # below default 0.7
 
-    passed_only = q.get_jobs(conn, gate_passed_only=True)
+    passed_only = q.get_jobs(conn, gate_status="passed")
 
     assert [j["title"] for j in passed_only] == ["Unscored"]
+
+
+def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
+    passed = q.insert_job(conn, source_id=source_id, url="http://job/passed", title="Passed", company="C", raw_text="r")
+    unscored = q.insert_job(conn, source_id=source_id, url="http://job/unscored", title="Unscored", company="C", raw_text="r")
+    q.update_job_pipeline(conn, failed, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, passed, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, failed, scenario_id, 0.3, "", "hash1")
+    q.upsert_job_score(conn, passed, scenario_id, 0.9, "", "hash2")
+
+    failed_only = q.get_jobs(conn, gate_status="failed")
+
+    assert [j["title"] for j in failed_only] == ["Failed"]
+
+
+def test_get_jobs_gate_status_failed_paired_with_job_posting_excludes_leads(conn):
+    # Route layer always pairs gate_status="failed" with content_type="job_posting"
+    # so a gate-failed lead never shows up in "Not relevant" — it's Leads-only.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    lead = q.insert_job(conn, source_id=source_id, url="http://job/lead", title="Lead", company="C", raw_text="r")
+    q.update_job_pipeline(conn, lead, simplified_content="", content_type="lead")
+    q.upsert_job_score(conn, lead, scenario_id, 0.3, "", "hash1")
+
+    failed_only = q.get_jobs(conn, content_type="job_posting", gate_status="failed")
+
+    assert failed_only == []
 
 
 def test_get_jobs_job_with_no_score_has_no_passed_scenarios(conn):

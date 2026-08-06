@@ -2,6 +2,7 @@
 <article class="job-row" id="job-{{ job.id }}">
   <label class="job-select-wrap">
     <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+      id="job-select-{{ job.id }}" hx-preserve="true"
       aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
   </label>
   <div role="button" tabindex="0" style="cursor:pointer"

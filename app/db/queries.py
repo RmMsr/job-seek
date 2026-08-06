@@ -347,7 +347,7 @@ def get_jobs(
     *,
     status: str | None = None,
     content_type: str | None = None,
-    gate_passed_only: bool = False,
+    gate_status: str | None = None,
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -356,8 +356,15 @@ def get_jobs(
     if content_type is not None:
         clauses.append("jobs.content_type = ?")
         params.append(content_type)
-    if gate_passed_only:
-        clauses.append("(scored.scored_count IS NULL OR gate.passed_count > 0)")
+    if gate_status == "passed":
+        clauses.append(
+            "(jobs.content_type != 'job_posting' OR jobs.content_type IS NULL "
+            "OR scored.scored_count IS NULL OR gate.passed_count > 0)"
+        )
+    elif gate_status == "failed":
+        clauses.append(
+            "scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0)"
+        )
     sql = f"SELECT {_GATE_SELECT} {_GATE_JOIN}"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
@@ -366,12 +373,22 @@ def get_jobs(
 
 
 def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    counts = {"new": 0, "accepted": 0, "rejected": 0, "invalid": 0, "lead": 0}
+    counts = {"new": 0, "accepted": 0, "rejected": 0, "invalid": 0, "lead": 0, "not_relevant": 0}
     for status, n in conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall():
         counts[status] = n
     counts["lead"] = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE content_type = ?", ("lead",)
     ).fetchone()[0]
+    not_relevant = conn.execute(
+        f"""
+        SELECT COUNT(*) {_GATE_JOIN}
+        WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
+          AND scored.scored_count IS NOT NULL
+          AND (gate.passed_count IS NULL OR gate.passed_count = 0)
+        """
+    ).fetchone()[0]
+    counts["not_relevant"] = not_relevant
+    counts["new"] -= not_relevant
     return counts
 
 

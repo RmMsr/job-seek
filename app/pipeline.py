@@ -229,7 +229,7 @@ def run_reassess_fit(
     profile = q.get_profile(conn)
     current_hash = compute_profile_hash(profile)
     eligible = [
-        j for j in q.get_jobs(conn, status="new", gate_passed_only=True)
+        j for j in q.get_jobs(conn, status="new", gate_status="passed")
         if j["content_type"] in ("job_posting", "lead")
     ]
     to_assess = [j for j in eligible if j["profile_version_hash"] != current_hash]

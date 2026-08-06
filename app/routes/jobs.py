@@ -19,12 +19,13 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
 
 
 def _get_filtered_jobs(
-    conn: sqlite3.Connection, status: str | None, content_type: str | None, show_filtered: bool
+    conn: sqlite3.Connection, status: str | None, content_type: str | None
 ) -> list[dict]:
-    gate_passed_only = not show_filtered
+    if status == "not_relevant":
+        return q.get_jobs(conn, status="new", content_type="job_posting", gate_status="failed")
     if status is None and content_type is None:
-        return q.get_jobs(conn, status="new", gate_passed_only=gate_passed_only)
-    return q.get_jobs(conn, status=status, content_type=content_type, gate_passed_only=gate_passed_only)
+        return q.get_jobs(conn, status="new", gate_status="passed")
+    return q.get_jobs(conn, status=status, content_type=content_type)
 
 
 @router.get("/jobs", response_class=HTMLResponse)
@@ -32,10 +33,9 @@ def job_list(
     request: Request,
     status: str | None = None,
     content_type: str | None = None,
-    show_filtered: bool = False,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type, show_filtered))
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type))
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
     effective_status = status if (status is not None or content_type is not None) else "new"
@@ -43,7 +43,7 @@ def job_list(
         request, "jobs/list.html",
         {
             "jobs": jobs, "counts": counts, "scenarios": scenarios,
-            "status": effective_status, "content_type": content_type, "show_filtered": show_filtered,
+            "status": effective_status, "content_type": content_type,
         },
     )
 
@@ -156,7 +156,6 @@ def job_bulk_feedback(
     note: str | None = Form(None),
     status_filter: str | None = Form(None),
     content_type_filter: str | None = Form(None),
-    show_filtered_filter: bool = Form(False),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -164,7 +163,7 @@ def job_bulk_feedback(
 
     status_filter = status_filter or None
     content_type_filter = content_type_filter or None
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, show_filtered_filter))
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter))
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
     effective_status = status_filter if (status_filter is not None or content_type_filter is not None) else "new"
@@ -172,6 +171,6 @@ def job_bulk_feedback(
         request, "jobs/_content.html",
         {
             "jobs": jobs, "counts": counts, "scenarios": scenarios,
-            "status": effective_status, "content_type": content_type_filter, "show_filtered": show_filtered_filter,
+            "status": effective_status, "content_type": content_type_filter,
         },
     )

@@ -3,13 +3,9 @@
     <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}>New ({{ counts.new }})</a>
     <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}>Accepted ({{ counts.accepted }})</a>
     <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}>Rejected ({{ counts.rejected }})</a>
-    <a href="/jobs?status=invalid" {% if status == "invalid" %}class="active"{% endif %}>Invalid ({{ counts.invalid }})</a>
     <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}>Leads ({{ counts.lead }})</a>
-    {% if show_filtered %}
-      <a href="/jobs" class="active" title="Currently showing jobs that didn't clear any scenario's gate">Show filtered ✓</a>
-    {% else %}
-      <a href="/jobs?show_filtered=1" title="Show jobs that didn't clear any scenario's gate">Show filtered</a>
-    {% endif %}
+    <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}>Not relevant ({{ counts.not_relevant }})</a>
+    <a href="/jobs?status=invalid" {% if status == "invalid" %}class="active"{% endif %}>Invalid ({{ counts.invalid }})</a>
   </div>
   {% if jobs %}
     <label class="select-all">

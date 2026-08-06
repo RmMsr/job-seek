@@ -549,7 +549,7 @@ def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
     assert "Data Eng" in resp.text
 
 
-def test_job_list_hides_gate_filtered_jobs_by_default(client, conn):
+def test_job_list_new_tab_excludes_gate_failed_postings(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
@@ -559,5 +559,54 @@ def test_job_list_hides_gate_filtered_jobs_by_default(client, conn):
     resp = client.get("/jobs")
     assert "Filtered Out" not in resp.text
 
-    resp2 = client.get("/jobs?show_filtered=1")
+    resp2 = client.get("/jobs?status=not_relevant")
     assert "Filtered Out" in resp2.text
+
+
+def test_job_list_not_relevant_tab_excludes_leads(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Lead", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="lead", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+
+    resp = client.get("/jobs?status=not_relevant")
+    assert "Low Score Lead" not in resp.text
+
+
+def test_job_list_leads_tab_includes_gate_failed_leads(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Lead", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="lead", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+
+    resp = client.get("/jobs?content_type=lead")
+    assert "Low Score Lead" in resp.text
+
+
+def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Accepted", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+    q.update_job_feedback(conn, jid, "accepted", "")
+
+    resp = client.get("/jobs?status=accepted")
+    assert "Low Score Accepted" in resp.text
+
+
+def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+
+    resp = client.get("/jobs")
+
+    assert "Not relevant (1)" in resp.text
+    assert 'href="/jobs?status=not_relevant"' in resp.text
+    assert "Show filtered" not in resp.text
+    assert 'name="show_filtered_filter"' not in resp.text
