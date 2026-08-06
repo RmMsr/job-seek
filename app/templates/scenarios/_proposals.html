@@ -2,7 +2,7 @@
 <form hx-post="/scenarios/{{ scenario_id }}/refine/accept"
       hx-target="#criteria-{{ scenario_id }}"
       hx-swap="outerHTML">
-  <input type="hidden" name="feedback_job_ids" value="{{ feedback_job_ids | default('') }}">
+  <input type="hidden" name="feedback_anchor" value="{{ feedback_anchor or '' }}">
   <p><strong>Proposed criteria changes.</strong> Uncheck any you don't want, then apply.</p>
   {% for p in proposals %}
   <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">

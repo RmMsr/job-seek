@@ -299,26 +299,27 @@ def test_refine_alone_does_not_mark_feedback_handled(client, conn):
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
         client.post(f"/scenarios/{sid}/refine")
 
-    assert q.get_recent_feedback_job_ids(conn, sid) == [job_id]
+    assert q.get_recent_feedback_notes(conn, sid) == [{"direction": "lower", "note": "too junior"}]
 
 
-def test_refine_embeds_feedback_job_ids_in_apply_form(client, conn):
+def test_refine_embeds_feedback_anchor_in_apply_form(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
+    anchor = q.get_recent_feedback_anchor(conn, sid)
 
     proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
         resp = client.post(f"/scenarios/{sid}/refine")
-    assert f'name="feedback_job_ids" value="{job_id}"' in resp.text
+    assert f'name="feedback_anchor" value="{anchor}"' in resp.text
 
 
 def test_manual_add_criterion_does_not_mark_feedback_handled(client, conn):
     # The always-instant manual add-form at the bottom of the criteria list
     # is unrelated to the LLM-suggestion batch-apply flow and carries no
-    # feedback_job_ids — it must never mark anything handled.
+    # feedback_anchor — it must never mark anything handled.
     sid = q.insert_scenario(conn, "Remote ML", "")
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -327,7 +328,7 @@ def test_manual_add_criterion_does_not_mark_feedback_handled(client, conn):
 
     resp = client.post(f"/scenarios/{sid}/criteria", data={"text": "Must be senior", "weight": "must"})
     assert resp.status_code == 200
-    assert q.get_recent_feedback_job_ids(conn, sid) == [job_id]
+    assert q.get_recent_feedback_notes(conn, sid) == [{"direction": "lower", "note": "too junior"}]
 
 
 def test_apply_batch_inserts_checked_add_and_deletes_checked_remove(client, conn):
@@ -379,13 +380,14 @@ def test_apply_batch_marks_feedback_handled_even_when_all_rows_skipped(client, c
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
+    anchor = q.get_recent_feedback_anchor(conn, sid)
 
     resp = client.post(
         f"/scenarios/{sid}/refine/accept",
-        data={"kind_0": "add", "text_0": "Must be senior", "weight_0": "must", "feedback_job_ids": str(job_id)},
+        data={"kind_0": "add", "text_0": "Must be senior", "weight_0": "must", "feedback_anchor": anchor},
     )
     assert resp.status_code == 200
-    assert q.get_recent_feedback_job_ids(conn, sid) == []
+    assert q.get_recent_feedback_notes(conn, sid) == []
     assert q.get_criteria(conn, sid) == []
 
 
@@ -397,21 +399,22 @@ def test_apply_batch_only_marks_this_scenarios_feedback_handled(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid_a, "too junior", "lower")
     q.upsert_scenario_feedback(conn, job_id, sid_b, "should count here too", "higher")
+    anchor_a = q.get_recent_feedback_anchor(conn, sid_a)
 
     client.post(
         f"/scenarios/{sid_a}/refine/accept",
-        data={"feedback_job_ids": str(job_id)},
+        data={"feedback_anchor": anchor_a},
     )
 
-    assert q.get_recent_feedback_job_ids(conn, sid_a) == []
-    assert q.get_recent_feedback_job_ids(conn, sid_b) == [job_id]
+    assert q.get_recent_feedback_notes(conn, sid_a) == []
+    assert q.get_recent_feedback_notes(conn, sid_b) == [{"direction": "higher", "note": "should count here too"}]
 
 
-def test_apply_batch_ignores_malformed_feedback_job_ids(client, conn):
+def test_apply_batch_ignores_malformed_feedback_anchor(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     resp = client.post(
         f"/scenarios/{sid}/refine/accept",
-        data={"feedback_job_ids": "1; DROP TABLE jobs"},
+        data={"feedback_anchor": "1; DROP TABLE jobs"},
     )
     assert resp.status_code == 200
 
@@ -458,17 +461,18 @@ def test_refine_all_scenarios_oob_wrapper_preserves_layout_style(client, conn):
     assert 'style="margin-top:0.75rem; width:100%;"' in resp.text
 
 
-def test_refine_all_scenarios_embeds_feedback_job_ids(client, conn):
+def test_refine_all_scenarios_embeds_feedback_anchor(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
+    anchor = q.get_recent_feedback_anchor(conn, sid)
 
     proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
         resp = client.post("/scenarios/refine")
-    assert f'name="feedback_job_ids" value="{job_id}"' in resp.text
+    assert f'name="feedback_anchor" value="{anchor}"' in resp.text
 
 
 def test_refine_all_scenarios_with_no_scenarios(client, conn):
@@ -609,3 +613,75 @@ def test_refine_proposals_sorted_must_prefer_avoid(client, conn):
     prefer_pos = text.index("Prefer Python")
     avoid_pos = text.index("Avoid on-call")
     assert must_pos < prefer_pos < avoid_pos
+
+
+def test_scenarios_page_shows_too_loose_verdict(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
+
+    resp = client.get("/scenarios")
+
+    assert "Criteria may be too loose — consider tightening" in resp.text
+    assert '0 votes said "too strict"' in resp.text
+    assert '1 vote said "too loose"' in resp.text
+    assert "pending, will be used in the next refine" in resp.text
+    assert "Also applied earlier" not in resp.text
+
+
+def test_scenarios_page_shows_too_strict_verdict(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, job_id, sid, "worth it", "higher")
+
+    resp = client.get("/scenarios")
+
+    assert "Criteria may be too strict — consider loosening" in resp.text
+
+
+def test_scenarios_page_shows_balanced_verdict(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, sid, "a", "higher")
+    q.upsert_scenario_feedback(conn, j2, sid, "b", "lower")
+
+    resp = client.get("/scenarios")
+
+    assert "Feedback seems balanced" in resp.text
+
+
+def test_scenarios_page_shows_already_applied_line_after_handling(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, job_id, sid, "worth it", "higher")
+    anchor = q.get_recent_feedback_anchor(conn, sid)
+    q.mark_feedback_handled(conn, sid, anchor)
+
+    resp = client.get("/scenarios")
+
+    assert "No unhandled feedback yet" in resp.text
+    assert "Also applied earlier (last 30 days): 1 too strict, 0 too loose" in resp.text
+
+
+def test_scenarios_page_omits_already_applied_line_when_nothing_handled(client, conn):
+    q.insert_scenario(conn, "Remote ML", "")
+
+    resp = client.get("/scenarios")
+
+    assert "No unhandled feedback yet" in resp.text
+    assert "Also applied earlier" not in resp.text
+    assert 'score-badge score-neutral">No unhandled feedback yet' in resp.text
+
+
+def test_scenarios_page_shows_feedback_refinement_section(client, conn):
+    q.insert_scenario(conn, "Remote ML", "")
+
+    resp = client.get("/scenarios")
+
+    assert "Feedback" in resp.text and "Refinement" in resp.text
+    assert "Re-evaluate jobs" in resp.text

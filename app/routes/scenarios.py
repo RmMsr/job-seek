@@ -17,12 +17,6 @@ router = APIRouter()
 _WEIGHT_ORDER = {"must": 0, "prefer": 1, "avoid": 2}
 
 
-def _parse_job_ids(raw: str | None) -> list[int]:
-    if not raw:
-        return []
-    return [int(part) for part in raw.split(",") if part.strip().isdigit()]
-
-
 def _resolve_proposals(proposals: list, existing: list[dict]) -> list[dict]:
     resolved = []
     for p in proposals:
@@ -40,10 +34,35 @@ def _resolve_proposals(proposals: list, existing: list[dict]) -> list[dict]:
     return resolved
 
 
+def _feedback_quality_verdict(higher: int, lower: int) -> dict:
+    total = higher + lower
+    if total == 0:
+        return {"label": "No unhandled feedback yet", "css_class": "score-neutral"}
+    ratio = higher / total
+    if ratio > 0.6:
+        return {"label": "Criteria may be too strict — consider loosening", "css_class": "score-mid"}
+    if ratio < 0.4:
+        return {"label": "Criteria may be too loose — consider tightening", "css_class": "score-mid"}
+    return {"label": "Feedback seems balanced", "css_class": "score-high"}
+
+
 def _scenarios_context(conn: sqlite3.Connection) -> dict:
     scenarios = q.get_scenarios(conn)
     criteria_by_scenario = {s["id"]: q.get_criteria(conn, s["id"]) for s in scenarios}
-    return {"scenarios": scenarios, "criteria_by_scenario": criteria_by_scenario}
+    feedback_counts_by_scenario = {s["id"]: q.get_recent_feedback_counts(conn, s["id"]) for s in scenarios}
+    feedback_verdict_by_scenario = {
+        s["id"]: _feedback_quality_verdict(
+            feedback_counts_by_scenario[s["id"]]["unhandled_higher"],
+            feedback_counts_by_scenario[s["id"]]["unhandled_lower"],
+        )
+        for s in scenarios
+    }
+    return {
+        "scenarios": scenarios,
+        "criteria_by_scenario": criteria_by_scenario,
+        "feedback_counts_by_scenario": feedback_counts_by_scenario,
+        "feedback_verdict_by_scenario": feedback_verdict_by_scenario,
+    }
 
 
 @router.get("/scenarios", response_class=HTMLResponse)
@@ -114,7 +133,7 @@ def refine_all_scenarios(
             label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
             yield label + "Requesting criteria proposals from LLM\n"
             existing = q.get_criteria(conn, scenario["id"])
-            job_ids = q.get_recent_feedback_job_ids(conn, scenario["id"])
+            anchor = q.get_recent_feedback_anchor(conn, scenario["id"])
             notes = q.get_recent_feedback_notes(conn, scenario["id"])
             proposals = propose_criteria(client, model, scenario, existing, notes)
             resolved = _resolve_proposals(proposals, existing)
@@ -123,7 +142,7 @@ def refine_all_scenarios(
                 request=request,
                 proposals=resolved,
                 scenario_id=scenario["id"],
-                feedback_job_ids=",".join(str(i) for i in job_ids),
+                feedback_anchor=anchor,
             )
             chunk = f'<div id="proposals-area-{scenario["id"]}" style="margin-top:0.75rem; width:100%;">{html}</div>'
             yield "HTML:" + chunk.replace("\n", "") + "\n"
@@ -232,7 +251,7 @@ def refine_criteria(
 ):
     scenario = _get_scenario_or_404(conn, scenario_id)
     existing = q.get_criteria(conn, scenario_id)
-    job_ids = q.get_recent_feedback_job_ids(conn, scenario_id)
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
     notes = q.get_recent_feedback_notes(conn, scenario_id)
 
     def stream():
@@ -248,7 +267,7 @@ def refine_criteria(
             request=request,
             proposals=resolved,
             scenario_id=scenario_id,
-            feedback_job_ids=",".join(str(i) for i in job_ids),
+            feedback_anchor=anchor,
         )
         yield "HTML:" + html.replace("\n", "")
 
@@ -278,7 +297,7 @@ async def accept_proposals(
         i += 1
     # The whole batch was reviewed in one go, regardless of which individual
     # rows were applied vs skipped, so its feedback is fully handled now.
-    q.mark_feedback_handled(conn, scenario_id, _parse_job_ids(form.get("feedback_job_ids")))
+    q.mark_feedback_handled(conn, scenario_id, form.get("feedback_anchor") or None)
     criteria = q.get_criteria(conn, scenario_id)
     html = templates.get_template("scenarios/_criteria.html").render(
         request=request, criteria=criteria, scenario_id=scenario_id

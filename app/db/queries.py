@@ -397,15 +397,16 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
 
 
-def _recent_scenario_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int) -> list[dict]:
+def _recent_scenario_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int, days: int = 30) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
             """
-            SELECT job_id, note, direction FROM scenario_feedback
+            SELECT job_id, note, direction, created_at FROM scenario_feedback
             WHERE scenario_id = ? AND direction IS NOT NULL AND handled_at IS NULL
+              AND created_at >= datetime('now', ? || ' days')
             ORDER BY created_at DESC LIMIT ?
             """,
-            (scenario_id, limit),
+            (scenario_id, f'-{days}', limit),
         ).fetchall()
     )
 
@@ -428,25 +429,45 @@ def get_job_scores(conn: sqlite3.Connection, job_id: int) -> list[dict]:
     )
 
 
-def get_recent_feedback_notes(conn: sqlite3.Connection, scenario_id: int, limit: int = 20) -> list[dict]:
+def get_recent_feedback_notes(conn: sqlite3.Connection, scenario_id: int, limit: int = 20, days: int = 30) -> list[dict]:
     return [
         {"direction": r["direction"], "note": r["note"]}
-        for r in _recent_scenario_feedback_rows(conn, scenario_id, limit)
+        for r in _recent_scenario_feedback_rows(conn, scenario_id, limit, days)
     ]
 
 
-def get_recent_feedback_job_ids(conn: sqlite3.Connection, scenario_id: int, limit: int = 20) -> list[int]:
-    return [r["job_id"] for r in _recent_scenario_feedback_rows(conn, scenario_id, limit)]
+def get_recent_feedback_anchor(conn: sqlite3.Connection, scenario_id: int, limit: int = 20, days: int = 30) -> str | None:
+    rows = _recent_scenario_feedback_rows(conn, scenario_id, limit, days)
+    return rows[0]["created_at"] if rows else None
 
 
-def mark_feedback_handled(conn: sqlite3.Connection, scenario_id: int, job_ids: list[int]) -> None:
-    if not job_ids:
+def get_recent_feedback_counts(conn: sqlite3.Connection, scenario_id: int, limit: int = 20, days: int = 30) -> dict:
+    unhandled = _recent_scenario_feedback_rows(conn, scenario_id, limit, days)
+    handled = _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT direction FROM scenario_feedback
+            WHERE scenario_id = ? AND direction IS NOT NULL AND handled_at IS NOT NULL
+              AND created_at >= datetime('now', ? || ' days')
+            """,
+            (scenario_id, f'-{days}'),
+        ).fetchall()
+    )
+    return {
+        "unhandled_higher": sum(1 for r in unhandled if r["direction"] == "higher"),
+        "unhandled_lower": sum(1 for r in unhandled if r["direction"] == "lower"),
+        "handled_higher": sum(1 for r in handled if r["direction"] == "higher"),
+        "handled_lower": sum(1 for r in handled if r["direction"] == "lower"),
+    }
+
+
+def mark_feedback_handled(conn: sqlite3.Connection, scenario_id: int, anchor: str | None) -> None:
+    if not anchor:
         return
-    placeholders = ",".join("?" * len(job_ids))
     conn.execute(
-        f"""UPDATE scenario_feedback SET handled_at = datetime('now')
-        WHERE scenario_id = ? AND job_id IN ({placeholders})""",
-        [scenario_id, *job_ids],
+        """UPDATE scenario_feedback SET handled_at = datetime('now')
+        WHERE scenario_id = ? AND direction IS NOT NULL AND handled_at IS NULL AND created_at <= ?""",
+        (scenario_id, anchor),
     )
     conn.commit()
 

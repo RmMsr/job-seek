@@ -260,7 +260,7 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     assert job["fit_score"] is None
     assert job["profile_version_hash"] is None
     assert q.get_job_scores(conn, jid) == []
-    assert q.get_recent_feedback_job_ids(conn, scenario_id) == []
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
 def test_get_job_exposes_top_passed_scenario_id(conn):
@@ -360,21 +360,66 @@ def test_get_recent_feedback_notes_excludes_undirected_comments(conn):
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
+def test_get_recent_feedback_notes_excludes_feedback_older_than_window(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
+    conn.execute(
+        "UPDATE scenario_feedback SET created_at = datetime('now', '-40 days') WHERE job_id = ? AND scenario_id = ?",
+        (j1, scenario_id),
+    )
+    conn.commit()
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
+
+
+def test_get_recent_feedback_notes_includes_feedback_within_window(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
+    conn.execute(
+        "UPDATE scenario_feedback SET created_at = datetime('now', '-20 days') WHERE job_id = ? AND scenario_id = ?",
+        (j1, scenario_id),
+    )
+    conn.commit()
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "lower", "note": "too junior"}]
+
+
+def test_get_recent_feedback_notes_row_cap_applies_within_window(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    for i in range(3):
+        j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
+        q.upsert_scenario_feedback(conn, j, scenario_id, f"note {i}", "lower")
+    notes = q.get_recent_feedback_notes(conn, scenario_id, limit=2)
+    assert len(notes) == 2
+
+
 def test_get_recent_feedback_notes_excludes_handled(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
-    q.mark_feedback_handled(conn, scenario_id, [j1])
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
+    q.mark_feedback_handled(conn, scenario_id, anchor)
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
-def test_get_recent_feedback_job_ids(conn):
+def test_get_recent_feedback_anchor_is_newest_created_at(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
-    assert q.get_recent_feedback_job_ids(conn, scenario_id) == [j1]
+    row = conn.execute(
+        "SELECT created_at FROM scenario_feedback WHERE job_id = ? AND scenario_id = ?", (j1, scenario_id)
+    ).fetchone()
+    assert q.get_recent_feedback_anchor(conn, scenario_id) == row["created_at"]
+
+
+def test_get_recent_feedback_anchor_none_when_no_recent_feedback(conn):
+    scenario_id = q.insert_scenario(conn, "A", "")
+    assert q.get_recent_feedback_anchor(conn, scenario_id) is None
 
 
 def test_mark_feedback_handled_scoped_to_one_scenario(conn):
@@ -386,9 +431,57 @@ def test_mark_feedback_handled_scoped_to_one_scenario(conn):
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_a, "too junior", "lower")
     q.upsert_scenario_feedback(conn, j1, scenario_b, "should count here too", "higher")
-    q.mark_feedback_handled(conn, scenario_a, [j1])
-    assert q.get_recent_feedback_job_ids(conn, scenario_a) == []
-    assert q.get_recent_feedback_job_ids(conn, scenario_b) == [j1]
+    anchor_a = q.get_recent_feedback_anchor(conn, scenario_a)
+    q.mark_feedback_handled(conn, scenario_a, anchor_a)
+    assert q.get_recent_feedback_notes(conn, scenario_a) == []
+    assert q.get_recent_feedback_notes(conn, scenario_b) == [{"direction": "higher", "note": "should count here too"}]
+
+
+def test_mark_feedback_handled_sweeps_rows_beyond_the_cap(conn):
+    # The LLM only ever sees the 20 most recent rows, but accepting that
+    # batch's proposals should clear every unhandled row up to that point,
+    # not just the 20 that were sampled — otherwise stragglers beyond the
+    # cap can never be marked handled.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    for i in range(3):
+        j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
+        q.upsert_scenario_feedback(conn, j, scenario_id, f"note {i}", "lower")
+
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id, limit=1)  # only the newest row is "in the batch"
+    q.mark_feedback_handled(conn, scenario_id, anchor)
+
+    assert q.get_recent_feedback_notes(conn, scenario_id, limit=10) == []
+
+
+def test_mark_feedback_handled_leaves_rows_created_after_anchor(conn):
+    # A vote cast after refine was triggered (but before its proposals were
+    # accepted) wasn't part of what the LLM saw, so it must stay unhandled.
+    # created_at has only second-level resolution, so backdate the first
+    # row explicitly rather than relying on real-time ordering between two
+    # upserts in the same test.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
+    conn.execute(
+        "UPDATE scenario_feedback SET created_at = datetime('now', '-1 minutes') WHERE job_id = ? AND scenario_id = ?",
+        (j1, scenario_id),
+    )
+    conn.commit()
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
+
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j2, scenario_id, "should count higher", "higher")
+
+    q.mark_feedback_handled(conn, scenario_id, anchor)
+
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "higher", "note": "should count higher"}]
+
+
+def test_mark_feedback_handled_none_anchor_is_noop(conn):
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.mark_feedback_handled(conn, scenario_id, None)  # must not raise
 
 
 def test_upsert_scenario_feedback_resets_handled_state(conn):
@@ -398,7 +491,8 @@ def test_upsert_scenario_feedback_resets_handled_state(conn):
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
-    q.mark_feedback_handled(conn, scenario_id, [j1])
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
+    q.mark_feedback_handled(conn, scenario_id, anchor)
     q.upsert_scenario_feedback(conn, j1, scenario_id, "actually, too senior", "lower")
     assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "lower", "note": "actually, too senior"}]
 
@@ -634,7 +728,8 @@ def test_upsert_scenario_feedback_resubmitting_unchanged_values_does_not_reset_h
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
-    q.mark_feedback_handled(conn, scenario_id, [jid])
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
+    q.mark_feedback_handled(conn, scenario_id, anchor)
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")  # identical resubmission
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
@@ -658,3 +753,64 @@ def test_get_job_scores_feedback_fields_none_when_no_feedback(conn):
     scores = q.get_job_scores(conn, jid)
     assert scores[0]["feedback_note"] is None
     assert scores[0]["feedback_direction"] is None
+
+
+def test_get_recent_feedback_counts_splits_unhandled_by_direction(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    j3 = q.insert_job(conn, source_id=source_id, url="http://job/3", title="T3", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "a", "higher")
+    q.upsert_scenario_feedback(conn, j2, scenario_id, "b", "higher")
+    q.upsert_scenario_feedback(conn, j3, scenario_id, "c", "lower")
+
+    counts = q.get_recent_feedback_counts(conn, scenario_id)
+
+    assert counts == {"unhandled_higher": 2, "unhandled_lower": 1, "handled_higher": 0, "handled_lower": 0}
+
+
+def test_get_recent_feedback_counts_splits_handled_by_direction(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "a", "higher")
+    q.upsert_scenario_feedback(conn, j2, scenario_id, "b", "lower")
+    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
+    q.mark_feedback_handled(conn, scenario_id, anchor)
+
+    counts = q.get_recent_feedback_counts(conn, scenario_id)
+
+    assert counts == {"unhandled_higher": 0, "unhandled_lower": 0, "handled_higher": 1, "handled_lower": 1}
+
+
+def test_get_recent_feedback_counts_excludes_rows_older_than_window(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "a", "higher")
+    conn.execute(
+        "UPDATE scenario_feedback SET created_at = datetime('now', '-40 days') WHERE job_id = ? AND scenario_id = ?",
+        (j1, scenario_id),
+    )
+    conn.commit()
+
+    counts = q.get_recent_feedback_counts(conn, scenario_id)
+
+    assert counts == {"unhandled_higher": 0, "unhandled_lower": 0, "handled_higher": 0, "handled_lower": 0}
+
+
+def test_get_recent_feedback_counts_unhandled_matches_notes_row_count(conn):
+    # The displayed unhandled count must be mechanically identical to what
+    # propose_criteria actually receives.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    for i in range(25):
+        j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
+        q.upsert_scenario_feedback(conn, j, scenario_id, f"note {i}", "higher")
+
+    counts = q.get_recent_feedback_counts(conn, scenario_id)
+    notes = q.get_recent_feedback_notes(conn, scenario_id)
+
+    assert counts["unhandled_higher"] == len(notes) == 20  # capped
