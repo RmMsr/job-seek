@@ -3,8 +3,9 @@ import json
 import openai
 from app.ai.json_utils import extract_json
 
-_SYSTEM = """You evaluate job fit. Given a candidate profile, a search scenario, and a job summary,
-return a relevance score from 0.0 to 1.0 and a brief reasoning.
+_SYSTEM = """You screen whether a job posting is even in the right search space for a scenario.
+Given a search scenario and a job summary, return a relevance score from 0.0 to 1.0 and a brief
+reasoning — this is a topical gate, not a judgment of whether the candidate should take the job.
 
 Weigh these signals in priority order, each one narrowing the one before it:
 
@@ -12,10 +13,8 @@ Weigh these signals in priority order, each one narrowing the one before it:
    fit the name's theme at all should score low no matter what else matches.
 2. Scenario description — elaborates and refines the name's theme. Use it to interpret borderline
    cases, not to override a job that clearly does or doesn't match the name.
-3. 'must' criteria and the candidate's profile — both act as hard qualifiers, not fine-tuning: a
-   job missing a 'must' criterion, or one this candidate is clearly unqualified for or a poor
-   personal fit for (wrong seniority, missing core skills the role clearly requires, a mismatch
-   the profile rules out), should score low even if it fits the scenario's theme well.
+3. 'must' criteria — hard qualifiers, not fine-tuning: a job missing a 'must' criterion should
+   score low even if it fits the scenario's theme well.
 4. 'prefer' / 'avoid' criteria — fine-tune the score within everything above. A missing 'prefer'
    or a triggered 'avoid' should nudge the score, not sink or save it on their own.
 
@@ -25,7 +24,6 @@ Respond with exactly: {"score": <float>, "reasoning": "<2-3 sentences>"}"""
 def evaluate(
     client: openai.OpenAI,
     model: str,
-    profile: str,
     scenario: dict,
     criteria: list[dict],
     summary: str,
@@ -34,7 +32,6 @@ def evaluate(
         f"[{c['weight'].upper()}] {c['text']}" for c in criteria
     )
     user_content = (
-        f"## Candidate Profile\n{profile}\n\n"
         f"## Search Scenario: {scenario['name']}\n{scenario.get('description', '')}\n\n"
         f"## Criteria\n{criteria_text}\n\n"
         f"## Job Summary\n{summary}"

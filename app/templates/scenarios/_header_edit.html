@@ -6,8 +6,9 @@
     <input type="text" name="name" value="{{ scenario.name }}" required>
     <input type="text" name="description" value="{{ scenario.description }}" style="flex:1; min-width:200px;">
     <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.9em;"
-           title="Boosted scenarios get a flat +20 point bonus when picking a job's best match">
-      <input type="checkbox" name="boosted" {% if scenario.boosted %}checked{% endif %}> Boosted
+           title="Jobs need at least this raw gate score, from this scenario, to show up in your list">
+      Gate threshold:
+      <input type="number" name="gate_threshold" value="{{ scenario.gate_threshold }}" min="0" max="1" step="0.05" style="width:5em;">
     </label>
     <button type="submit" class="btn">Save</button>
     <button type="button" class="btn"

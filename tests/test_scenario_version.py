@@ -1,4 +1,4 @@
-from app.scenario_version import compute_version_hash
+from app.scenario_version import compute_version_hash, compute_profile_hash
 
 
 def test_hash_is_deterministic():
@@ -42,3 +42,15 @@ def test_hash_handles_missing_description_key():
 
 def test_hash_handles_missing_name_key():
     assert compute_version_hash({}, []) == compute_version_hash({"name": ""}, [])
+
+
+def test_profile_hash_is_deterministic():
+    assert compute_profile_hash("Senior ML engineer") == compute_profile_hash("Senior ML engineer")
+
+
+def test_profile_hash_changes_with_content():
+    assert compute_profile_hash("A") != compute_profile_hash("B")
+
+
+def test_profile_hash_handles_empty_string():
+    assert compute_profile_hash("") == compute_profile_hash("")

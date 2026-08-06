@@ -72,10 +72,12 @@ def insert_scenario(conn: sqlite3.Connection, name: str, description: str) -> in
     return cur.lastrowid
 
 
-def update_scenario(conn: sqlite3.Connection, scenario_id: int, name: str, description: str, boosted: bool = False) -> None:
+def update_scenario(
+    conn: sqlite3.Connection, scenario_id: int, name: str, description: str, gate_threshold: float = 0.7
+) -> None:
     conn.execute(
-        "UPDATE scenarios SET name = ?, description = ?, boosted = ? WHERE id = ?",
-        (name, description, int(boosted), scenario_id),
+        "UPDATE scenarios SET name = ?, description = ?, gate_threshold = ? WHERE id = ?",
+        (name, description, gate_threshold, scenario_id),
     )
     conn.commit()
 
@@ -200,6 +202,64 @@ def upsert_job_score(
     conn.commit()
 
 
+def update_job_fit(
+    conn: sqlite3.Connection,
+    job_id: int,
+    interest_score: float,
+    interest_reasoning: str,
+    attainability_score: float,
+    attainability_reasoning: str,
+    profile_version_hash: str,
+) -> None:
+    fit_score = (interest_score + attainability_score) / 2
+    conn.execute(
+        """UPDATE jobs SET
+            interest_score = ?,
+            interest_reasoning = ?,
+            attainability_score = ?,
+            attainability_reasoning = ?,
+            fit_score = ?,
+            profile_version_hash = ?
+        WHERE id = ?""",
+        (interest_score, interest_reasoning, attainability_score, attainability_reasoning, fit_score, profile_version_hash, job_id),
+    )
+    conn.commit()
+
+
+def upsert_scenario_feedback(
+    conn: sqlite3.Connection, job_id: int, scenario_id: int, note: str, direction: str | None = None
+) -> None:
+    note = note.strip()
+    if direction not in ("higher", "lower"):
+        direction = None
+    existing = conn.execute(
+        "SELECT note, direction FROM scenario_feedback WHERE job_id = ? AND scenario_id = ?",
+        (job_id, scenario_id),
+    ).fetchone()
+    if not note and direction is None:
+        # Explicit retraction: no direction and nothing new to say.
+        if existing is not None:
+            conn.execute(
+                "DELETE FROM scenario_feedback WHERE job_id = ? AND scenario_id = ?", (job_id, scenario_id)
+            )
+            conn.commit()
+        return
+    # A blank note means "nothing new to say this round," not "clear the
+    # existing note" — the combined feedback form clears its textareas after
+    # every save, so a later submit touching only one scenario's fields must
+    # not silently wipe another scenario's already-saved note.
+    final_note = note or (existing["note"] if existing is not None else "")
+    if existing is not None and existing["note"] == final_note and existing["direction"] == direction:
+        return  # nothing actually changed — leave handled_at alone
+    conn.execute(
+        """INSERT INTO scenario_feedback (job_id, scenario_id, note, direction) VALUES (?, ?, ?, ?)
+        ON CONFLICT(job_id, scenario_id) DO UPDATE SET
+            note = excluded.note, direction = excluded.direction, handled_at = NULL""",
+        (job_id, scenario_id, final_note, direction),
+    )
+    conn.commit()
+
+
 def get_job_score(conn: sqlite3.Connection, job_id: int, scenario_id: int) -> dict | None:
     return _row_to_dict(
         conn.execute(
@@ -224,54 +284,61 @@ def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
             summary = '',
             headline = '',
             feedback_note = NULL,
-            feedback_scenario_id = NULL,
-            feedback_handled_at = NULL
+            feedback_handled_at = NULL,
+            interest_score = NULL,
+            interest_reasoning = NULL,
+            attainability_score = NULL,
+            attainability_reasoning = NULL,
+            fit_score = NULL,
+            profile_version_hash = NULL
         WHERE id = ?""",
         (job_id,),
     )
     conn.execute("DELETE FROM job_scores WHERE job_id = ?", (job_id,))
+    conn.execute("DELETE FROM scenario_feedback WHERE job_id = ?", (job_id,))
     conn.commit()
 
 
-def update_job_feedback(
-    conn: sqlite3.Connection,
-    job_id: int,
-    status: str,
-    note: str,
-    feedback_scenario_id: int | None = None,
-) -> None:
+def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
     conn.execute(
-        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_scenario_id = ?, feedback_handled_at = NULL WHERE id = ?",
-        (status, note, feedback_scenario_id, job_id),
+        "UPDATE jobs SET status = ?, feedback_note = ? WHERE id = ?",
+        (status, note, job_id),
     )
     conn.commit()
 
 
-_BEST_SCORE_SELECT = """
+_GATE_SELECT = """
     jobs.*,
-    best.scenario_id AS best_scenario_id,
-    best.relevance_score AS best_score,
-    best.score_reasoning AS best_score_reasoning,
-    scenarios.name AS best_scenario_name,
-    feedback_scenarios.name AS feedback_scenario_name
+    gate.passed_count AS passed_gate_count,
+    gate.passed_scenario_names AS passed_scenario_names,
+    gate.top_passed_scenario_id AS top_passed_scenario_id,
+    gate.top_passed_scenario_name AS top_passed_scenario_name,
+    scored.scored_count AS scored_gate_count
 """
 
-BOOST_BONUS = 0.2  # flat bonus added to a boosted scenario's score when picking a job's best match
-
-_BEST_SCORE_JOIN = f"""
+_GATE_JOIN = """
     FROM jobs
     LEFT JOIN (
-        SELECT job_scores.job_id, job_scores.scenario_id, job_scores.relevance_score, job_scores.score_reasoning,
-               ROW_NUMBER() OVER (
-                   PARTITION BY job_scores.job_id
-                   ORDER BY job_scores.relevance_score + CASE WHEN s.boosted THEN {BOOST_BONUS} ELSE 0 END DESC,
-                            job_scores.scenario_id ASC
-               ) AS rn
-        FROM job_scores
-        JOIN scenarios s ON s.id = job_scores.scenario_id
-    ) best ON best.job_id = jobs.id AND best.rn = 1
-    LEFT JOIN scenarios ON scenarios.id = best.scenario_id
-    LEFT JOIN scenarios AS feedback_scenarios ON feedback_scenarios.id = jobs.feedback_scenario_id
+        SELECT ranked.job_id,
+               COUNT(*) AS passed_count,
+               GROUP_CONCAT(ranked.scenario_name, ', ') AS passed_scenario_names,
+               MAX(CASE WHEN ranked.rn = 1 THEN ranked.scenario_id END) AS top_passed_scenario_id,
+               MAX(CASE WHEN ranked.rn = 1 THEN ranked.scenario_name END) AS top_passed_scenario_name
+        FROM (
+            SELECT js.job_id, js.scenario_id, s.name AS scenario_name,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY js.job_id
+                       ORDER BY js.relevance_score DESC, js.scenario_id ASC
+                   ) AS rn
+            FROM job_scores js
+            JOIN scenarios s ON s.id = js.scenario_id
+            WHERE js.relevance_score >= s.gate_threshold
+        ) ranked
+        GROUP BY ranked.job_id
+    ) gate ON gate.job_id = jobs.id
+    LEFT JOIN (
+        SELECT job_id, COUNT(*) AS scored_count FROM job_scores GROUP BY job_id
+    ) scored ON scored.job_id = jobs.id
 """
 
 
@@ -280,6 +347,7 @@ def get_jobs(
     *,
     status: str | None = None,
     content_type: str | None = None,
+    gate_passed_only: bool = False,
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -288,10 +356,12 @@ def get_jobs(
     if content_type is not None:
         clauses.append("jobs.content_type = ?")
         params.append(content_type)
-    sql = f"SELECT {_BEST_SCORE_SELECT} {_BEST_SCORE_JOIN}"
+    if gate_passed_only:
+        clauses.append("(scored.scored_count IS NULL OR gate.passed_count > 0)")
+    sql = f"SELECT {_GATE_SELECT} {_GATE_JOIN}"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY best.relevance_score DESC NULLS LAST, jobs.fetched_at DESC"
+    sql += " ORDER BY jobs.fit_score DESC NULLS LAST, jobs.fetched_at DESC"
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
@@ -306,19 +376,18 @@ def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
-    sql = f"SELECT {_BEST_SCORE_SELECT} {_BEST_SCORE_JOIN} WHERE jobs.id = ?"
+    sql = f"SELECT {_GATE_SELECT} {_GATE_JOIN} WHERE jobs.id = ?"
     return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
 
 
-def _recent_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int) -> list[dict]:
+def _recent_scenario_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
-            """SELECT id, status, feedback_note FROM jobs
-            WHERE feedback_scenario_id = ?
-            AND status != 'invalid'
-            AND feedback_note IS NOT NULL AND feedback_note != ''
-            AND feedback_handled_at IS NULL
-            ORDER BY fetched_at DESC LIMIT ?""",
+            """
+            SELECT job_id, note, direction FROM scenario_feedback
+            WHERE scenario_id = ? AND direction IS NOT NULL AND handled_at IS NULL
+            ORDER BY created_at DESC LIMIT ?
+            """,
             (scenario_id, limit),
         ).fetchall()
     )
@@ -328,9 +397,12 @@ def get_job_scores(conn: sqlite3.Connection, job_id: int) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
             """
-            SELECT job_scores.*, scenarios.name AS scenario_name, scenarios.boosted AS scenario_boosted
+            SELECT job_scores.*, scenarios.name AS scenario_name, scenarios.gate_threshold AS scenario_gate_threshold,
+                   scenario_feedback.note AS feedback_note, scenario_feedback.direction AS feedback_direction
             FROM job_scores
             JOIN scenarios ON scenarios.id = job_scores.scenario_id
+            LEFT JOIN scenario_feedback
+                ON scenario_feedback.job_id = job_scores.job_id AND scenario_feedback.scenario_id = job_scores.scenario_id
             WHERE job_scores.job_id = ?
             ORDER BY job_scores.relevance_score DESC
             """,
@@ -339,31 +411,25 @@ def get_job_scores(conn: sqlite3.Connection, job_id: int) -> list[dict]:
     )
 
 
-def get_recent_feedback_notes(
-    conn: sqlite3.Connection, scenario_id: int, limit: int = 20
-) -> list[dict]:
-    # Includes each note's job status (accepted/rejected) since the same
-    # note text means opposite things depending on the outcome, and the LLM
-    # needs that to interpret feedback correctly rather than guess.
+def get_recent_feedback_notes(conn: sqlite3.Connection, scenario_id: int, limit: int = 20) -> list[dict]:
     return [
-        {"status": r["status"], "feedback_note": r["feedback_note"]}
-        for r in _recent_feedback_rows(conn, scenario_id, limit)
+        {"direction": r["direction"], "note": r["note"]}
+        for r in _recent_scenario_feedback_rows(conn, scenario_id, limit)
     ]
 
 
-def get_recent_feedback_job_ids(
-    conn: sqlite3.Connection, scenario_id: int, limit: int = 20
-) -> list[int]:
-    return [r["id"] for r in _recent_feedback_rows(conn, scenario_id, limit)]
+def get_recent_feedback_job_ids(conn: sqlite3.Connection, scenario_id: int, limit: int = 20) -> list[int]:
+    return [r["job_id"] for r in _recent_scenario_feedback_rows(conn, scenario_id, limit)]
 
 
-def mark_feedback_handled(conn: sqlite3.Connection, job_ids: list[int]) -> None:
+def mark_feedback_handled(conn: sqlite3.Connection, scenario_id: int, job_ids: list[int]) -> None:
     if not job_ids:
         return
     placeholders = ",".join("?" * len(job_ids))
     conn.execute(
-        f"UPDATE jobs SET feedback_handled_at = datetime('now') WHERE id IN ({placeholders})",
-        job_ids,
+        f"""UPDATE scenario_feedback SET handled_at = datetime('now')
+        WHERE scenario_id = ? AND job_id IN ({placeholders})""",
+        [scenario_id, *job_ids],
     )
     conn.commit()
 

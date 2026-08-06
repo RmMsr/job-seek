@@ -18,13 +18,17 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 
 def test_init_db_creates_all_tables(conn):
     init_db(conn)
-    assert _tables(conn) == {"profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs"}
+    assert _tables(conn) == {
+        "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+    }
 
 
 def test_init_db_is_idempotent(conn):
     init_db(conn)
     init_db(conn)  # should not raise
-    assert _tables(conn) == {"profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs"}
+    assert _tables(conn) == {
+        "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+    }
 
 
 def test_jobs_url_is_unique(conn):
@@ -148,7 +152,7 @@ def test_init_db_migrates_jobs_scores_to_job_scores_table(conn):
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            active INTEGER NOT NULL DEFAULT 0,
+            boosted INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE jobs (
@@ -218,13 +222,39 @@ def test_init_db_migrates_jobs_scores_to_job_scores_table(conn):
     assert conn.execute("SELECT COUNT(*) FROM job_scores").fetchone()[0] == 1
 
 
-def test_jobs_table_has_feedback_scenario_id_column(conn):
+def test_scenario_feedback_table_created(conn):
+    init_db(conn)
+    assert "scenario_feedback" in _tables(conn)
+
+
+def test_scenario_feedback_unique_per_job_and_scenario(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
+    conn.execute("INSERT INTO scenarios (name) VALUES ('A')")
+    conn.execute("INSERT INTO scenario_feedback (job_id, scenario_id, note) VALUES (1, 1, 'note')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO scenario_feedback (job_id, scenario_id, note) VALUES (1, 1, 'other')")
+
+
+def test_scenario_feedback_direction_constrained(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
+    conn.execute("INSERT INTO scenarios (name) VALUES ('A')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO scenario_feedback (job_id, scenario_id, note, direction) VALUES (1, 1, '', 'sideways')"
+        )
+
+
+def test_jobs_table_has_no_feedback_scenario_id_column(conn):
     init_db(conn)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-    assert "feedback_scenario_id" in cols
+    assert "feedback_scenario_id" not in cols
 
 
-def test_init_db_migrates_jobs_adds_feedback_scenario_id_with_backfill(conn):
+def test_init_db_migrates_jobs_drops_feedback_scenario_id_with_backfill(conn):
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(
         """
@@ -239,7 +269,7 @@ def test_init_db_migrates_jobs_adds_feedback_scenario_id_with_backfill(conn):
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            active INTEGER NOT NULL DEFAULT 0,
+            gate_threshold REAL NOT NULL DEFAULT 0.7,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE jobs (
@@ -251,50 +281,43 @@ def test_init_db_migrates_jobs_adds_feedback_scenario_id_with_backfill(conn):
             raw_text TEXT NOT NULL DEFAULT '',
             simplified_content TEXT NOT NULL DEFAULT '',
             summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
             content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
             fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
             status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
-            feedback_note TEXT
-        );
-        CREATE TABLE job_scores (
-            id INTEGER PRIMARY KEY,
-            job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-            scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
-            relevance_score REAL NOT NULL,
-            score_reasoning TEXT NOT NULL DEFAULT '',
-            scenario_version_hash TEXT NOT NULL,
-            evaluated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(job_id, scenario_id)
+            feedback_note TEXT,
+            feedback_scenario_id INTEGER REFERENCES scenarios(id),
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT
         );
         """
     )
     conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
-    conn.execute("INSERT INTO scenarios (name) VALUES ('Scenario A')")  # id 1
-    conn.execute("INSERT INTO scenarios (name) VALUES ('Scenario B')")  # id 2
+    conn.execute("INSERT INTO scenarios (name) VALUES ('Remote ML')")  # id 1
     conn.execute(
-        "INSERT INTO jobs (source_id, url, status, feedback_note) "
-        "VALUES (1, 'http://job/1', 'accepted', 'good fit')"
-    )  # id 1, has feedback, scored against both scenarios
-    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/2')")  # id 2, no feedback
-    conn.execute(
-        "INSERT INTO job_scores (job_id, scenario_id, relevance_score, scenario_version_hash) "
-        "VALUES (1, 1, 0.4, 'h1')"
-    )
-    conn.execute(
-        "INSERT INTO job_scores (job_id, scenario_id, relevance_score, scenario_version_hash) "
-        "VALUES (1, 2, 0.9, 'h2')"
-    )
+        "INSERT INTO jobs (source_id, url, status, feedback_note, feedback_scenario_id) "
+        "VALUES (1, 'http://job/1', 'accepted', 'good fit', 1)"
+    )  # id 1: has feedback, should backfill
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/2')")  # id 2: no feedback, nothing to backfill
     conn.commit()
 
     init_db(conn)
 
-    rows = {r["id"]: r["feedback_scenario_id"] for r in conn.execute("SELECT id, feedback_scenario_id FROM jobs")}
-    assert rows[1] == 2  # backfilled to the higher-scoring scenario
-    assert rows[2] is None  # no feedback, stays untagged
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    assert "feedback_scenario_id" not in cols
 
-    # Idempotent: running init_db again doesn't change the backfilled value.
+    rows = conn.execute("SELECT job_id, scenario_id, note, direction FROM scenario_feedback").fetchall()
+    assert [dict(r) for r in rows] == [{"job_id": 1, "scenario_id": 1, "note": "good fit", "direction": None}]
+
+    # Idempotent: running init_db again doesn't duplicate or error.
     init_db(conn)
-    assert conn.execute("SELECT feedback_scenario_id FROM jobs WHERE id = 1").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM scenario_feedback").fetchone()[0] == 1
 
 
 def test_jobs_table_has_headline_column(conn):
@@ -396,40 +419,106 @@ def test_init_db_migrates_jobs_adds_published_at_column(conn):
     assert cols.count("published_at") == 1
 
 
-def test_scenarios_table_has_boosted_column_not_active(conn):
+def test_jobs_table_has_fit_scorecard_columns(conn):
+    init_db(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    for col in ("interest_score", "interest_reasoning", "attainability_score",
+                "attainability_reasoning", "fit_score", "profile_version_hash"):
+        assert col in cols
+
+
+def test_init_db_migrates_jobs_adds_fit_scorecard_columns(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT,
+            feedback_scenario_id INTEGER REFERENCES scenarios(id),
+            feedback_handled_at TEXT
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute(
+        "SELECT title, interest_score, fit_score, profile_version_hash FROM jobs WHERE url = 'http://job/1'"
+    ).fetchone()
+    assert row["title"] == "Existing Title"
+    assert row["interest_score"] is None
+    assert row["fit_score"] is None
+    assert row["profile_version_hash"] is None
+
+    # Idempotent: running init_db again doesn't error or duplicate columns.
+    init_db(conn)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("interest_score") == 1
+
+
+def test_scenarios_table_has_gate_threshold_column_not_boosted(conn):
     init_db(conn)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(scenarios)").fetchall()}
-    assert "boosted" in cols
+    assert "gate_threshold" in cols
+    assert "boosted" not in cols
     assert "active" not in cols
 
 
-def test_init_db_migrates_scenarios_replaces_active_with_boosted(conn):
+def test_scenarios_gate_threshold_defaults_to_0_7(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO scenarios (name) VALUES ('A')")
+    row = conn.execute("SELECT gate_threshold FROM scenarios WHERE name = 'A'").fetchone()
+    assert row["gate_threshold"] == pytest.approx(0.7)
+
+
+def test_init_db_migrates_scenarios_replaces_boosted_with_gate_threshold(conn):
     conn.executescript(
         """
         CREATE TABLE scenarios (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            active INTEGER NOT NULL DEFAULT 0,
+            boosted INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         """
     )
-    conn.execute("INSERT INTO scenarios (name, description, active) VALUES ('ai_expert', 'fallback', 1)")
+    conn.execute("INSERT INTO scenarios (name, description, boosted) VALUES ('ai_expert', 'fallback', 1)")
     conn.commit()
 
     init_db(conn)
 
-    row = conn.execute("SELECT name, description, boosted FROM scenarios WHERE name = 'ai_expert'").fetchone()
+    row = conn.execute("SELECT name, description, gate_threshold FROM scenarios WHERE name = 'ai_expert'").fetchone()
     assert row["name"] == "ai_expert"
     assert row["description"] == "fallback"
-    assert row["boosted"] == 0  # migration doesn't guess which scenarios should be boosted
+    assert row["gate_threshold"] == pytest.approx(0.7)  # migration doesn't preserve the old boost as a threshold
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(scenarios)").fetchall()}
-    assert "boosted" in cols
-    assert "active" not in cols
+    assert "gate_threshold" in cols
+    assert "boosted" not in cols
 
     # Idempotent: running init_db again doesn't error or duplicate columns.
     init_db(conn)
     cols_list = [r[1] for r in conn.execute("PRAGMA table_info(scenarios)").fetchall()]
-    assert cols_list.count("boosted") == 1
+    assert cols_list.count("gate_threshold") == 1

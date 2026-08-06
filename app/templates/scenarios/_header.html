@@ -1,7 +1,7 @@
 <div id="scenario-header-{{ scenario.id }}">
   <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
     <strong>{{ scenario.name }}</strong>
-    {% if scenario.boosted %}<span class="tag" title="Gets a +20 point bonus when picking a job's best match">⚡ Boosted</span>{% endif %}
+    <span class="tag" title="Jobs need at least this raw gate score to appear in your list">gate: {{ "%.0f"|format(scenario.gate_threshold * 100) }}%</span>
     <button class="btn" style="font-size:0.85em; padding:3px 10px;"
       hx-get="/scenarios/{{ scenario.id }}/edit"
       hx-target="#scenario-header-{{ scenario.id }}"

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    boosted INTEGER NOT NULL DEFAULT 0,
+    gate_threshold REAL NOT NULL DEFAULT 0.7,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -47,8 +47,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
     feedback_note TEXT,
-    feedback_scenario_id INTEGER REFERENCES scenarios(id),
-    feedback_handled_at TEXT
+    feedback_handled_at TEXT,
+    interest_score REAL,
+    interest_reasoning TEXT,
+    attainability_score REAL,
+    attainability_reasoning TEXT,
+    fit_score REAL,
+    profile_version_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_scores (
@@ -70,6 +75,17 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     jobs_found INTEGER NOT NULL DEFAULT 0,
     jobs_new INTEGER NOT NULL DEFAULT 0,
     error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scenario_feedback (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+    note TEXT NOT NULL DEFAULT '',
+    direction TEXT CHECK(direction IN ('higher', 'lower')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    handled_at TEXT,
+    UNIQUE(job_id, scenario_id)
 );
 """
 
@@ -146,33 +162,29 @@ def _migrate_jobs_scores_to_table(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
-def _migrate_jobs_add_feedback_scenario_id(conn: sqlite3.Connection) -> None:
-    # Purely additive column, no CHECK/constraint change and nothing to drop
-    # unlike the rebuilds above, so a plain ALTER TABLE suffices instead of a
-    # full jobs_new/copy/drop/rename cycle. foreign_keys is toggled off only
-    # because SQLite refuses to ALTER TABLE ADD COLUMN ... REFERENCES on a
-    # non-empty table while FK enforcement is on.
+def _migrate_jobs_drop_feedback_scenario_id(conn: sqlite3.Connection) -> None:
+    # feedback_scenario_id is superseded by scenario_feedback — status is
+    # now fully scenario-agnostic. Direct DROP COLUMN, same pattern already
+    # used for scenarios.boosted.
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
     ).fetchone()
-    if row is None or "feedback_scenario_id" in row[0]:
+    if row is None or "feedback_scenario_id" not in row[0]:
         return
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("ALTER TABLE jobs ADD COLUMN feedback_scenario_id INTEGER REFERENCES scenarios(id)")
+    # Best-effort backfill: an existing (feedback_note, feedback_scenario_id)
+    # pair looks exactly like what a gate-feedback note is today, so carry
+    # it into scenario_feedback before the column disappears.
     conn.execute(
         """
-        UPDATE jobs
-        SET feedback_scenario_id = (
-            SELECT scenario_id FROM job_scores
-            WHERE job_scores.job_id = jobs.id
-            ORDER BY relevance_score DESC, scenario_id ASC
-            LIMIT 1
-        )
-        WHERE feedback_note IS NOT NULL AND feedback_note != ''
+        INSERT OR IGNORE INTO scenario_feedback (job_id, scenario_id, note)
+        SELECT id, feedback_scenario_id, feedback_note
+        FROM jobs
+        WHERE feedback_scenario_id IS NOT NULL
+          AND feedback_note IS NOT NULL AND feedback_note != ''
         """
     )
+    conn.execute("ALTER TABLE jobs DROP COLUMN feedback_scenario_id")
     conn.commit()
-    conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _migrate_jobs_add_headline(conn: sqlite3.Connection) -> None:
@@ -209,17 +221,33 @@ def _migrate_jobs_add_feedback_handled_at(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _migrate_scenarios_boosted_flag(conn: sqlite3.Connection) -> None:
-    # Replaces the vestigial "active" column (unused since the active-scenario
-    # concept was removed) with "boosted", which drives the fallback-scoring
-    # bonus in app/db/queries.py.
+def _migrate_jobs_add_fit_scorecard(conn: sqlite3.Connection) -> None:
+    # Purely additive columns, same shape as the feedback_handled_at migration above.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "interest_score" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN interest_score REAL")
+    conn.execute("ALTER TABLE jobs ADD COLUMN interest_reasoning TEXT")
+    conn.execute("ALTER TABLE jobs ADD COLUMN attainability_score REAL")
+    conn.execute("ALTER TABLE jobs ADD COLUMN attainability_reasoning TEXT")
+    conn.execute("ALTER TABLE jobs ADD COLUMN fit_score REAL")
+    conn.execute("ALTER TABLE jobs ADD COLUMN profile_version_hash TEXT")
+    conn.commit()
+
+
+def _migrate_scenarios_gate_threshold(conn: sqlite3.Connection) -> None:
+    # Replaces "boosted" (best-match tie-break bonus, now removed entirely)
+    # with "gate_threshold" (per-scenario cutoff for stage-1 visibility) —
+    # see two-stage-scoring-pipeline spec.
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
     ).fetchone()
-    if row is None or "boosted" in row[0]:
+    if row is None or "gate_threshold" in row[0]:
         return
-    conn.execute("ALTER TABLE scenarios DROP COLUMN active")
-    conn.execute("ALTER TABLE scenarios ADD COLUMN boosted INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE scenarios DROP COLUMN boosted")
+    conn.execute("ALTER TABLE scenarios ADD COLUMN gate_threshold REAL NOT NULL DEFAULT 0.7")
     conn.commit()
 
 
@@ -227,8 +255,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
     _migrate_jobs_scores_to_table(conn)
-    _migrate_jobs_add_feedback_scenario_id(conn)
     _migrate_jobs_add_headline(conn)
     _migrate_jobs_add_published_at(conn)
     _migrate_jobs_add_feedback_handled_at(conn)
-    _migrate_scenarios_boosted_flag(conn)
+    _migrate_jobs_add_fit_scorecard(conn)
+    _migrate_jobs_drop_feedback_scenario_id(conn)
+    _migrate_scenarios_gate_threshold(conn)

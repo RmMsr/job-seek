@@ -34,55 +34,38 @@ def test_update_scenario(client, conn):
     assert "Remote ML v2" in resp.text
 
 
-def test_update_scenario_route_persists_boosted_checkbox(client, conn):
+def test_update_scenario_route_persists_gate_threshold(client, conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
     resp = client.post(
         f"/scenarios/{sid}",
-        data={"name": "ai_expert", "description": "fallback", "boosted": "on"},
+        data={"name": "ai_expert", "description": "fallback", "gate_threshold": "0.5"},
     )
     assert resp.status_code == 200
     scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
-    assert scenario["boosted"] == 1
+    assert scenario["gate_threshold"] == pytest.approx(0.5)
 
 
-def test_update_scenario_route_unchecking_boosted_clears_flag(client, conn):
+def test_update_scenario_route_gate_threshold_defaults_to_0_7_when_omitted(client, conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
-    client.post(f"/scenarios/{sid}", data={"name": "ai_expert", "description": "fallback", "boosted": "on"})
     resp = client.post(f"/scenarios/{sid}", data={"name": "ai_expert", "description": "fallback"})
     assert resp.status_code == 200
     scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
-    assert scenario["boosted"] == 0
+    assert scenario["gate_threshold"] == pytest.approx(0.7)
 
 
-def test_edit_scenario_form_checkbox_checked_when_boosted(client, conn):
+def test_edit_scenario_form_shows_current_gate_threshold(client, conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
-    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
+    q.update_scenario(conn, sid, name="ai_expert", description="fallback", gate_threshold=0.55)
     resp = client.get(f"/scenarios/{sid}/edit")
     assert resp.status_code == 200
-    assert '<input type="checkbox" name="boosted" checked>' in resp.text
+    assert 'value="0.55"' in resp.text
 
 
-def test_edit_scenario_form_checkbox_unchecked_by_default(client, conn):
-    sid = q.insert_scenario(conn, "A", "")
-    resp = client.get(f"/scenarios/{sid}/edit")
-    assert resp.status_code == 200
-    assert '<input type="checkbox" name="boosted" checked>' not in resp.text
-    assert 'name="boosted"' in resp.text
-
-
-def test_scenario_header_shows_boosted_tag(client, conn):
+def test_scenario_header_shows_gate_threshold(client, conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
-    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
     resp = client.get(f"/scenarios/{sid}")
     assert resp.status_code == 200
-    assert "Boosted" in resp.text
-
-
-def test_scenario_header_omits_boosted_tag_when_not_boosted(client, conn):
-    sid = q.insert_scenario(conn, "A", "")
-    resp = client.get(f"/scenarios/{sid}")
-    assert resp.status_code == 200
-    assert "Boosted" not in resp.text
+    assert "gate: 70%" in resp.text
 
 
 def test_cancel_scenario_edit_returns_display_header(client, conn):
@@ -310,7 +293,7 @@ def test_refine_alone_does_not_mark_feedback_handled(client, conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
-    q.update_job_feedback(conn, job_id, "rejected", "too junior", feedback_scenario_id=sid)
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
     proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
@@ -324,7 +307,7 @@ def test_refine_embeds_feedback_job_ids_in_apply_form(client, conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
-    q.update_job_feedback(conn, job_id, "rejected", "too junior", feedback_scenario_id=sid)
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
     proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
@@ -340,7 +323,7 @@ def test_manual_add_criterion_does_not_mark_feedback_handled(client, conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
-    q.update_job_feedback(conn, job_id, "rejected", "too junior", feedback_scenario_id=sid)
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
     resp = client.post(f"/scenarios/{sid}/criteria", data={"text": "Must be senior", "weight": "must"})
     assert resp.status_code == 200
@@ -395,7 +378,7 @@ def test_apply_batch_marks_feedback_handled_even_when_all_rows_skipped(client, c
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
-    q.update_job_feedback(conn, job_id, "rejected", "too junior", feedback_scenario_id=sid)
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
     resp = client.post(
         f"/scenarios/{sid}/refine/accept",
@@ -404,6 +387,24 @@ def test_apply_batch_marks_feedback_handled_even_when_all_rows_skipped(client, c
     assert resp.status_code == 200
     assert q.get_recent_feedback_job_ids(conn, sid) == []
     assert q.get_criteria(conn, sid) == []
+
+
+def test_apply_batch_only_marks_this_scenarios_feedback_handled(client, conn):
+    sid_a = q.insert_scenario(conn, "Remote ML", "")
+    sid_b = q.insert_scenario(conn, "Robotics", "")
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
+    q.upsert_scenario_feedback(conn, job_id, sid_a, "too junior", "lower")
+    q.upsert_scenario_feedback(conn, job_id, sid_b, "should count here too", "higher")
+
+    client.post(
+        f"/scenarios/{sid_a}/refine/accept",
+        data={"feedback_job_ids": str(job_id)},
+    )
+
+    assert q.get_recent_feedback_job_ids(conn, sid_a) == []
+    assert q.get_recent_feedback_job_ids(conn, sid_b) == [job_id]
 
 
 def test_apply_batch_ignores_malformed_feedback_job_ids(client, conn):
@@ -462,7 +463,7 @@ def test_refine_all_scenarios_embeds_feedback_job_ids(client, conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
-    q.update_job_feedback(conn, job_id, "rejected", "too junior", feedback_scenario_id=sid)
+    q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
     proposals = [CriterionProposal(text="Must be senior", weight="must", action="add")]
     with patch("app.routes.scenarios.propose_criteria", return_value=proposals):
@@ -501,8 +502,9 @@ def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     assert resp.status_code == 200
     assert "Re-evaluating 1 job(s)" in resp.text
     assert "Re-evaluation complete" in resp.text
+    score = q.get_job_score(conn, job_id, sid)
+    assert score["relevance_score"] == pytest.approx(0.75)
     job = q.get_job(conn, job_id)
-    assert job["best_score"] == pytest.approx(0.75)
     assert job["summary"] == "Updated summary"
 
 

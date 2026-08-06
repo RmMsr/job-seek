@@ -9,12 +9,13 @@ from app.ai.simplify import simplify
 from app.ai.classify import classify
 from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
+from app.ai.assess_fit import assess_fit
 from app.fetchers.base import RawJob
 from app.fetchers.http import HttpFetcher
 from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.slack import SlackFetcher
 from app.fetchers.finn import FinnListingFetcher
-from app.scenario_version import compute_version_hash
+from app.scenario_version import compute_version_hash, compute_profile_hash
 
 logger = logging.getLogger("job_seek")
 
@@ -72,12 +73,26 @@ def _ingest_posting(
             headline=headline,
             summary=job_summary,
         )
+        passed_gate = False
         for scenario in scenarios:
             criteria = q.get_criteria(conn, scenario["id"])
-            score, reasoning = evaluate(client, model, profile, scenario, criteria, job_summary)
+            score, reasoning = evaluate(client, model, scenario, criteria, job_summary)
             version_hash = compute_version_hash(scenario, criteria)
             q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
+            if score >= scenario["gate_threshold"]:
+                passed_gate = True
             yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {url}")
+        if passed_gate:
+            result = assess_fit(client, model, profile, job_summary)
+            q.update_job_fit(
+                conn, job_id,
+                result["interest"], result["interest_reasoning"],
+                result["attainability"], result["attainability_reasoning"],
+                compute_profile_hash(profile),
+            )
+            yield _progress(
+                f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {url}"
+            )
     else:
         q.update_job_pipeline(conn, job_id, simplified_content=simplified, content_type=content_type)
 
@@ -177,7 +192,6 @@ def run_reevaluate(
     job_total: int | None = None,
     scenario_label: str = "",
 ) -> Generator[str, None, int]:
-    profile = q.get_profile(conn)
     to_evaluate, skipped, criteria, current_hash = _eligible_for_reevaluation(conn, scenario)
     total = job_total if job_total is not None else len(to_evaluate)
 
@@ -191,7 +205,7 @@ def run_reevaluate(
             ai_title, headline, new_summary = summarize(client, model, job["simplified_content"])
         else:
             ai_title, headline, new_summary = job["title"], job["headline"], job["summary"]
-        score, reasoning = evaluate(client, model, profile, scenario, criteria, new_summary)
+        score, reasoning = evaluate(client, model, scenario, criteria, new_summary)
         q.update_job_pipeline(
             conn, job["id"],
             simplified_content=job["simplified_content"],
@@ -205,3 +219,39 @@ def run_reevaluate(
 
     yield _progress(f"{scenario_label}Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
     return len(to_evaluate)
+
+
+def run_reassess_fit(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+) -> Generator[str, None, int]:
+    profile = q.get_profile(conn)
+    current_hash = compute_profile_hash(profile)
+    eligible = [
+        j for j in q.get_jobs(conn, status="new", gate_passed_only=True)
+        if j["content_type"] in ("job_posting", "lead")
+    ]
+    to_assess = [j for j in eligible if j["profile_version_hash"] != current_hash]
+    skipped = len(eligible) - len(to_assess)
+
+    msg = f"Recomputing fit scores for {len(to_assess)} job(s)"
+    if skipped:
+        msg += f", skipping {skipped} already current"
+    yield _progress(msg)
+
+    for i, job in enumerate(to_assess, start=1):
+        result = assess_fit(client, model, profile, job["summary"])
+        q.update_job_fit(
+            conn, job["id"],
+            result["interest"], result["interest_reasoning"],
+            result["attainability"], result["attainability_reasoning"],
+            current_hash,
+        )
+        yield _progress(
+            f"[{i}/{len(to_assess)}] Fit {result['interest']:.2f}/{result['attainability']:.2f}: "
+            f"{job['title'] or job['url']}"
+        )
+
+    yield _progress(f"Fit recompute complete: {len(to_assess)} job(s) updated")
+    return len(to_assess)

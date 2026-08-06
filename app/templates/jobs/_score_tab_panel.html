@@ -1,0 +1,14 @@
+<div class="score-tab-panel">
+  {{ js.score_reasoning | markdown }}
+  <input type="hidden" name="scenario_id" value="{{ js.scenario_id }}">
+  <input type="hidden" name="direction" value="{{ js.feedback_direction or '' }}" class="direction-hidden">
+  <div class="direction-toggle" role="group" aria-label="Score direction">
+    <button type="button" class="btn direction-btn" data-direction="higher"
+            aria-pressed="{{ 'true' if js.feedback_direction == 'higher' else 'false' }}">▲ Should score higher</button>
+    <button type="button" class="btn direction-btn" data-direction="lower"
+            aria-pressed="{{ 'true' if js.feedback_direction == 'lower' else 'false' }}">▼ Should score lower</button>
+  </div>
+  <label>Why should this scenario score different?
+    <textarea name="note" placeholder="Optional details">{{ js.feedback_note or '' }}</textarea>
+  </label>
+</div>

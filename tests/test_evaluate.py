@@ -20,33 +20,42 @@ _CRITERIA = [
 
 def test_evaluate_returns_score_and_reasoning():
     client = _mock_client('{"score": 0.85, "reasoning": "Matches remote and Python criteria"}')
-    score, reasoning = evaluate(client, "llama3.2", "I am a senior ML engineer", _SCENARIO, _CRITERIA, "Good role summary")
+    score, reasoning = evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "Good role summary")
     assert score == pytest.approx(0.85)
     assert "remote" in reasoning.lower() or "Python" in reasoning
 
 
 def test_evaluate_clamps_score():
     client = _mock_client('{"score": 1.5, "reasoning": "Perfect"}')
-    score, _ = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    score, _ = evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "summary")
     assert 0.0 <= score <= 1.0
 
 
 def test_evaluate_invalid_json_returns_zero():
     client = _mock_client("not json")
-    score, reasoning = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    score, reasoning = evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "summary")
     assert score == 0.0
     assert "error" in reasoning.lower()
 
 
 def test_evaluate_strips_markdown_code_fence():
     client = _mock_client('```json\n{"score": 0.6, "reasoning": "Decent match"}\n```')
-    score, reasoning = evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    score, reasoning = evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "summary")
     assert score == pytest.approx(0.6)
     assert reasoning == "Decent match"
 
 
 def test_evaluate_disables_model_thinking():
     client = _mock_client('{"score": 0.6, "reasoning": "Decent match"}')
-    evaluate(client, "llama3.2", "profile", _SCENARIO, _CRITERIA, "summary")
+    evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "summary")
     call_args = client.chat.completions.create.call_args
     assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_evaluate_does_not_mention_profile_in_prompt():
+    # This call is a pure topical gate now — no profile/candidate-fit language
+    # should leak into the system prompt.
+    client = _mock_client('{"score": 0.6, "reasoning": "Decent match"}')
+    evaluate(client, "llama3.2", _SCENARIO, _CRITERIA, "summary")
+    system_content = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "profile" not in system_content.lower()

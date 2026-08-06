@@ -14,8 +14,8 @@ def _mock_client(response_text: str) -> MagicMock:
 _SCENARIO = {"name": "Remote ML", "description": "Looking for remote ML roles"}
 _EXISTING = [{"text": "Must be remote", "weight": "must"}]
 _NOTES = [
-    {"status": "rejected", "feedback_note": "required on-site work"},
-    {"status": "rejected", "feedback_note": "too junior, needs senior level"},
+    {"direction": "lower", "note": "required on-site work"},
+    {"direction": "lower", "note": "too junior, needs senior level"},
 ]
 
 
@@ -59,20 +59,18 @@ def test_propose_criteria_disables_model_thinking():
     assert call_args.kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
-def test_propose_criteria_tags_notes_with_outcome():
-    # Same note text means opposite things depending on accept/reject, so
-    # the prompt must carry that distinction rather than a flat note list.
+def test_propose_criteria_tags_notes_with_direction():
     response = "[]"
     client = _mock_client(response)
     notes = [
-        {"status": "rejected", "feedback_note": "too junior"},
-        {"status": "accepted", "feedback_note": "great senior role"},
+        {"direction": "lower", "note": "too junior"},
+        {"direction": "higher", "note": "great senior role, should have matched"},
     ]
     propose_criteria(client, "llama3.2", _SCENARIO, _EXISTING, notes)
     call_args = client.chat.completions.create.call_args
     user_content = call_args.kwargs["messages"][1]["content"]
-    assert "[REJECTED] too junior" in user_content
-    assert "[ACCEPTED] great senior role" in user_content
+    assert "[SHOULD SCORE LOWER] too junior" in user_content
+    assert "[SHOULD SCORE HIGHER] great senior role, should have matched" in user_content
 
 
 def test_propose_criteria_uses_zero_temperature():

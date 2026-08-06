@@ -23,21 +23,26 @@
     <section aria-label="Summary">{{ job.summary | markdown }}</section>
   {% endif %}
   {% if job_scores %}
-    <section class="score-box score-compare" aria-label="Scenario score comparison">
-      <div class="score-tabs">
-        {% for js in job_scores %}
-          <input type="radio" id="score-tab-{{ job.id }}-{{ js.scenario_id }}" name="score-tab-{{ job.id }}" class="score-tab-input" {% if js.scenario_id == job.best_scenario_id %}checked{% endif %}>
-          <label for="score-tab-{{ job.id }}-{{ js.scenario_id }}" class="score-tab-card">
-            {% if js.scenario_boosted %}<span title="Boosted scenario">⚡</span>{% endif %}
-            <span class="tag">{{ js.scenario_name }}</span>
-            {% if js.relevance_score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-            {% elif js.relevance_score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-            {% else %}<span class="score-badge score-low">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-            {% endif %}
-          </label>
-          <div class="score-tab-panel">{{ js.score_reasoning | markdown }}</div>
-        {% endfor %}
-      </div>
+    {% include "jobs/_score_tabs.html" %}
+  {% endif %}
+  {% if job.passed_gate_count %}
+    <section class="score-box fit-scorecard" aria-label="Fit scorecard">
+      {% if job.fit_score is not none %}
+        <dl class="fit-scorecard-grid">
+          <dt>Interest</dt>
+          <dd>
+            <span class="score-badge {% if job.interest_score >= 0.7 %}score-high{% elif job.interest_score >= 0.4 %}score-mid{% else %}score-low{% endif %}">{{ "%.0f"|format(job.interest_score * 100) }}%</span>
+            {{ job.interest_reasoning | markdown }}
+          </dd>
+          <dt>Attainability</dt>
+          <dd>
+            <span class="score-badge {% if job.attainability_score >= 0.7 %}score-high{% elif job.attainability_score >= 0.4 %}score-mid{% else %}score-low{% endif %}">{{ "%.0f"|format(job.attainability_score * 100) }}%</span>
+            {{ job.attainability_reasoning | markdown }}
+          </dd>
+        </dl>
+      {% else %}
+        <p>Not yet assessed.</p>
+      {% endif %}
     </section>
   {% endif %}
   <form class="feedback-form" style="margin-top:0.75rem;"
@@ -45,14 +50,7 @@
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
     <label>Note (optional):
-      <textarea name="note" placeholder="Why accepting/rejecting? What should change?"></textarea>
-    </label>
-    <label>Scenario (best fit shown, change if needed):
-      <select name="feedback_scenario_id" required>
-        {% for s in scenarios %}
-          <option value="{{ s.id }}" {% if s.id == job.best_scenario_id %}selected{% endif %}>{{ s.name }}</option>
-        {% endfor %}
-      </select>
+      <textarea name="note" placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
     </label>
     <div class="actions" role="group" aria-label="Decision">
       <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import logging
 import sqlite3
-from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
@@ -165,11 +164,11 @@ def update_scenario(
     request: Request,
     name: str = Form(...),
     description: str = Form(""),
-    boosted: Optional[str] = Form(None),
+    gate_threshold: float = Form(0.7),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     _get_scenario_or_404(conn, scenario_id)
-    q.update_scenario(conn, scenario_id, name=name, description=description, boosted=boosted is not None)
+    q.update_scenario(conn, scenario_id, name=name, description=description, gate_threshold=gate_threshold)
     scenario = q.get_scenario(conn, scenario_id)
     return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
 
@@ -279,7 +278,7 @@ async def accept_proposals(
         i += 1
     # The whole batch was reviewed in one go, regardless of which individual
     # rows were applied vs skipped, so its feedback is fully handled now.
-    q.mark_feedback_handled(conn, _parse_job_ids(form.get("feedback_job_ids")))
+    q.mark_feedback_handled(conn, scenario_id, _parse_job_ids(form.get("feedback_job_ids")))
     criteria = q.get_criteria(conn, scenario_id)
     html = templates.get_template("scenarios/_criteria.html").render(
         request=request, criteria=criteria, scenario_id=scenario_id

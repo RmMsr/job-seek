@@ -2,7 +2,7 @@
 {% block title %}Profile — Job Seek{% endblock %}
 {% block content %}
 <h1>Profile</h1>
-{% if saved %}<div style="padding:0.5rem; background:#d4edda; border-radius:4px; margin-bottom:1rem;">Saved.</div>{% endif %}
+{% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
 <form method="post" action="/profile">
   <label>Your skills, interests, and constraints (markdown supported):<br>
     <textarea name="content" style="width:100%; min-height:300px; font-family:monospace;">{{ content }}</textarea>
@@ -10,4 +10,12 @@
   <br>
   <button type="submit" class="btn">Save</button>
 </form>
+<div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid #dee2e6;">
+  <button type="button" class="btn" data-progress-url="/profile/reassess-fit"
+    data-progress-display="#reassess-progress"
+    title="Recompute the interest/attainability scorecard for every job that already passed a scenario gate but has a stale or missing fit score.">
+    Recompute fit scores
+  </button>
+  <div class="reset-progress" id="reassess-progress" aria-live="polite"></div>
+</div>
 {% endblock %}

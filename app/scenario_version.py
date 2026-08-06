@@ -7,3 +7,7 @@ def compute_version_hash(scenario: dict, criteria: list[dict]) -> str:
     for c in sorted(criteria, key=lambda c: (c["weight"], c["text"])):
         parts.append(f"{c['weight']}:{c['text']}")
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def compute_profile_hash(profile: str) -> str:
+    return hashlib.sha256(profile.encode("utf-8")).hexdigest()

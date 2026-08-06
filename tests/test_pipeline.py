@@ -34,15 +34,19 @@ def _drain(gen):
         return messages, stop.value
 
 
-def _mock_client(classify_resp, summarize_resp, evaluate_resp):
+def _mock_client(classify_resp, summarize_resp, evaluate_resp,
+                  assess_fit_resp='{"interest": 0.8, "interest_reasoning": "Good fit", '
+                                  '"attainability": 0.7, "attainability_reasoning": "Close match"}'):
     client = MagicMock()
     def create(**kwargs):
         system = kwargs["messages"][0]["content"].lower()
         choice = MagicMock()
         if "you classify" in system:
             choice.message.content = classify_resp
-        elif "you evaluate" in system:
+        elif "you screen" in system:
             choice.message.content = evaluate_resp
+        elif "you assess" in system:
+            choice.message.content = assess_fit_resp
         else:
             choice.message.content = summarize_resp
         return MagicMock(choices=[choice])
@@ -224,8 +228,46 @@ def test_run_fetch_with_no_scenarios_still_summarizes(conn):
     job = q.get_jobs(conn)[0]
     assert job["content_type"] == "job_posting"
     assert job["summary"] == "Good ML role"
-    assert job["best_score"] is None
+    assert job["fit_score"] is None
     assert not any("Scored" in m for m in messages)
+
+
+def test_run_fetch_runs_stage_two_once_when_gate_passes(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>hi</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',  # 0.9 >= default gate_threshold 0.7
+    )
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, _ = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["interest_score"] == pytest.approx(0.8)
+    assert job["attainability_score"] == pytest.approx(0.7)
+    assert job["fit_score"] == pytest.approx(0.75)
+    assert job["profile_version_hash"]
+    assert sum("Fit" in m for m in messages) == 1
+
+
+def test_run_fetch_skips_stage_two_when_gate_not_passed(conn, source):
+    q.update_scenario(conn, q.get_scenarios(conn)[0]["id"], name="Remote ML", description="", gate_threshold=0.95)
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>hi</p>")]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',  # 0.9 < 0.95, gate fails
+    )
+
+    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, _ = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["fit_score"] is None
+    assert not any("Fit" in m for m in messages)
 
 
 def test_run_fetch_stores_ai_title_and_headline(conn, source):
@@ -316,3 +358,57 @@ def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
     job = q.get_jobs(conn)[0]
     assert job["title"] == "scraped title"
     assert job["headline"] == ""
+
+
+from app.pipeline import run_reassess_fit
+
+
+def test_run_reassess_fit_updates_gate_passed_jobs(conn, source):
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Good role")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "great", "hash1")  # passes default 0.7 gate
+
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"interest": 0.8, "interest_reasoning": "a", "attainability": 0.6, "attainability_reasoning": "b"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+
+    messages, updated_count = _drain(run_reassess_fit(conn, client, "llama3.2"))
+
+    assert updated_count == 1
+    job = q.get_job(conn, jid)
+    assert job["interest_score"] == pytest.approx(0.8)
+    assert job["fit_score"] == pytest.approx(0.7)
+    assert any("Recomputing fit scores for 1 job" in m for m in messages)
+
+
+def test_run_reassess_fit_skips_jobs_below_gate(conn, source):
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Good role")
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "weak", "hash1")  # below default 0.7 gate
+
+    client = MagicMock()
+    _drain(run_reassess_fit(conn, client, "llama3.2"))
+
+    assert client.chat.completions.create.call_count == 0
+    assert q.get_job(conn, jid)["fit_score"] is None
+
+
+def test_run_reassess_fit_skips_already_current_profile_hash(conn, source):
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Good role")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "great", "hash1")
+
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"interest": 0.8, "interest_reasoning": "a", "attainability": 0.6, "attainability_reasoning": "b"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+
+    _drain(run_reassess_fit(conn, client, "llama3.2"))  # first pass: assesses
+    messages, updated_count = _drain(run_reassess_fit(conn, client, "llama3.2"))  # second pass: profile unchanged
+
+    assert updated_count == 0
+    assert "skipping 1 already current" in "".join(messages)

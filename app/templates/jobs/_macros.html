@@ -1,31 +1,24 @@
-{% macro score_scenario_fields(job) %}
-{% if job.best_score is not none %}
-{% set score = job.best_score %}
-<dt class="sr-only">Score</dt>
+{% macro fit_badge_fields(job) %}
+{% if job.fit_score is not none %}
+<dt class="sr-only">Fit score</dt>
 <dd>
-  {% if score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(score * 100) }}%</span>
-  {% elif score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(score * 100) }}%</span>
-  {% else %}<span class="score-badge score-low">{{ "%.0f"|format(score * 100) }}%</span>
+  {% if job.fit_score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+  {% elif job.fit_score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+  {% else %}<span class="score-badge score-low">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
   {% endif %}
 </dd>
-<dt class="sr-only">Scenario</dt>
-<dd><span class="tag">{{ job.best_scenario_name }}</span></dd>
 {% endif %}
-{% endmacro %}
-
-{% macro score_scenario(job) %}
-{% if job.best_score is not none %}
-<dl class="job-tags">{{ score_scenario_fields(job) }}</dl>
+{% if job.passed_scenario_names %}
+<dt class="sr-only">Matched scenarios</dt>
+{% for name in job.passed_scenario_names.split(', ') %}
+<dd><span class="tag">{{ name }}</span></dd>
+{% endfor %}
 {% endif %}
 {% endmacro %}
 
 {% macro meta_tags(job) %}
 <dl class="job-tags">
-  {{ score_scenario_fields(job) }}
-  {% if job.feedback_scenario_id and job.feedback_scenario_id != job.best_scenario_id %}
-  <dt class="sr-only">Feedback scenario</dt>
-  <dd><span class="tag tag-feedback">→ {{ job.feedback_scenario_name }}</span></dd>
-  {% endif %}
+  {{ fit_badge_fields(job) }}
   <dt class="sr-only">Content type</dt>
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   <dt class="sr-only">Source</dt>

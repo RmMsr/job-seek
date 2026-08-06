@@ -46,68 +46,35 @@ def test_update_scenario(conn):
     assert scenarios[sid]["description"] == "new description"
 
 
-def test_update_scenario_persists_boosted(conn):
+def test_update_scenario_persists_gate_threshold(conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
-    q.update_scenario(conn, sid, name="ai_expert", description="fallback", boosted=True)
+    q.update_scenario(conn, sid, name="ai_expert", description="fallback", gate_threshold=0.5)
     scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
-    assert scenario["boosted"] == 1
+    assert scenario["gate_threshold"] == pytest.approx(0.5)
 
 
-def test_update_scenario_boosted_defaults_false(conn):
+def test_update_scenario_gate_threshold_defaults_to_0_7(conn):
     sid = q.insert_scenario(conn, "A", "")
     q.update_scenario(conn, sid, name="A", description="")
     scenario = {s["id"]: s for s in q.get_scenarios(conn)}[sid]
-    assert scenario["boosted"] == 0
-
-
-def test_boosted_scenario_wins_within_bonus_margin(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
-    boosted_id = q.insert_scenario(conn, "ai_expert", "")
-    q.update_scenario(conn, boosted_id, name="ai_expert", description="", boosted=True)
-    specific_id = q.insert_scenario(conn, "Backend Roles", "")
-    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.upsert_job_score(conn, jid, boosted_id, 0.5, "generic fit", "h1")
-    q.upsert_job_score(conn, jid, specific_id, 0.6, "decent fit", "h2")  # 0.6 < 0.5 + 0.2
-
-    job = q.get_job(conn, jid)
-
-    assert job["best_scenario_id"] == boosted_id
-    assert job["best_score"] == pytest.approx(0.5)  # raw score, not 0.5 + bonus
-    assert job["best_score_reasoning"] == "generic fit"
-
-
-def test_specific_scenario_wins_when_it_clears_bonus_margin(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
-    boosted_id = q.insert_scenario(conn, "ai_expert", "")
-    q.update_scenario(conn, boosted_id, name="ai_expert", description="", boosted=True)
-    specific_id = q.insert_scenario(conn, "Backend Roles", "")
-    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.upsert_job_score(conn, jid, boosted_id, 0.5, "generic fit", "h1")
-    q.upsert_job_score(conn, jid, specific_id, 0.75, "strong fit", "h2")  # 0.75 > 0.5 + 0.2
-
-    job = q.get_job(conn, jid)
-
-    assert job["best_scenario_id"] == specific_id
-    assert job["best_score"] == pytest.approx(0.75)
+    assert scenario["gate_threshold"] == pytest.approx(0.7)
 
 
 def test_get_job_scores_returns_all_scenarios_ordered_by_raw_score(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
-    q.update_scenario(conn, scenario_b, name="B", description="", boosted=True)
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_a, 0.7, "a reasoning", "h1")
     q.upsert_job_score(conn, jid, scenario_b, 0.4, "b reasoning", "h2")
 
     scores = q.get_job_scores(conn, jid)
 
-    assert [s["scenario_id"] for s in scores] == [scenario_a, scenario_b]  # raw score order, not boosted order
+    assert [s["scenario_id"] for s in scores] == [scenario_a, scenario_b]  # raw score order
     assert scores[0]["scenario_name"] == "A"
-    assert scores[0]["scenario_boosted"] == 0
+    assert scores[0]["scenario_gate_threshold"] == pytest.approx(0.7)
     assert scores[0]["score_reasoning"] == "a reasoning"
     assert scores[1]["scenario_name"] == "B"
-    assert scores[1]["scenario_boosted"] == 1
 
 
 def test_get_job_scores_empty_for_unscored_job(conn):
@@ -225,7 +192,7 @@ def test_update_job_pipeline(conn):
     job = q.get_job(conn, jid)
     assert job["content_type"] == "job_posting"
     assert job["summary"] == "Good role"
-    assert job["best_score"] is None
+    assert job["fit_score"] is None
 
 
 def test_update_job_pipeline_sets_title_and_headline(conn):
@@ -266,15 +233,6 @@ def test_update_job_feedback(conn):
     assert job["feedback_note"] == "Great match"
 
 
-def test_update_job_feedback_persists_scenario_id(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
-    scenario_id = q.insert_scenario(conn, "A", "")
-    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.update_job_feedback(conn, jid, "accepted", "good fit", feedback_scenario_id=scenario_id)
-    job = q.get_job(conn, jid)
-    assert job["feedback_scenario_id"] == scenario_id
-
-
 def test_reset_job_clears_pipeline_output_and_scores(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -284,7 +242,9 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
         title="AI Title", headline="hook", summary="summary text",
     )
     q.upsert_job_score(conn, jid, scenario_id, 0.8, "great", "h1")
-    q.update_job_feedback(conn, jid, "accepted", "note", feedback_scenario_id=scenario_id)
+    q.update_job_fit(conn, jid, 0.7, "good interest", 0.6, "some gaps", "phash1")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "shouldn't count", "lower")
+    q.update_job_feedback(conn, jid, "accepted", "note")
 
     q.reset_job(conn, jid)
 
@@ -295,12 +255,15 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     assert job["summary"] == ""
     assert job["headline"] == ""
     assert job["feedback_note"] is None
-    assert job["feedback_scenario_id"] is None
     assert job["raw_text"] == "r"
+    assert job["interest_score"] is None
+    assert job["fit_score"] is None
+    assert job["profile_version_hash"] is None
     assert q.get_job_scores(conn, jid) == []
+    assert q.get_recent_feedback_job_ids(conn, scenario_id) == []
 
 
-def test_get_job_exposes_best_scenario_id(conn):
+def test_get_job_exposes_top_passed_scenario_id(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
@@ -308,7 +271,16 @@ def test_get_job_exposes_best_scenario_id(conn):
     q.upsert_job_score(conn, jid, scenario_a, 0.4, "ok", "h1")
     q.upsert_job_score(conn, jid, scenario_b, 0.8, "great", "h2")
     job = q.get_job(conn, jid)
-    assert job["best_scenario_id"] == scenario_b
+    assert job["top_passed_scenario_id"] == scenario_b
+    assert job["top_passed_scenario_name"] == "B"
+
+
+def test_get_jobs_works_without_feedback_scenario_id_column(conn):
+    # Regression guard: _GATE_JOIN used to join on jobs.feedback_scenario_id,
+    # which Task 1 dropped — this must not raise sqlite3.OperationalError.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    assert q.get_jobs(conn) is not None
 
 
 def test_get_jobs_filter_by_status(conn):
@@ -337,24 +309,18 @@ def test_get_recent_feedback_notes(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
     notes = q.get_recent_feedback_notes(conn, scenario_id)
-    assert {"status": "rejected", "feedback_note": "too junior"} in notes
+    assert {"direction": "lower", "note": "too junior"} in notes
 
 
-def test_get_recent_feedback_notes_reports_accepted_status(conn):
-    # Same note text means opposite things depending on outcome, so the
-    # status must reflect what was actually recorded, not always "rejected".
+def test_get_recent_feedback_notes_reports_direction(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "accepted", "great senior role", feedback_scenario_id=scenario_id)
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "should have counted", "higher")
     notes = q.get_recent_feedback_notes(conn, scenario_id)
-    assert notes == [{"status": "accepted", "feedback_note": "great senior role"}]
+    assert notes == [{"direction": "higher", "note": "should have counted"}]
 
 
 def test_get_recent_feedback_notes_scoped_to_scenario(conn):
@@ -362,37 +328,27 @@ def test_get_recent_feedback_notes_scoped_to_scenario(conn):
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_a, 0.5, "reasoning", "hash1")
-    q.upsert_job_score(conn, j1, scenario_b, 0.9, "reasoning", "hash2")  # scores higher for B...
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_a)  # ...but tagged to A
-    assert q.get_recent_feedback_notes(conn, scenario_a) == [{"status": "rejected", "feedback_note": "too junior"}]
+    q.upsert_scenario_feedback(conn, j1, scenario_a, "too junior", "lower")
+    assert q.get_recent_feedback_notes(conn, scenario_a) == [{"direction": "lower", "note": "too junior"}]
     assert q.get_recent_feedback_notes(conn, scenario_b) == []
 
 
-def test_get_recent_feedback_notes_excludes_invalid_status(conn):
+def test_get_recent_feedback_notes_excludes_undirected_comments(conn):
+    # A note left with no direction chosen is pure commentary — propose_criteria
+    # has no polarity to act on, so it must not see it.
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
-    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "invalid", "expired listing", feedback_scenario_id=scenario_id)
-    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j2, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j2, scenario_id, 0.5, "reasoning", "hash2")
-    q.update_job_feedback(conn, j2, "rejected", "too junior", feedback_scenario_id=scenario_id)
-    notes = q.get_recent_feedback_notes(conn, scenario_id)
-    assert notes == [{"status": "rejected", "feedback_note": "too junior"}]
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "just a thought", None)
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
 def test_get_recent_feedback_notes_excludes_handled(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
-    q.mark_feedback_handled(conn, [j1])
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
+    q.mark_feedback_handled(conn, scenario_id, [j1])
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
@@ -400,37 +356,34 @@ def test_get_recent_feedback_job_ids(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
     assert q.get_recent_feedback_job_ids(conn, scenario_id) == [j1]
 
 
-def test_mark_feedback_handled_excludes_from_future_calls(conn):
+def test_mark_feedback_handled_scoped_to_one_scenario(conn):
+    # A job can carry independent gate feedback for two scenarios — handling
+    # one scenario's proposals must not clear the other's pending feedback.
     source_id = q.insert_source(conn, "s", "http://x", "http")
-    scenario_id = q.insert_scenario(conn, "A", "")
+    scenario_a = q.insert_scenario(conn, "A", "")
+    scenario_b = q.insert_scenario(conn, "B", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
-    q.mark_feedback_handled(conn, [j1])
-    assert q.get_recent_feedback_job_ids(conn, scenario_id) == []
+    q.upsert_scenario_feedback(conn, j1, scenario_a, "too junior", "lower")
+    q.upsert_scenario_feedback(conn, j1, scenario_b, "should count here too", "higher")
+    q.mark_feedback_handled(conn, scenario_a, [j1])
+    assert q.get_recent_feedback_job_ids(conn, scenario_a) == []
+    assert q.get_recent_feedback_job_ids(conn, scenario_b) == [j1]
 
 
-def test_update_job_feedback_resets_handled_state(conn):
-    # Re-submitting feedback on a job is fresh input the LLM hasn't seen yet,
+def test_upsert_scenario_feedback_resets_handled_state(conn):
+    # Re-saving feedback on a job is fresh input the LLM hasn't seen yet,
     # even if its prior feedback had already been handled.
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
-    q.update_job_pipeline(conn, j1, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, j1, scenario_id, 0.5, "reasoning", "hash1")
-    q.update_job_feedback(conn, j1, "rejected", "too junior", feedback_scenario_id=scenario_id)
-    q.mark_feedback_handled(conn, [j1])
-    q.update_job_feedback(conn, j1, "rejected", "actually, too senior", feedback_scenario_id=scenario_id)
-    assert q.get_recent_feedback_notes(conn, scenario_id) == [
-        {"status": "rejected", "feedback_note": "actually, too senior"}
-    ]
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
+    q.mark_feedback_handled(conn, scenario_id, [j1])
+    q.upsert_scenario_feedback(conn, j1, scenario_id, "actually, too senior", "lower")
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "lower", "note": "actually, too senior"}]
 
 
 def test_fetch_run_lifecycle(conn):
@@ -472,44 +425,186 @@ def test_get_job_score_hashes_scoped_to_scenario(conn):
     assert q.get_job_score_hashes(conn, scenario_a) == {j1: "hash1"}
 
 
-def test_get_jobs_shows_best_score_across_scenarios(conn):
+def test_get_jobs_reports_all_passed_scenario_names(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
-    q.upsert_job_score(conn, jid, scenario_a, 0.3, "low fit", "hash1")
-    q.upsert_job_score(conn, jid, scenario_b, 0.8, "great fit", "hash2")
+    q.upsert_job_score(conn, jid, scenario_a, 0.8, "great fit", "hash1")
+    q.upsert_job_score(conn, jid, scenario_b, 0.9, "even better", "hash2")
     job = q.get_jobs(conn)[0]
-    assert job["best_score"] == pytest.approx(0.8)
-    assert job["best_score_reasoning"] == "great fit"
-    assert job["best_scenario_name"] == "B"
+    assert job["passed_gate_count"] == 2
+    assert set(job["passed_scenario_names"].split(", ")) == {"A", "B"}
 
 
-def test_get_job_shows_best_score(conn):
+def test_get_jobs_excludes_scenario_below_its_own_gate_threshold(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
-    scenario_id = q.insert_scenario(conn, "A", "")
+    strict = q.insert_scenario(conn, "Strict", "")
+    q.update_scenario(conn, strict, name="Strict", description="", gate_threshold=0.9)
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    q.upsert_job_score(conn, jid, scenario_id, 0.6, "decent", "hash1")
-    job = q.get_job(conn, jid)
-    assert job["best_score"] == pytest.approx(0.6)
-    assert job["best_scenario_name"] == "A"
+    q.upsert_job_score(conn, jid, strict, 0.8, "close but no", "hash1")  # below 0.9
+    job = q.get_jobs(conn)[0]
+    assert job["passed_gate_count"] is None
 
 
-def test_get_jobs_orders_by_best_score_desc(conn):
+def test_get_jobs_gate_passed_only_excludes_below_threshold(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    below = q.insert_job(conn, source_id=source_id, url="http://job/below", title="Below", company="C", raw_text="r")
+    above = q.insert_job(conn, source_id=source_id, url="http://job/above", title="Above", company="C", raw_text="r")
+    q.upsert_job_score(conn, below, scenario_id, 0.5, "", "hash1")
+    q.upsert_job_score(conn, above, scenario_id, 0.9, "", "hash2")
+
+    all_jobs = q.get_jobs(conn)
+    assert {j["title"] for j in all_jobs} == {"Below", "Above"}
+
+    passed_only = q.get_jobs(conn, gate_passed_only=True)
+    assert [j["title"] for j in passed_only] == ["Above"]
+
+
+def test_get_jobs_gate_passed_only_keeps_never_scored_jobs(conn):
+    # A job with zero job_scores rows (e.g. no scenarios existed at fetch
+    # time) hasn't failed a gate — it was never gated at all — so it must
+    # stay visible, unlike a job that was scored and failed every scenario.
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_id = q.insert_scenario(conn, "A", "")
+    scored_and_failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
+    never_scored = q.insert_job(conn, source_id=source_id, url="http://job/unscored", title="Unscored", company="C", raw_text="r")
+    q.upsert_job_score(conn, scored_and_failed, scenario_id, 0.5, "", "hash1")  # below default 0.7
+
+    passed_only = q.get_jobs(conn, gate_passed_only=True)
+
+    assert [j["title"] for j in passed_only] == ["Unscored"]
+
+
+def test_get_jobs_job_with_no_score_has_no_passed_scenarios(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    job = q.get_jobs(conn)[0]
+    assert job["passed_gate_count"] is None
+    assert job["passed_scenario_names"] is None
+    assert job["top_passed_scenario_id"] is None
+
+
+def test_update_job_fit_sets_scores_and_computed_fit_score(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_fit(conn, jid, 0.8, "Strong domain fit", 0.6, "Slightly junior", "phash1")
+    job = q.get_job(conn, jid)
+    assert job["interest_score"] == pytest.approx(0.8)
+    assert job["interest_reasoning"] == "Strong domain fit"
+    assert job["attainability_score"] == pytest.approx(0.6)
+    assert job["attainability_reasoning"] == "Slightly junior"
+    assert job["fit_score"] == pytest.approx(0.7)  # average
+    assert job["profile_version_hash"] == "phash1"
+
+
+def test_get_jobs_orders_by_fit_score_desc(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
     low = q.insert_job(conn, source_id=source_id, url="http://job/low", title="Low", company="C", raw_text="r")
     high = q.insert_job(conn, source_id=source_id, url="http://job/high", title="High", company="C", raw_text="r")
-    q.upsert_job_score(conn, low, scenario_id, 0.2, "", "hash1")
-    q.upsert_job_score(conn, high, scenario_id, 0.9, "", "hash1")
+    q.update_job_fit(conn, low, 0.2, "", 0.2, "", "h")
+    q.update_job_fit(conn, high, 0.9, "", 0.9, "", "h")
     jobs = q.get_jobs(conn)
     assert [j["title"] for j in jobs] == ["High", "Low"]
 
 
-def test_get_jobs_job_with_no_score_has_none(conn):
+def test_upsert_scenario_feedback_inserts_and_updates(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
-    q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
-    job = q.get_jobs(conn)[0]
-    assert job["best_score"] is None
-    assert job["best_scenario_name"] is None
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too broad", "lower")
+    scores = q.get_job_scores(conn, jid)
+    # No job_scores row exists yet — get_job_scores only surfaces scored scenarios —
+    # so verify via get_recent_feedback_notes instead, which reads scenario_feedback directly.
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "lower", "note": "too broad"}]
+
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "actually fine", "higher")
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "higher", "note": "actually fine"}]
+
+
+def test_upsert_scenario_feedback_deletes_when_both_blank(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "note", "higher")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "", None)
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
+
+
+def test_upsert_scenario_feedback_keeps_row_with_only_note(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "just a comment", None)
+    row = conn.execute(
+        "SELECT note, direction FROM scenario_feedback WHERE job_id = ? AND scenario_id = ?", (jid, scenario_id)
+    ).fetchone()
+    assert row["note"] == "just a comment"
+    assert row["direction"] is None
+
+
+def test_upsert_scenario_feedback_keeps_row_with_only_direction(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "", "higher")
+    row = conn.execute(
+        "SELECT note, direction FROM scenario_feedback WHERE job_id = ? AND scenario_id = ?", (jid, scenario_id)
+    ).fetchone()
+    assert row["note"] == ""
+    assert row["direction"] == "higher"
+
+
+def test_upsert_scenario_feedback_blank_note_preserves_existing_note(conn):
+    # The combined multi-scenario feedback form clears note textareas after
+    # a save, so a later submit touching only a different scenario's fields
+    # must not wipe this one's previously-saved note just because its box
+    # is now visually blank.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "", "lower")
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "lower", "note": "too junior"}]
+
+
+def test_upsert_scenario_feedback_blank_note_with_new_direction_preserves_note(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "", "higher")
+    assert q.get_recent_feedback_notes(conn, scenario_id) == [{"direction": "higher", "note": "too junior"}]
+
+
+def test_upsert_scenario_feedback_resubmitting_unchanged_values_does_not_reset_handled_state(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
+    q.mark_feedback_handled(conn, scenario_id, [jid])
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")  # identical resubmission
+    assert q.get_recent_feedback_notes(conn, scenario_id) == []
+
+
+def test_get_job_scores_surfaces_feedback_note_and_direction(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "too strict", "higher")
+    scores = q.get_job_scores(conn, jid)
+    assert scores[0]["feedback_note"] == "too strict"
+    assert scores[0]["feedback_direction"] == "higher"
+
+
+def test_get_job_scores_feedback_fields_none_when_no_feedback(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
+    scores = q.get_job_scores(conn, jid)
+    assert scores[0]["feedback_note"] is None
+    assert scores[0]["feedback_direction"] is None
