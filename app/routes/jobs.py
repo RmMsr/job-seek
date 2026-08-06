@@ -75,7 +75,8 @@ def job_feedback(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.update_job_feedback(conn, job_id, status, note)
-    return HTMLResponse(content="", status_code=200)
+    counts = q.get_job_counts(conn)
+    return templates.TemplateResponse(request, "jobs/_counts_oob.html", {"counts": counts})
 
 
 @router.post("/jobs/{job_id}/scenario-feedback", response_class=HTMLResponse)

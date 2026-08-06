@@ -345,5 +345,16 @@ document.addEventListener('click', function (e) {
   }
 });
   </script>
+  <script>
+document.body.addEventListener('click', function (e) {
+  var btn = e.target.closest('.feedback-form .actions button[type="submit"]');
+  if (!btn) return;
+  var row = btn.closest('.job-row');
+  var scenarioForm = row && row.querySelector('.scenario-feedback-form');
+  if (scenarioForm && window.htmx) {
+    htmx.trigger(scenarioForm, 'submit');
+  }
+});
+  </script>
 </body>
 </html>

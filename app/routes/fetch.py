@@ -20,10 +20,11 @@ def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         sid = run["source_id"]
         if sid not in runs_by_source:
             runs_by_source[sid] = run
+    stats_by_source = q.get_fetch_stats_by_source(conn)
     return templates.TemplateResponse(
         request,
         "fetch/panel.html",
-        {"sources": sources, "runs_by_source": runs_by_source},
+        {"sources": sources, "runs_by_source": runs_by_source, "stats_by_source": stats_by_source},
     )
 
 

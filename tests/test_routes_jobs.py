@@ -60,11 +60,11 @@ def test_job_list_filter_bar_shows_counts(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert "New (1)" in resp.text
-    assert "Accepted (0)" in resp.text
-    assert "Rejected (0)" in resp.text
-    assert "Invalid (0)" in resp.text
-    assert "Leads (0)" in resp.text
+    assert '<span id="count-new">1</span>' in resp.text
+    assert '<span id="count-accepted">0</span>' in resp.text
+    assert '<span id="count-rejected">0</span>' in resp.text
+    assert '<span id="count-invalid">0</span>' in resp.text
+    assert '<span id="count-lead">0</span>' in resp.text
 
 
 def test_job_expand(client, conn):
@@ -606,7 +606,16 @@ def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
 
     resp = client.get("/jobs")
 
-    assert "Not relevant (1)" in resp.text
+    assert '<span id="count-not_relevant">1</span>' in resp.text
     assert 'href="/jobs?status=not_relevant"' in resp.text
     assert "Show filtered" not in resp.text
     assert 'name="show_filtered_filter"' not in resp.text
+
+
+def test_job_feedback_updates_counts_oob(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
+    assert resp.status_code == 200
+    assert '<span id="count-new" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span id="count-rejected" hx-swap-oob="true">0</span>' in resp.text

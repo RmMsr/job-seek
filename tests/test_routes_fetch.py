@@ -39,3 +39,20 @@ def test_post_fetch_streams_progress(client, conn):
 def test_post_fetch_unknown_source_returns_404(client, conn):
     resp = client.post("/fetch/999")
     assert resp.status_code == 404
+
+
+def test_fetch_panel_shows_lifetime_stats(client, conn):
+    sid = _seed(conn)
+    run = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run, jobs_found=3, jobs_new=2)
+    resp = client.get("/fetch")
+    assert resp.status_code == 200
+    assert "2 new" in resp.text
+    assert "1 run" in resp.text
+
+
+def test_fetch_panel_does_not_repeat_source_url(client, conn):
+    _seed(conn)
+    resp = client.get("/fetch")
+    assert resp.status_code == 200
+    assert "https://finn.no" not in resp.text

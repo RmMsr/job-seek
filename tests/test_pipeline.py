@@ -312,7 +312,7 @@ def test_run_reprocess_job_reruns_full_pipeline(conn, source):
 
     updated = q.get_job(conn, jid)
     assert updated["status"] == "new"
-    assert updated["feedback_note"] is None
+    assert updated["feedback_note"] == "not a fit"
     assert updated["simplified_content"] != "stale simplified"
     assert updated["summary"] == "Good ML role"
     assert updated["headline"] == "Great remote ML role"

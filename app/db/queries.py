@@ -283,7 +283,6 @@ def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
             simplified_content = '',
             summary = '',
             headline = '',
-            feedback_note = NULL,
             feedback_handled_at = NULL,
             interest_score = NULL,
             interest_reasoning = NULL,
@@ -508,6 +507,21 @@ def get_recent_fetch_runs(conn: sqlite3.Connection) -> list[dict]:
             "ORDER BY fr.started_at DESC LIMIT 50"
         ).fetchall()
     )
+
+
+def get_fetch_stats_by_source(conn: sqlite3.Connection) -> dict[int, dict]:
+    rows = conn.execute(
+        """
+        SELECT source_id,
+               COUNT(*) AS run_count,
+               SUM(jobs_new) AS total_new,
+               SUM(jobs_found) AS total_found,
+               MAX(CASE WHEN error IS NULL THEN completed_at END) AS last_success_at
+        FROM fetch_runs
+        GROUP BY source_id
+        """
+    ).fetchall()
+    return {row["source_id"]: dict(row) for row in rows}
 
 
 def has_completed_fetch_run(conn: sqlite3.Connection) -> bool:

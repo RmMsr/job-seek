@@ -254,7 +254,7 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     assert job["simplified_content"] == ""
     assert job["summary"] == ""
     assert job["headline"] == ""
-    assert job["feedback_note"] is None
+    assert job["feedback_note"] == "note"
     assert job["raw_text"] == "r"
     assert job["interest_score"] is None
     assert job["fit_score"] is None
@@ -814,3 +814,24 @@ def test_get_recent_feedback_counts_unhandled_matches_notes_row_count(conn):
     notes = q.get_recent_feedback_notes(conn, scenario_id)
 
     assert counts["unhandled_higher"] == len(notes) == 20  # capped
+
+
+def test_get_fetch_stats_by_source_aggregates_runs(conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    run1 = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run1, jobs_found=3, jobs_new=2)
+    run2 = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run2, jobs_found=1, jobs_new=0, error="boom")
+
+    stats = q.get_fetch_stats_by_source(conn)
+
+    assert stats[sid]["run_count"] == 2
+    assert stats[sid]["total_new"] == 2
+    assert stats[sid]["total_found"] == 4
+    assert stats[sid]["last_success_at"] is not None
+
+
+def test_get_fetch_stats_by_source_omits_sources_with_no_runs(conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    stats = q.get_fetch_stats_by_source(conn)
+    assert sid not in stats

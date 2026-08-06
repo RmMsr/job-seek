@@ -9,6 +9,7 @@
         <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Source</th>
         <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Last run</th>
         <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">New / Found</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Lifetime</th>
         <th style="padding:0.5rem; border-bottom:2px solid #dee2e6;"></th>
       </tr>
     </thead>
@@ -17,8 +18,7 @@
       {% set run = runs_by_source.get(source.id) %}
       <tr style="border-bottom:1px solid #eee;">
         <td style="padding:0.5rem;">
-          <strong>{{ source.name }}</strong><br>
-          <small>{{ source.url }}</small>
+          <strong>{{ source.name }}</strong>
         </td>
         <td style="padding:0.5rem;">
           {% if run %}{{ run.started_at }}{% else %}—{% endif %}
@@ -26,6 +26,15 @@
         </td>
         <td style="padding:0.5rem;">
           {% if run %}{{ run.jobs_new }} / {{ run.jobs_found }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:0.5rem;">
+          {% set stats = stats_by_source.get(source.id) %}
+          {% if stats %}
+            {{ stats.run_count }} run{{ 's' if stats.run_count != 1 else '' }}, {{ stats.total_new }} new
+            {% if stats.last_success_at %}<br><small>last success {{ stats.last_success_at }}</small>{% endif %}
+          {% else %}
+            —
+          {% endif %}
         </td>
         <td style="padding:0.5rem;">
           {% if source.enabled %}
