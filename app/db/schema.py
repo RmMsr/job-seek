@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     attainability_score REAL,
     attainability_reasoning TEXT,
     fit_score REAL,
-    profile_version_hash TEXT
+    profile_version_hash TEXT,
+    gate_override INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS job_scores (
@@ -237,6 +238,17 @@ def _migrate_jobs_add_fit_scorecard(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_add_gate_override(conn: sqlite3.Connection) -> None:
+    # Purely additive column, same shape as the headline/published_at migrations above.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "gate_override" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN gate_override INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def _migrate_scenarios_gate_threshold(conn: sqlite3.Connection) -> None:
     # Replaces "boosted" (best-match tie-break bonus, now removed entirely)
     # with "gate_threshold" (per-scenario cutoff for stage-1 visibility) —
@@ -260,4 +272,5 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_feedback_handled_at(conn)
     _migrate_jobs_add_fit_scorecard(conn)
     _migrate_jobs_drop_feedback_scenario_id(conn)
+    _migrate_jobs_add_gate_override(conn)
     _migrate_scenarios_gate_threshold(conn)

@@ -263,6 +263,27 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
 
 
+def test_reset_job_clears_gate_override(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.mark_job_gate_override(conn, jid)
+
+    q.reset_job(conn, jid)
+
+    job = q.get_job(conn, jid)
+    assert job["gate_override"] == 0
+
+
+def test_mark_job_gate_override_sets_flag(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+
+    q.mark_job_gate_override(conn, jid)
+
+    job = q.get_job(conn, jid)
+    assert job["gate_override"] == 1
+
+
 def test_get_job_exposes_top_passed_scenario_id(conn):
     source_id = q.insert_source(conn, "s", "http://x", "http")
     scenario_a = q.insert_scenario(conn, "A", "")
@@ -320,6 +341,20 @@ def test_get_job_counts_splits_new_from_not_relevant(conn):
     assert counts["new"] == 1
     assert counts["not_relevant"] == 1
     assert counts["new"] + counts["not_relevant"] == 2  # raw status='new' total
+
+
+def test_get_job_counts_excludes_overridden_job_from_not_relevant(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "", "hash1")
+    q.mark_job_gate_override(conn, jid)
+
+    counts = q.get_job_counts(conn)
+
+    assert counts["not_relevant"] == 0
+    assert counts["new"] == 1
 
 
 def test_get_recent_feedback_notes(conn):
@@ -606,6 +641,32 @@ def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):
     failed_only = q.get_jobs(conn, gate_status="failed")
 
     assert [j["title"] for j in failed_only] == ["Failed"]
+
+
+def test_get_jobs_gate_status_passed_includes_overridden_job_that_failed_score(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "", "hash1")
+    q.mark_job_gate_override(conn, jid)
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+
+    assert [j["title"] for j in passed_only] == ["Overridden"]
+
+
+def test_get_jobs_gate_status_failed_excludes_overridden_job(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "", "hash1")
+    q.mark_job_gate_override(conn, jid)
+
+    failed_only = q.get_jobs(conn, gate_status="failed")
+
+    assert failed_only == []
 
 
 def test_get_jobs_gate_status_failed_paired_with_job_posting_excludes_leads(conn):

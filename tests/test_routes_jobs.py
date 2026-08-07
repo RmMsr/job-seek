@@ -245,6 +245,41 @@ def test_job_expand_no_score_box_when_unscored(client, conn):
     assert 'class="score-box' not in resp.text
 
 
+def test_job_expand_shows_pass_as_new_button_when_gate_failed(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/pass-as-new"' in resp.text
+    assert "Pass as new" in resp.text
+
+
+def test_job_expand_omits_pass_as_new_button_when_gate_passed(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # scored 0.9, passes default 0.7 gate
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert "Pass as new" not in resp.text
+
+
+def test_job_expand_omits_pass_as_new_button_when_already_overridden(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+    q.mark_job_gate_override(conn, jid)
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert "Pass as new" not in resp.text
+
+
 def test_job_feedback_without_note_succeeds(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted"})
@@ -345,6 +380,32 @@ def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
     assert resp.text.count("Reprocessing") == 2
     assert q.get_job(conn, j1)["status"] == "new"
     assert q.get_job(conn, j2)["status"] == "new"
+
+
+def _fake_run_pass_as_new(conn, client, model, job, profile):
+    yield f"Bypassing gate threshold: {job['url']}"
+    q.mark_job_gate_override(conn, job["id"])
+    yield f"Fit 0.80/0.60: {job['url']}"
+
+
+def test_job_pass_as_new_streams_progress_and_marks_override(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+
+    with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
+        resp = client.post(f"/jobs/{jid}/pass-as-new")
+
+    assert resp.status_code == 200
+    assert "Bypassing gate threshold" in resp.text
+    assert q.get_job(conn, jid)["gate_override"] == 1
+
+
+def test_job_pass_as_new_unknown_job_returns_404(client, conn):
+    resp = client.post("/jobs/999/pass-as-new")
+    assert resp.status_code == 404
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):

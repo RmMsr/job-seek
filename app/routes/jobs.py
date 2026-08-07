@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
-from app.pipeline import run_reprocess_job
+from app.pipeline import run_reprocess_job, run_pass_as_new
 from app.template_env import templates
 
 router = APIRouter()
@@ -112,6 +112,29 @@ def job_reset(
 
     def stream():
         gen = run_reprocess_job(conn, client, model, job, scenarios, profile)
+        try:
+            while True:
+                yield next(gen) + "\n"
+        except StopIteration:
+            pass
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
+@router.post("/jobs/{job_id}/pass-as-new")
+def job_pass_as_new(
+    job_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    job = q.get_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    profile = q.get_profile(conn)
+
+    def stream():
+        gen = run_pass_as_new(conn, client, model, job, profile)
         try:
             while True:
                 yield next(gen) + "\n"

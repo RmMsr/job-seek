@@ -167,6 +167,27 @@ def run_reprocess_job(
     yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
 
 
+def run_pass_as_new(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job: dict,
+    profile: str,
+) -> Generator[str, None, None]:
+    q.mark_job_gate_override(conn, job["id"])
+    yield _progress(f"Bypassing gate threshold: {job['url']}")
+    result = assess_fit(client, model, profile, job["summary"])
+    q.update_job_fit(
+        conn, job["id"],
+        result["interest"], result["interest_reasoning"],
+        result["attainability"], result["attainability_reasoning"],
+        compute_profile_hash(profile),
+    )
+    yield _progress(
+        f"Fit {result['interest']:.2f}/{result['attainability']:.2f}: {job['url']}"
+    )
+
+
 def _eligible_for_reevaluation(conn: sqlite3.Connection, scenario: dict) -> tuple[list[dict], int, list[dict], str]:
     criteria = q.get_criteria(conn, scenario["id"])
     current_hash = compute_version_hash(scenario, criteria)

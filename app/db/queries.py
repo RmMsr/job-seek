@@ -289,12 +289,18 @@ def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
             attainability_score = NULL,
             attainability_reasoning = NULL,
             fit_score = NULL,
-            profile_version_hash = NULL
+            profile_version_hash = NULL,
+            gate_override = 0
         WHERE id = ?""",
         (job_id,),
     )
     conn.execute("DELETE FROM job_scores WHERE job_id = ?", (job_id,))
     conn.execute("DELETE FROM scenario_feedback WHERE job_id = ?", (job_id,))
+    conn.commit()
+
+
+def mark_job_gate_override(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute("UPDATE jobs SET gate_override = 1 WHERE id = ?", (job_id,))
     conn.commit()
 
 
@@ -358,11 +364,12 @@ def get_jobs(
     if gate_status == "passed":
         clauses.append(
             "(jobs.content_type != 'job_posting' OR jobs.content_type IS NULL "
-            "OR scored.scored_count IS NULL OR gate.passed_count > 0)"
+            "OR scored.scored_count IS NULL OR gate.passed_count > 0 OR jobs.gate_override = 1)"
         )
     elif gate_status == "failed":
         clauses.append(
-            "scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0)"
+            "scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0) "
+            "AND jobs.gate_override = 0"
         )
     sql = f"SELECT {_GATE_SELECT} {_GATE_JOIN}"
     if clauses:
@@ -384,6 +391,7 @@ def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
         WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
           AND scored.scored_count IS NOT NULL
           AND (gate.passed_count IS NULL OR gate.passed_count = 0)
+          AND jobs.gate_override = 0
         """
     ).fetchone()[0]
     counts["not_relevant"] = not_relevant

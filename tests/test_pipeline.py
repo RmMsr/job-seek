@@ -360,6 +360,35 @@ def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
     assert job["headline"] == ""
 
 
+from app.pipeline import run_pass_as_new
+
+
+def test_run_pass_as_new_marks_override_and_assesses_fit(conn, source):
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Good role")
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "weak", "hash1")  # below default 0.7 gate
+
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"interest": 0.8, "interest_reasoning": "a", "attainability": 0.6, "attainability_reasoning": "b"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+    profile = q.get_profile(conn)
+    job = q.get_job(conn, jid)
+
+    messages, _ = _drain(run_pass_as_new(conn, client, "llama3.2", job, profile))
+
+    updated = q.get_job(conn, jid)
+    assert updated["gate_override"] == 1
+    assert updated["interest_score"] == pytest.approx(0.8)
+    assert updated["fit_score"] == pytest.approx(0.7)
+    # Original gate score/reasoning must survive untouched.
+    score = q.get_job_score(conn, jid, scenario_id)
+    assert score["relevance_score"] == pytest.approx(0.2)
+    assert score["score_reasoning"] == "weak"
+    assert any("Fit 0.80/0.60" in m for m in messages)
+
+
 from app.pipeline import run_reassess_fit
 
 

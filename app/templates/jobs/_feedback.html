@@ -26,7 +26,7 @@
   {% if job_scores %}
     {% include "jobs/_score_tabs.html" %}
   {% endif %}
-  {% if job.passed_gate_count %}
+  {% if job.passed_gate_count or job.gate_override %}
     <section class="score-box fit-scorecard" aria-label="Fit scorecard">
       {% if job.fit_score is not none %}
         <dl class="fit-scorecard-grid">
@@ -61,6 +61,14 @@
   </form>
   <details class="job-advanced">
     <summary>Advanced&hellip;</summary>
+    {% if job.content_type == "job_posting" and job.scored_gate_count and not job.passed_gate_count and not job.gate_override %}
+      <button type="button" class="btn"
+        data-progress-url="/jobs/{{ job.id }}/pass-as-new"
+        data-progress-display="#reset-progress-{{ job.id }}"
+        title="Bypass the gate threshold for this job and file it as New, keeping its existing scores as a record of why it failed.">
+        Pass as new
+      </button>
+    {% endif %}
     <button type="button" class="btn btn-reset"
       data-progress-url="/jobs/{{ job.id }}/reset"
       data-progress-display="#reset-progress-{{ job.id }}"

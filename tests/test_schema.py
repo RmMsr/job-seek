@@ -477,6 +477,66 @@ def test_init_db_migrates_jobs_adds_fit_scorecard_columns(conn):
     assert cols.count("interest_score") == 1
 
 
+def test_jobs_table_has_gate_override_column_defaulting_false(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Title')")
+    conn.commit()
+    row = conn.execute("SELECT gate_override FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["gate_override"] == 0
+
+
+def test_init_db_migrates_jobs_adds_gate_override_column(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute("SELECT title, gate_override FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["title"] == "Existing Title"
+    assert row["gate_override"] == 0
+
+    # Idempotent: running init_db again doesn't error or duplicate columns.
+    init_db(conn)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("gate_override") == 1
+
+
 def test_scenarios_table_has_gate_threshold_column_not_boosted(conn):
     init_db(conn)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(scenarios)").fetchall()}
