@@ -22,7 +22,10 @@
   <div class="decision-panel-left">
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
-      <button type="button" class="btn btn-reset" data-progress-url="/jobs/bulk-reset" data-progress-jobs
+      <button type="button" class="btn btn-reset"
+        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+        data-progress-jobs
+        data-progress-oob="1"
         data-progress-display="#bulk-reset-progress"
         title="Wipe the simplified content, classification, summary and scores for each selected job, then immediately rerun the full pipeline from the original posting text.">
         Reset to new
@@ -40,6 +43,11 @@
   {% for job in jobs %}
     {% include "jobs/_row.html" %}
   {% endfor %}
-{% else %}
+{% elif not stale_jobs %}
   <p>No jobs found.</p>
+{% endif %}
+{% if stale_jobs %}
+  {% for job in stale_jobs %}
+    {% include "jobs/_row.html" %}
+  {% endfor %}
 {% endif %}

@@ -19,13 +19,19 @@
     .tag-feedback { background: #cfe2ff; color: #084298; }
     .job-row { border: 1px solid #dee2e6; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; position: relative; }
     .job-row:hover { background: #f8f9fa; }
-    .job-select-wrap { position: absolute; top: 0; right: 0; padding: 0.75rem; cursor: pointer; line-height: 0; }
+    .job-row-stale { opacity: 0.55; }
+    .job-row-stale:hover { opacity: 0.8; }
+    .stale-note { margin: 0.25rem 0 0; font-size: 0.9em; color: #666; }
+    .stale-note a { color: inherit; }
+    .job-row-actions { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 0.1rem; padding: 0.4rem; }
+    .job-select-wrap { padding: 0.35rem; cursor: pointer; line-height: 0; }
     .job-select-wrap input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
     .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
     dl.job-tags { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin:0; }
     dl.job-tags dt, dl.job-tags dd { margin:0; }
     .job-title { margin:0.5rem 0 0.25rem; font-size:1.1rem; }
     .job-hook { margin:0.25rem 0 0; color:#444; }
+    .permalink-icon { text-decoration:none; font-size:0.95em; padding: 0.35rem; line-height: 1; }
     .score-box { margin-top:0.75rem; padding:0.75rem; border:1px solid #dee2e6; border-radius:6px; background:#f8f9fa; }
     .score-box dl.job-tags { margin-bottom:0.5rem; }
     .score-tabs { display:flex; flex-wrap:wrap; }
@@ -45,6 +51,11 @@
     @keyframes fade-out {
       0%, 60% { opacity:1; max-height:3rem; margin-bottom:0.5rem; padding-top:0.3rem; padding-bottom:0.3rem; }
       100% { opacity:0; max-height:0; margin-bottom:0; padding-top:0; padding-bottom:0; }
+    }
+    .job-row-target-highlight { animation: target-highlight 2.5s ease-out; }
+    @keyframes target-highlight {
+      0% { background: #fff3cd; }
+      100% { background: transparent; }
     }
     .btn-primary { background:#eaf2ff; border-color:#0d6efd; color:#084298; font-weight:bold; }
     .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; }
@@ -182,15 +193,19 @@
           // htmx's OOB swap machinery only fires while htmx is settling a
           // response it fetched itself (hx-get/hx-post/etc) — htmx.process()
           // on manually-inserted content does NOT trigger it. So instead of
-          // relying on hx-swap-oob, find the real target by the id embedded
-          // in the chunk and replace it directly.
-          var match = /id="([^"]+)"/.exec(chunk);
-          if (!match) return;
-          var existing = document.getElementById(match[1]);
-          if (!existing) return;
-          existing.outerHTML = chunk;
-          var replaced = document.getElementById(match[1]);
-          if (replaced && window.htmx) window.htmx.process(replaced);
+          // relying on hx-swap-oob, parse the chunk and replace each id'd
+          // top-level element directly. A chunk may carry one element (a
+          // job row) or several siblings (e.g. the six nav-count spans).
+          var container = document.createElement("div");
+          container.innerHTML = chunk;
+          Array.prototype.forEach.call(container.children, function (node) {
+            if (!node.id) return;
+            var existing = document.getElementById(node.id);
+            if (!existing) return;
+            existing.outerHTML = node.outerHTML;
+            var replaced = document.getElementById(node.id);
+            if (replaced && window.htmx) window.htmx.process(replaced);
+          });
         }
 
         function handleLine(line) {
@@ -354,6 +369,18 @@ document.body.addEventListener('click', function (e) {
     htmx.trigger(scenarioForm, 'submit');
   }
 });
+  </script>
+  <script>
+    (function () {
+      if (!location.hash) return;
+      var el;
+      try { el = document.querySelector(location.hash); } catch (err) { return; }
+      if (!el || !el.classList.contains("job-row")) return;
+      el.classList.add("job-row-target-highlight");
+      el.addEventListener("animationend", function () {
+        el.classList.remove("job-row-target-highlight");
+      }, { once: true });
+    })();
   </script>
 </body>
 </html>

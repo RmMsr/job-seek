@@ -1,17 +1,30 @@
 {% import "jobs/_macros.html" as macros %}
-<article class="job-row" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer"
-  hx-get="/jobs/{{ job.id }}/expand"
+<article class="job-row{% if job.stale_badge %} job-row-stale{% endif %}" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer"
+  hx-get="/jobs/{{ job.id }}/expand{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML"
   hx-trigger="click, keyup[key=='Enter']">
-  <label class="job-select-wrap">
-    <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
-      id="job-select-{{ job.id }}" hx-preserve="true"
-      aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
-  </label>
+  <div class="job-row-actions">
+    <a href="/jobs/{{ job.id }}" class="permalink-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
+    {% if not is_detail_page %}
+    <label class="job-select-wrap">
+      <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+        id="job-select-{{ job.id }}" hx-preserve="true"
+        aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
+    </label>
+    {% endif %}
+  </div>
   {{ macros.meta_tags(job) }}
   <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
-  {% if job.headline %}
+  {% if job.stale_badge %}
+    <p class="stale-note">
+      {% if job.stale_badge.href %}
+        <a href="{{ job.stale_badge.href }}">{{ job.stale_badge.label }} &rarr;</a>
+      {% else %}
+        <span>{{ job.stale_badge.label }}</span>
+      {% endif %}
+    </p>
+  {% elif job.headline %}
     <p class="job-hook">{{ job.headline }}</p>
   {% elif job.summary %}
     <p class="job-hook">{{ job.summary | markdown_text | truncate(200) }}</p>

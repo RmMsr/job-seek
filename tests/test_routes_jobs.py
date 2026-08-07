@@ -106,7 +106,7 @@ def test_job_list_card_is_clickable_and_has_no_details_button(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/expand"' in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?status=&content_type="' in resp.text
     assert "Details" not in resp.text
     assert 'role="button"' in resp.text
 
@@ -367,6 +367,163 @@ def test_job_reset_unknown_job_returns_404(client, conn):
     assert resp.status_code == 404
 
 
+def test_job_expand_reset_button_has_progress_oob_attribute(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/reset"' in resp.text
+    assert "data-progress-oob" in resp.text
+
+
+def test_job_reset_stream_ends_with_html_chunk_for_updated_row(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post(f"/jobs/{jid}/reset")
+    assert resp.status_code == 200
+    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+
+
+def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+    with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
+        resp = client.post(f"/jobs/{jid}/pass-as-new")
+    assert resp.status_code == 200
+    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+
+
+def test_job_reset_stream_includes_counts_html_chunk(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post(f"/jobs/{jid}/reset")
+    assert resp.status_code == 200
+    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+
+
+def test_job_pass_as_new_stream_includes_counts_html_chunk(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+    with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
+        resp = client.post(f"/jobs/{jid}/pass-as-new")
+    assert resp.status_code == 200
+    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+
+
+def test_job_reset_with_filter_query_forwards_it_into_rendered_row(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post(f"/jobs/{jid}/reset?status=accepted&content_type=")
+    assert resp.status_code == 200
+    # Resetting an accepted job always returns it to status "new", so it falls out of
+    # the Accepted tab -> renders as the stale short row, whose own expand link must
+    # still carry the filter forward.
+    assert f'jobs/{jid}/expand?status=accepted&content_type=' in resp.text
+
+
+def _fake_run_reprocess_job_to_passing(conn, client, model, job, scenarios, profile, progress_prefix=""):
+    yield f"{progress_prefix}Reprocessing: {job['url']}"
+    q.reset_job(conn, job["id"])
+    q.update_job_pipeline(
+        conn, job["id"], simplified_content="clean", content_type="job_posting",
+        title=job["title"], headline="", summary="Now a great match",
+    )
+    scenario = scenarios[0]
+    q.upsert_job_score(conn, job["id"], scenario["id"], 0.95, "now passes", "hash-new")
+    yield f"{progress_prefix}Reset complete: {job['url']}"
+
+
+def test_job_reset_from_not_relevant_tab_shows_moved_to_new_badge(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
+        resp = client.post(f"/jobs/{jid}/reset?status=not_relevant&content_type=")
+
+    assert resp.status_code == 200
+    assert "Moved to New" in resp.text
+    assert f'href="/jobs#job-{jid}"' in resp.text
+
+
+def test_job_reset_that_stays_in_current_filter_shows_no_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # already gate-passed, status "new"
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post(f"/jobs/{jid}/reset?status=&content_type=")
+    assert resp.status_code == 200
+    assert "Moved to" not in resp.text
+
+
+def test_job_reset_without_filter_query_shows_no_badge(client, conn):
+    # Simulates the standalone /jobs/{id} page, which never sends filter params.
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
+        resp = client.post(f"/jobs/{jid}/reset")
+
+    assert resp.status_code == 200
+    assert "Moved to" not in resp.text
+
+
+def test_job_pass_as_new_shows_moved_to_new_badge(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+
+    with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
+        resp = client.post(f"/jobs/{jid}/pass-as-new?status=not_relevant&content_type=")
+
+    assert resp.status_code == 200
+    assert "Moved to New" in resp.text
+
+
+def test_job_feedback_with_redirect_field_returns_hx_redirect_header(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "accepted", "note": "", "redirect": "/jobs"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["HX-Redirect"] == "/jobs"
+    job = q.get_job(conn, jid)
+    assert job["status"] == "accepted"
+
+
+def test_job_feedback_without_redirect_field_has_no_redirect_header(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
+    assert resp.status_code == 200
+    assert "HX-Redirect" not in resp.headers
+
+
+def test_job_detail_feedback_form_includes_redirect_field(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert '<input type="hidden" name="redirect" value="/jobs">' in resp.text
+
+
+def test_job_expand_feedback_form_has_no_redirect_field(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'name="redirect"' not in resp.text
+
+
 def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
@@ -380,6 +537,42 @@ def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
     assert resp.text.count("Reprocessing") == 2
     assert q.get_job(conn, j1)["status"] == "new"
     assert q.get_job(conn, j2)["status"] == "new"
+
+
+def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "note")
+    q.update_job_feedback(conn, j2, "invalid", "note")
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
+        resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
+
+    assert resp.status_code == 200
+    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j2}">') == 1
+    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+
+
+def test_job_bulk_reset_with_filter_shows_moved_marker_per_job(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
+
+    with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
+        resp = client.post("/jobs/bulk-reset?status=not_relevant&content_type=", data={"job_ids": [jid]})
+
+    assert resp.status_code == 200
+    assert "Moved to New" in resp.text
+
+
+def test_job_bulk_reset_button_has_progress_oob_and_filter_query(client, conn):
+    resp = client.get("/jobs?status=accepted")
+    assert resp.status_code == 200
+    assert 'data-progress-url="/jobs/bulk-reset?status=accepted&content_type="' in resp.text
+    assert 'data-progress-oob="1"' in resp.text
 
 
 def _fake_run_pass_as_new(conn, client, model, job, profile):
@@ -432,14 +625,28 @@ def test_job_bulk_feedback_note_is_optional(client, conn):
     assert q.get_job(conn, j1)["feedback_note"] is None
 
 
-def test_job_bulk_feedback_returns_filtered_content_reflecting_removed_jobs(client, conn):
+def test_job_bulk_feedback_leaves_moved_job_as_stale_row(client, conn):
     sid, j1, scenario_id = _seed(conn)
     resp = client.post(
         "/jobs/bulk-feedback",
         data={"job_ids": [j1], "status": "rejected", "status_filter": "", "content_type_filter": ""},
     )
     assert resp.status_code == 200
-    assert "ML Eng" not in resp.text
+    # The rejected job no longer belongs on the default (New) tab, but instead of
+    # vanishing it lingers as a dimmed stale row with a "Moved to Rejected" marker.
+    assert "ML Eng" in resp.text
+    assert "Moved to Rejected" in resp.text
+    assert f'href="/jobs?status=rejected#job-{j1}"' in resp.text
+    assert "No jobs found" not in resp.text
+
+
+def test_job_bulk_feedback_shows_no_jobs_found_when_nothing_matches_or_moved(client, conn):
+    # job_ids references a nonexistent job, so nothing lands in either jobs or stale_jobs.
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [999], "status": "rejected", "status_filter": "", "content_type_filter": ""},
+    )
+    assert resp.status_code == 200
     assert "No jobs found" in resp.text
 
 
@@ -680,3 +887,179 @@ def test_job_feedback_updates_counts_oob(client, conn):
     assert '<span id="count-new" hx-swap-oob="true">0</span>' in resp.text
     assert '<span id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
     assert '<span id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
+
+
+def test_job_detail_returns_200_with_job_content(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert "ML Eng" in resp.text
+    assert "Accept" in resp.text
+    assert "Reject" in resp.text
+
+
+def test_job_detail_unknown_job_returns_404(client, conn):
+    resp = client.get("/jobs/999")
+    assert resp.status_code == 404
+
+
+def test_job_detail_has_back_to_list_link(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert 'href="/jobs"' in resp.text
+
+
+def test_job_detail_omits_bulk_select_checkbox(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert '<label class="job-select-wrap">' not in resp.text
+    assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' not in resp.text
+
+
+def test_job_expand_still_has_bulk_select_checkbox(client, conn):
+    # Guards against the is_detail_page flag leaking into the normal list flow.
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert '<label class="job-select-wrap">' in resp.text
+
+
+def test_job_list_row_has_permalink_icon(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert f'href="/jobs/{jid}" class="permalink-icon"' in resp.text
+
+
+def test_job_expand_has_permalink_icon(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'href="/jobs/{jid}" class="permalink-icon"' in resp.text
+
+
+def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/expand?status=&content_type="' in resp.text
+
+
+def test_job_list_filtered_tab_expand_link_carries_filter_params(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    resp = client.get("/jobs?status=accepted")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/expand?status=accepted&content_type="' in resp.text
+
+
+def test_job_expand_forwards_filter_to_collapse_link(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand?status=accepted&content_type=")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/collapse?status=accepted&content_type="' in resp.text
+
+
+def test_job_expand_without_filter_query_omits_collapse_filter_params(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/collapse"' in resp.text
+    assert "collapse?status=" not in resp.text
+
+
+def test_job_accept_from_new_tab_shows_stale_short_row(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # status "new", gate-passed -> shown on default /jobs tab
+    resp = client.post(
+        f"/jobs/{jid}/feedback?status=&content_type=",
+        data={"status": "accepted", "note": ""},
+    )
+    assert resp.status_code == 200
+    assert "Moved to Accepted" in resp.text
+    assert f'href="/jobs?status=accepted#job-{jid}"' in resp.text
+    # Nav counts still update alongside the stale row.
+    assert '<span id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+
+
+def test_job_reject_from_not_relevant_tab_shows_stale_short_row(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
+
+    resp = client.post(
+        f"/jobs/{jid}/feedback?status=not_relevant&content_type=",
+        data={"status": "rejected", "note": "not a fit"},
+    )
+    assert resp.status_code == 200
+    assert "Moved to Rejected" in resp.text
+    assert f'href="/jobs?status=rejected#job-{jid}"' in resp.text
+
+
+def test_job_feedback_that_stays_in_current_filter_shows_no_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "rejected", "")
+    resp = client.post(
+        f"/jobs/{jid}/feedback?status=rejected&content_type=",
+        data={"status": "rejected", "note": "still not a fit"},
+    )
+    assert resp.status_code == 200
+    assert "Moved to" not in resp.text
+
+
+def test_job_feedback_without_filter_query_shows_no_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
+    assert resp.status_code == 200
+    assert "Moved to" not in resp.text
+
+
+def test_job_feedback_with_redirect_still_bypasses_row_rendering(client, conn):
+    # The detail page's redirect flow must short-circuit before any row/badge logic.
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(
+        f"/jobs/{jid}/feedback",
+        data={"status": "accepted", "note": "", "redirect": "/jobs"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["HX-Redirect"] == "/jobs"
+    assert resp.text == ""
+
+
+def test_base_page_includes_target_highlight_script(client, conn):
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert "job-row-target-highlight" in resp.text
+
+
+def test_job_detail_collapse_link_carries_detail_flag(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/collapse?detail=1"' in resp.text
+
+
+def test_job_detail_collapse_keeps_checkbox_hidden(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/collapse?detail=1")
+    assert resp.status_code == 200
+    assert '<label class="job-select-wrap">' not in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?detail=1"' in resp.text
+
+
+def test_job_detail_collapsed_then_reexpanded_still_hides_checkbox_and_redirect(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand?detail=1")
+    assert resp.status_code == 200
+    assert '<label class="job-select-wrap">' not in resp.text
+    assert '<input type="hidden" name="redirect" value="/jobs">' in resp.text
+
+
+def test_job_collapse_without_detail_flag_shows_checkbox(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/collapse")
+    assert resp.status_code == 200
+    assert '<label class="job-select-wrap">' in resp.text
