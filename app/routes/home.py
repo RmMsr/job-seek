@@ -27,7 +27,7 @@ def home(
             {"label": "Run your first fetch", "done": q.has_completed_fetch_run(conn), "href": "/fetch"},
             {
                 "label": "Review your first job",
-                "done": (counts["accepted"] + counts["rejected"] + counts["invalid"]) > 0,
+                "done": (counts["accepted"] + counts["rejected"] + counts["trash"]) > 0,
                 "href": "/jobs",
             },
         ]

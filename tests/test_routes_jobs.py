@@ -63,8 +63,23 @@ def test_job_list_filter_bar_shows_counts(client, conn):
     assert '<span id="count-new">1</span>' in resp.text
     assert '<span id="count-accepted">0</span>' in resp.text
     assert '<span id="count-rejected">0</span>' in resp.text
-    assert '<span id="count-invalid">0</span>' in resp.text
+    assert '<span id="count-trash">0</span>' in resp.text
     assert '<span id="count-lead">0</span>' in resp.text
+
+
+def test_job_list_nav_tabs_have_explanatory_tooltips(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    for label, snippet in [
+        ("New Jobs", 'title="Job postings awaiting your decision'),
+        ("New Leads", 'title="Leads awaiting your decision'),
+        ("Accepted", "title=\"Jobs and leads you've accepted."),
+        ("Rejected", "title=\"Jobs and leads you've rejected"),
+        ("Not relevant", 'title="Real job postings that didn\'t pass any scenario\'s relevance gate'),
+        ("Trash", 'title="Unusable postings (expired, spam, duplicate, wrong content)'),
+    ]:
+        assert snippet in resp.text, f"missing tooltip for {label}"
 
 
 def test_job_expand(client, conn):
@@ -297,12 +312,12 @@ def test_job_expand_note_field_is_optional(client, conn):
     assert '<textarea name="note" required' not in resp.text
 
 
-def test_job_expand_reject_invalid_buttons_have_tooltips(client, conn):
+def test_job_expand_reject_trash_buttons_have_tooltips(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert 'title="Does not match your criteria — feeds back into scenario tuning."' in resp.text
-    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria."' in resp.text
+    assert 'title="Does not match your criteria."' in resp.text
+    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content)."' in resp.text
 
 
 def test_job_collapse_returns_row_view(client, conn):
@@ -528,7 +543,7 @@ def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_feedback(conn, j1, "rejected", "note")
-    q.update_job_feedback(conn, j2, "invalid", "note")
+    q.update_job_feedback(conn, j2, "trash", "note")
 
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
@@ -543,7 +558,7 @@ def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, c
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_feedback(conn, j1, "rejected", "note")
-    q.update_job_feedback(conn, j2, "invalid", "note")
+    q.update_job_feedback(conn, j2, "trash", "note")
 
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
@@ -760,9 +775,9 @@ def test_job_list_bulk_bar_has_actions_and_no_scenario_select(client, conn):
     assert 'name="feedback_scenario_id"' not in resp.text
     assert 'form="bulk-form" name="status" value="accepted"' in resp.text
     assert 'form="bulk-form" name="status" value="rejected"' in resp.text
-    assert 'form="bulk-form" name="status" value="invalid"' in resp.text
-    assert 'title="Does not match your criteria — feeds back into scenario tuning."' in resp.text
-    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria."' in resp.text
+    assert 'form="bulk-form" name="status" value="trash"' in resp.text
+    assert 'title="Does not match your criteria."' in resp.text
+    assert 'title="Not a usable posting (expired, spam, duplicate, wrong content)."' in resp.text
 
 
 def test_job_expand_shows_scenario_feedback_form_per_tab(client, conn):
@@ -853,6 +868,22 @@ def test_job_list_leads_tab_includes_gate_failed_leads(client, conn):
     assert "Low Score Lead" in resp.text
 
 
+def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Accepted Lead", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid_accepted, simplified_content="clean", content_type="lead", summary="role")
+    q.update_job_feedback(conn, jid_accepted, "accepted", "")
+
+    jid_rejected = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Rejected Lead", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid_rejected, simplified_content="clean", content_type="lead", summary="role")
+    q.update_job_feedback(conn, jid_rejected, "rejected", "")
+
+    resp = client.get("/jobs?content_type=lead")
+    assert "Accepted Lead" not in resp.text
+    assert "Rejected Lead" not in resp.text
+    assert '<span id="count-lead">0</span>' in resp.text
+
+
 def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Accepted", company="Acme", raw_text="r")
@@ -863,6 +894,36 @@ def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
 
     resp = client.get("/jobs?status=accepted")
     assert "Low Score Accepted" in resp.text
+
+
+def test_job_list_shows_status_badge_for_accepted_rejected_trash(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+
+    jid_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Accepted Job", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, jid_accepted, "accepted", "")
+
+    jid_rejected = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Rejected Job", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, jid_rejected, "rejected", "")
+
+    jid_trash = q.insert_job(conn, source_id=sid, url="http://finn.no/job/3", title="Trashed Job", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, jid_trash, "trash", "")
+
+    resp = client.get("/jobs?status=accepted")
+    assert '<span class="score-badge score-high">Accepted</span>' in resp.text
+
+    resp = client.get("/jobs?status=rejected")
+    assert '<span class="score-badge score-low">Rejected</span>' in resp.text
+
+    resp = client.get("/jobs?status=trash")
+    assert '<span class="score-badge score-neutral">Trash</span>' in resp.text
+
+
+def test_job_list_new_tab_shows_no_status_badge(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs")
+    assert "score-badge score-high\">Accepted" not in resp.text
+    assert "score-badge score-low\">Rejected" not in resp.text
+    assert "score-badge score-neutral\">Trash" not in resp.text
 
 
 def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):

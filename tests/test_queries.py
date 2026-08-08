@@ -325,7 +325,7 @@ def test_get_job_counts(conn):
     q.update_job_feedback(conn, j2, "rejected", "note")
     q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
     counts = q.get_job_counts(conn)
-    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "invalid": 0, "lead": 1, "not_relevant": 0}
+    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
 
 
 def test_get_job_counts_splits_new_from_not_relevant(conn):

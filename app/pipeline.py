@@ -93,6 +93,8 @@ def _ingest_posting(
             yield _progress(
                 f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {url}"
             )
+    elif content_type == "irrelevant":
+        q.delete_job(conn, job_id)
     else:
         q.update_job_pipeline(conn, job_id, simplified_content=simplified, content_type=content_type)
 
@@ -136,6 +138,8 @@ def run_fetch(
                 conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
                 url=raw.url, progress_prefix=f"[{i}/{jobs_found}] ",
             )
+            if not q.job_exists(conn, job_id):
+                jobs_new -= 1
 
         q.complete_fetch_run(conn, run_id, jobs_found=jobs_found, jobs_new=jobs_new)
         yield _progress(f"Fetch complete for '{source['name']}': {jobs_new} new / {jobs_found} found")
@@ -164,7 +168,10 @@ def run_reprocess_job(
         conn, client, model, job["id"], job["raw_text"], job["title"], is_slack, profile, scenarios,
         url=job["url"], progress_prefix=progress_prefix,
     )
-    yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
+    if q.job_exists(conn, job["id"]):
+        yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
+    else:
+        yield _progress(f"{progress_prefix}Removed as not job-related: {job['url']}")
 
 
 def run_pass_as_new(

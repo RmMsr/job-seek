@@ -25,6 +25,8 @@ def _get_filtered_jobs(
         return q.get_jobs(conn, status="new", content_type="job_posting", gate_status="failed")
     if status is None and content_type is None:
         return q.get_jobs(conn, status="new", gate_status="passed")
+    if status is None and content_type == "lead":
+        return q.get_jobs(conn, status="new", content_type="lead")
     return q.get_jobs(conn, status=status, content_type=content_type)
 
 
@@ -50,8 +52,8 @@ def _stale_badge(conn: sqlite3.Connection, job: dict, status: str | None, conten
         return {"label": "Moved to Accepted", "href": f"/jobs?status=accepted{anchor}"}
     if job["status"] == "rejected":
         return {"label": "Moved to Rejected", "href": f"/jobs?status=rejected{anchor}"}
-    if job["status"] == "invalid":
-        return {"label": "Moved to Invalid", "href": f"/jobs?status=invalid{anchor}"}
+    if job["status"] == "trash":
+        return {"label": "Moved to Trash", "href": f"/jobs?status=trash{anchor}"}
     if job["content_type"] == "job_posting":
         if job["passed_gate_count"] or job["gate_override"]:
             return {"label": "Moved to New", "href": f"/jobs{anchor}"}
@@ -61,8 +63,17 @@ def _stale_badge(conn: sqlite3.Connection, job: dict, status: str | None, conten
     return {"label": "No longer shown in this view", "href": None}
 
 
+def _render_removed_job_html(job_id: int) -> str:
+    return (
+        f'<article class="job-row" id="job-{job_id}">'
+        "<p>Reclassified as not job-related and removed.</p></article>"
+    )
+
+
 def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id: int, filter_ctx: dict) -> str:
     job = q.get_job(conn, job_id)
+    if job is None:
+        return _render_removed_job_html(job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
 

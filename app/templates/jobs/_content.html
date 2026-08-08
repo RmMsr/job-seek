@@ -1,11 +1,17 @@
 <div class="filter-bar">
   <div class="filter-links">
-    <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}>New (<span id="count-new">{{ counts.new }}</span>)</a>
-    <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}>Accepted (<span id="count-accepted">{{ counts.accepted }}</span>)</a>
-    <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}>Rejected (<span id="count-rejected">{{ counts.rejected }}</span>)</a>
-    <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}>Leads (<span id="count-lead">{{ counts.lead }}</span>)</a>
-    <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}>Not relevant (<span id="count-not_relevant">{{ counts.not_relevant }}</span>)</a>
-    <a href="/jobs?status=invalid" {% if status == "invalid" %}class="active"{% endif %}>Invalid (<span id="count-invalid">{{ counts.invalid }}</span>)</a>
+    <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}
+      title="Job postings awaiting your decision — passed at least one scenario's relevance gate.">New Jobs (<span id="count-new">{{ counts.new }}</span>)</a>
+    <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}
+      title="Leads awaiting your decision — mentions of a possible opportunity, not full postings.">New Leads (<span id="count-lead">{{ counts.lead }}</span>)</a>
+    <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}
+      title="Jobs and leads you've accepted.">Accepted (<span id="count-accepted">{{ counts.accepted }}</span>)</a>
+    <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}
+      title="Jobs and leads you've rejected.">Rejected (<span id="count-rejected">{{ counts.rejected }}</span>)</a>
+    <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}
+      title="Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios.">Not relevant (<span id="count-not_relevant">{{ counts.not_relevant }}</span>)</a>
+    <a href="/jobs?status=trash" {% if status == "trash" %}class="active"{% endif %}
+      title="Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily.">Trash (<span id="count-trash">{{ counts.trash }}</span>)</a>
   </div>
   {% if jobs %}
     <label class="select-all">
@@ -33,8 +39,8 @@
     </details>
     <div class="actions" role="group" aria-label="Bulk decision">
       <button type="submit" form="bulk-form" name="status" value="accepted" class="btn btn-accept">Accept</button>
-      <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria — feeds back into scenario tuning.">Reject</button>
-      <button type="submit" form="bulk-form" name="status" value="invalid" class="btn btn-invalid" title="Not a usable posting (expired, spam, duplicate, wrong content) — does not affect scenario criteria.">Invalid</button>
+      <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
+      <button type="submit" form="bulk-form" name="status" value="trash" class="btn btn-trash" title="Not a usable posting (expired, spam, duplicate, wrong content).">Trash</button>
     </div>
   </div>
   <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>

@@ -637,3 +637,77 @@ def test_init_db_migrates_scenarios_replaces_boosted_with_gate_threshold(conn):
     init_db(conn)
     cols_list = [r[1] for r in conn.execute("PRAGMA table_info(scenarios)").fetchall()]
     assert cols_list.count("gate_threshold") == 1
+
+
+def test_jobs_status_check_allows_trash_not_invalid(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/1', 'Title', 'trash')"
+    )
+    conn.commit()
+    row = conn.execute("SELECT status FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["status"] == "trash"
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/2', 'Title', 'invalid')"
+        )
+
+
+def test_init_db_migrates_jobs_status_invalid_to_trash(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'invalid')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT,
+            gate_override INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/1', 'Existing Title', 'invalid')"
+    )
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/2', 'Still New', 'new')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute("SELECT title, status FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["title"] == "Existing Title"
+    assert row["status"] == "trash"
+    row2 = conn.execute("SELECT status FROM jobs WHERE url = 'http://job/2'").fetchone()
+    assert row2["status"] == "new"
+
+    # Idempotent: running init_db again doesn't error or lose data.
+    init_db(conn)
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2

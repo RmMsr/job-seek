@@ -37,12 +37,12 @@
     <li><strong>Sources</strong> — Job boards, Slack communities, and listing pages you register on the Sources page.</li>
     <li><strong>Fetch</strong> — Pulls new postings from each source, skipping URLs already seen.
       <ol>
-        <li><strong>Classify</strong> — An LLM tags each posting as a job posting, a lead, irrelevant, or an error.</li>
+        <li><strong>Classify</strong> — An LLM tags each posting as a job posting, a lead, irrelevant, or an error. Irrelevant postings are discarded rather than stored.</li>
         <li><strong>Summarize</strong> — Job postings and leads get an AI-written title, headline, and summary.</li>
         <li><strong>Score</strong> — For each active scenario, the summary is evaluated against your <strong>Profile</strong> (who you are — skills, interests, constraints, set once) and that scenario's <strong>Criteria</strong> (what you're looking for right now — must/prefer/avoid, refined over time) to produce a relevance score and reasoning.</li>
       </ol>
     </li>
-    <li><strong>Jobs</strong> — The Jobs list surfaces everything sorted by score. You accept, reject, or mark invalid, each with a short note.
+    <li><strong>Jobs</strong> — The Jobs list surfaces everything sorted by score. You accept, reject, or trash, each with a short note.
       <ol>
         <li><strong>Refine</strong> — Your notes accumulate as feedback. The Scenarios page can propose criteria updates based on what you've been accepting and rejecting — closing the loop back into Score.</li>
       </ol>

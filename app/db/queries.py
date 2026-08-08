@@ -158,6 +158,15 @@ def get_all_job_urls(conn: sqlite3.Connection) -> frozenset[str]:
     return frozenset(r["url"] for r in rows)
 
 
+def job_exists(conn: sqlite3.Connection, job_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone() is not None
+
+
+def delete_job(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    conn.commit()
+
+
 def update_job_pipeline(
     conn: sqlite3.Connection,
     job_id: int,
@@ -383,11 +392,11 @@ def get_jobs(
 
 
 def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    counts = {"new": 0, "accepted": 0, "rejected": 0, "invalid": 0, "lead": 0, "not_relevant": 0}
+    counts = {"new": 0, "accepted": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
     for status, n in conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall():
         counts[status] = n
     counts["lead"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE content_type = ?", ("lead",)
+        "SELECT COUNT(*) FROM jobs WHERE content_type = ? AND status = 'new'", ("lead",)
     ).fetchone()[0]
     not_relevant = conn.execute(
         f"""

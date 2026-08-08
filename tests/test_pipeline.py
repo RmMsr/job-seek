@@ -115,10 +115,11 @@ def test_run_fetch_stores_published_at(conn, source):
         url="http://example.com/job/1", title="T", company="C", raw_text="r",
         published_at="2026-07-01T00:00:00+00:00",
     )]
-    client = MagicMock()
-    choice = MagicMock()
-    choice.message.content = '{"type": "irrelevant", "reason": "x"}'
-    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+    client = _mock_client(
+        classify_resp='{"type": "lead", "reason": "vague mention, no full posting"}',
+        summarize_resp='{"organizations": ["Acme"], "headline": "A lead"}',
+        evaluate_resp='{"score": 0.5, "reasoning": "Some relevance"}',
+    )
 
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
@@ -152,7 +153,7 @@ def test_run_fetch_records_fetch_run(conn, source):
     assert runs[0]["completed_at"] is not None
 
 
-def test_run_fetch_irrelevant_not_evaluated(conn, source):
+def test_run_fetch_irrelevant_not_persisted(conn, source):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="meetup next week")]
     client = MagicMock()
     choice = MagicMock()
@@ -161,12 +162,12 @@ def test_run_fetch_irrelevant_not_evaluated(conn, source):
 
     with patch("app.pipeline.HttpFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
-        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
-    jobs = q.get_jobs(conn)
-    assert jobs[0]["content_type"] == "irrelevant"
-    assert jobs[0]["summary"] == ""
+    assert q.get_jobs(conn) == []
+    assert result.jobs_new == 0
     assert client.chat.completions.create.call_count == 1
+    assert any("Classified as irrelevant" in m for m in messages)
 
 
 def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
@@ -358,7 +359,7 @@ def test_run_reprocess_job_reruns_full_pipeline(conn, source):
     assert any("Scored 0.9" in m for m in messages)
 
 
-def test_run_reprocess_job_non_posting_skips_scoring(conn, source):
+def test_run_reprocess_job_irrelevant_deletes_job(conn, source):
     jid = q.insert_job(
         conn, source_id=source["id"], url="http://example.com/job/1",
         title="T", company="C", raw_text="meetup announcement",
@@ -371,12 +372,11 @@ def test_run_reprocess_job_non_posting_skips_scoring(conn, source):
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
 
-    _drain(run_reprocess_job(conn, client, "llama3.2", job, scenarios, profile))
+    messages, _ = _drain(run_reprocess_job(conn, client, "llama3.2", job, scenarios, profile))
 
-    updated = q.get_job(conn, jid)
-    assert updated["content_type"] == "irrelevant"
-    assert updated["summary"] == ""
+    assert q.get_job(conn, jid) is None
     assert q.get_job_scores(conn, jid) == []
+    assert any("Removed as not job-related" in m for m in messages)
 
 
 def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):

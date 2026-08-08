@@ -19,6 +19,16 @@
 {% macro meta_tags(job) %}
 <dl class="job-tags">
   {{ fit_badge_fields(job) }}
+  {% if job.status == "accepted" %}
+  <dt class="sr-only">Status</dt>
+  <dd><span class="score-badge score-high">Accepted</span></dd>
+  {% elif job.status == "rejected" %}
+  <dt class="sr-only">Status</dt>
+  <dd><span class="score-badge score-low">Rejected</span></dd>
+  {% elif job.status == "trash" %}
+  <dt class="sr-only">Status</dt>
+  <dd><span class="score-badge score-neutral">Trash</span></dd>
+  {% endif %}
   <dt class="sr-only">Content type</dt>
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   <dt class="sr-only">Source</dt>
