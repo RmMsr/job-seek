@@ -1,7 +1,7 @@
 <tr id="source-row-{{ source.id }}" style="border-bottom:1px solid #eee;">
   <td style="padding:0.5rem;">
     <strong>{{ source.name }}</strong><br>
-    <small>{{ source.url }}</small>
+    <small style="word-break:break-all;">{{ source.url }}</small>
     {% if needs_login %}
       <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>
       <button class="btn" style="font-size:0.85em; padding:3px 10px;"
