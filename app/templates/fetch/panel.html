@@ -16,7 +16,7 @@
     <tbody>
     {% for source in sources %}
       {% set run = runs_by_source.get(source.id) %}
-      <tr style="border-bottom:1px solid #eee;">
+      <tr>
         <td style="padding:0.5rem;">
           <strong>{{ source.name }}</strong>
         </td>
@@ -38,10 +38,16 @@
         </td>
         <td style="padding:0.5rem;">
           {% if source.enabled %}
-            <button class="btn" data-progress-url="/fetch/{{ source.id }}">Fetch</button>
+            <button class="btn" data-progress-url="/fetch/{{ source.id }}"
+              data-progress-display="#fetch-progress-{{ source.id }}">Fetch</button>
           {% else %}
             <span style="color:#999;">disabled</span>
           {% endif %}
+        </td>
+      </tr>
+      <tr class="fetch-progress-row" style="border-bottom:1px solid #eee;">
+        <td colspan="5" style="padding:0 0.5rem;">
+          <div id="fetch-progress-{{ source.id }}" class="reset-progress"></div>
         </td>
       </tr>
     {% endfor %}

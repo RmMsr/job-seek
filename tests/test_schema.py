@@ -121,6 +121,61 @@ def test_init_db_migrates_sources_table_missing_finn_listing_type(conn):
     ]
 
 
+def test_init_db_migrates_fetch_runs_off_stale_sources_old_fk(conn):
+    # Reproduces a real historical corruption: an old migration renamed
+    # "sources" to "sources_old" (which auto-rewrites dependent tables'
+    # REFERENCES clauses to follow the rename) before creating a fresh
+    # "sources" table -- leaving fetch_runs permanently pointing at the
+    # now-stale "sources_old" snapshot instead of the live "sources" table.
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE sources_old (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE fetch_runs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES "sources_old"(id),
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            jobs_found INTEGER NOT NULL DEFAULT 0,
+            jobs_new INTEGER NOT NULL DEFAULT 0,
+            error TEXT
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources_old (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (2, 'new', 'http://y', 'http')")
+    conn.execute("INSERT INTO fetch_runs (id, source_id, jobs_found) VALUES (1, 1, 3)")
+    conn.commit()
+
+    init_db(conn)
+
+    # A source that only exists in the current "sources" table (not in the
+    # stale sources_old snapshot) must be usable for a fetch run.
+    conn.execute("INSERT INTO fetch_runs (source_id) VALUES (2)")
+    runs = conn.execute("SELECT id, source_id, jobs_found FROM fetch_runs ORDER BY id").fetchall()
+    assert [dict(r) for r in runs] == [
+        {"id": 1, "source_id": 1, "jobs_found": 3},
+        {"id": 2, "source_id": 2, "jobs_found": 0},
+    ]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO fetch_runs (source_id) VALUES (999)")
+    assert "sources_old" not in _tables(conn)
+
+
 def test_job_scores_unique_per_job_and_scenario(conn):
     init_db(conn)
     conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")

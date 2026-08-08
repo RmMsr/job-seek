@@ -121,6 +121,39 @@ def _migrate_sources_fetcher_type(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_fetch_runs_source_fk(conn: sqlite3.Connection) -> None:
+    # A historical migration renamed "sources" to "sources_old" (which
+    # auto-rewrites dependent tables' REFERENCES clauses to follow the
+    # rename) before creating a fresh "sources" table in its place, leaving
+    # fetch_runs permanently pointing at that stale sources_old snapshot --
+    # any source created since can never start a fetch run.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='fetch_runs'"
+    ).fetchone()
+    if row is None or "sources_old" not in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE fetch_runs_new (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            jobs_found INTEGER NOT NULL DEFAULT 0,
+            jobs_new INTEGER NOT NULL DEFAULT 0,
+            error TEXT
+        );
+        INSERT INTO fetch_runs_new SELECT * FROM fetch_runs;
+        DROP TABLE fetch_runs;
+        ALTER TABLE fetch_runs_new RENAME TO fetch_runs;
+        DROP TABLE IF EXISTS sources_old;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def _migrate_jobs_scores_to_table(conn: sqlite3.Connection) -> None:
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
@@ -266,6 +299,7 @@ def _migrate_scenarios_gate_threshold(conn: sqlite3.Connection) -> None:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
+    _migrate_fetch_runs_source_fk(conn)
     _migrate_jobs_scores_to_table(conn)
     _migrate_jobs_add_headline(conn)
     _migrate_jobs_add_published_at(conn)

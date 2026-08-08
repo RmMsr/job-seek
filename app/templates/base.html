@@ -137,7 +137,6 @@
         var displaySelector = el.getAttribute("data-progress-display");
         var displayTarget = displaySelector ? document.querySelector(displaySelector) : null;
         var progressEl = document.createElement("span");
-        progressEl.hidden = true;
         if (displayTarget) {
           displayTarget.appendChild(progressEl);
         } else {
@@ -147,9 +146,7 @@
         }
 
         var start = Date.now();
-        var revealed = false;
         var lastLine = "";
-        var tickTimer = null;
         var htmlChunk = null;
         var failed = false;
 
@@ -158,19 +155,13 @@
           progressEl.textContent = elapsed + "s" + (lastLine ? " — " + lastLine : "");
         }
 
-        var revealTimer = setTimeout(function () {
-          revealed = true;
-          progressEl.hidden = false;
-          tick();
-          tickTimer = setInterval(tick, 1000);
-        }, 5000);
+        tick();
+        var tickTimer = setInterval(tick, 1000);
 
         function finish() {
-          clearTimeout(revealTimer);
           if (tickTimer) clearInterval(tickTimer);
           delete el.dataset.progressRunning;
           if (failed) {
-            progressEl.hidden = false;
             progressEl.style.color = "#dc3545";
             progressEl.textContent = lastLine || "Failed";
             return;
@@ -219,7 +210,7 @@
             }
           } else {
             lastLine = line;
-            if (revealed) tick();
+            tick();
           }
         }
 

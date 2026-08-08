@@ -20,13 +20,32 @@ _SYSTEM = (
     "or organization context."
 )
 
+_LEAD_SYSTEM = (
+    "This message references a possible job opportunity without a full job "
+    "description -- it doesn't describe one specific role in detail. Instead of "
+    "forcing it into a job-posting shape, identify the organization(s) it suggests "
+    "are hiring or might be hiring. Respond with exactly this JSON shape: "
+    '{"organizations": ["<Organization name>", ...], '
+    '"headline": "<one punchy sentence on what this lead points to>"}. '
+    "List every organization the message suggests could be hiring, even if only "
+    "vaguely implied. Do not invent a specific role, title, or job description "
+    "that isn't actually present in the message. Be factual and brief. If no "
+    "organization is identifiable, return an empty organizations list."
+)
 
-def summarize(client: openai.OpenAI, model: str, simplified_content: str) -> tuple[str, str, str]:
+
+def summarize(
+    client: openai.OpenAI,
+    model: str,
+    simplified_content: str,
+    content_type: str = "job_posting",
+) -> tuple[str, str, str]:
+    is_lead = content_type == "lead"
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": _SYSTEM},
+                {"role": "system", "content": _LEAD_SYSTEM if is_lead else _SYSTEM},
                 {"role": "user", "content": simplified_content[:6000]},
             ],
             temperature=0.3,
@@ -37,6 +56,13 @@ def summarize(client: openai.OpenAI, model: str, simplified_content: str) -> tup
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
         data = json.loads(extract_json(resp.choices[0].message.content))
-        return data.get("title", ""), data.get("headline", ""), data.get("summary", "")
+        if is_lead:
+            # Leads are short/vague by nature, so the retained original message
+            # (already including its author, see SlackFetcher) is more useful
+            # than an AI-compressed rewrite — only title/headline come from AI.
+            title = ", ".join(data.get("organizations", []))
+            return title, data.get("headline", ""), simplified_content
+        title = data.get("title", "")
+        return title, data.get("headline", ""), data.get("summary", "")
     except Exception:
-        return "", "", ""
+        return "", "", simplified_content if is_lead else ""

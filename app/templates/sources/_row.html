@@ -2,6 +2,12 @@
   <td style="padding:0.5rem;">
     <strong>{{ source.name }}</strong><br>
     <small>{{ source.url }}</small>
+    {% if needs_login %}
+      <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>
+      <button class="btn" style="font-size:0.85em; padding:3px 10px;"
+        data-progress-url="/sources/{{ source.id }}/login"
+        data-progress-target="#source-row-{{ source.id }}">Log in now</button>
+    {% endif %}
   </td>
   <td style="padding:0.5rem;">{{ source.fetcher_type }}</td>
   <td style="padding:0.5rem;">

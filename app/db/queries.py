@@ -321,6 +321,13 @@ _GATE_SELECT = """
     scored.scored_count AS scored_gate_count
 """
 
+_GATE_PASSED_CLAUSE = """
+    (jobs.content_type IS NULL
+     OR jobs.gate_override = 1
+     OR (jobs.content_type IN ('job_posting', 'lead')
+         AND (scored.scored_count IS NULL OR gate.passed_count > 0)))
+"""
+
 _GATE_JOIN = """
     FROM jobs
     LEFT JOIN (
@@ -362,10 +369,7 @@ def get_jobs(
         clauses.append("jobs.content_type = ?")
         params.append(content_type)
     if gate_status == "passed":
-        clauses.append(
-            "(jobs.content_type != 'job_posting' OR jobs.content_type IS NULL "
-            "OR scored.scored_count IS NULL OR gate.passed_count > 0 OR jobs.gate_override = 1)"
-        )
+        clauses.append(_GATE_PASSED_CLAUSE)
     elif gate_status == "failed":
         clauses.append(
             "scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0) "
@@ -395,7 +399,9 @@ def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
         """
     ).fetchone()[0]
     counts["not_relevant"] = not_relevant
-    counts["new"] -= not_relevant
+    counts["new"] = conn.execute(
+        f"SELECT COUNT(*) {_GATE_JOIN} WHERE jobs.status = 'new' AND {_GATE_PASSED_CLAUSE}"
+    ).fetchone()[0]
     return counts
 
 

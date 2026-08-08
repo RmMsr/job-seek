@@ -354,6 +354,19 @@ def test_get_job_counts_excludes_overridden_job_from_not_relevant(conn):
     counts = q.get_job_counts(conn)
 
     assert counts["not_relevant"] == 0
+
+
+def test_get_job_counts_new_excludes_irrelevant_and_error(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    posting = q.insert_job(conn, source_id=source_id, url="http://job/post", title="Post", company="C", raw_text="r")
+    irrelevant = q.insert_job(conn, source_id=source_id, url="http://job/irr", title="Irr", company="C", raw_text="r")
+    error = q.insert_job(conn, source_id=source_id, url="http://job/err", title="Err", company="C", raw_text="r")
+    q.update_job_pipeline(conn, posting, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, irrelevant, simplified_content="", content_type="irrelevant")
+    q.update_job_pipeline(conn, error, simplified_content="", content_type="error")
+
+    counts = q.get_job_counts(conn)
+
     assert counts["new"] == 1
 
 
@@ -625,6 +638,49 @@ def test_get_jobs_gate_status_passed_keeps_never_scored_jobs(conn):
     passed_only = q.get_jobs(conn, gate_status="passed")
 
     assert [j["title"] for j in passed_only] == ["Unscored"]
+
+
+def test_get_jobs_gate_status_passed_excludes_irrelevant_and_error(conn):
+    # irrelevant/error content is never scored (evaluate() only runs for
+    # job_posting/lead), so the old "content_type != job_posting" escape
+    # hatch let it slip into the default New view as if it were pending.
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    irrelevant = q.insert_job(conn, source_id=source_id, url="http://job/irr", title="Irr", company="C", raw_text="r")
+    error = q.insert_job(conn, source_id=source_id, url="http://job/err", title="Err", company="C", raw_text="r")
+    posting = q.insert_job(conn, source_id=source_id, url="http://job/post", title="Post", company="C", raw_text="r")
+    q.update_job_pipeline(conn, irrelevant, simplified_content="", content_type="irrelevant")
+    q.update_job_pipeline(conn, error, simplified_content="", content_type="error")
+    q.update_job_pipeline(conn, posting, simplified_content="", content_type="job_posting")
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+
+    assert [j["title"] for j in passed_only] == ["Post"]
+
+
+def test_get_jobs_gate_status_passed_excludes_lead_below_threshold(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    lead = q.insert_job(conn, source_id=source_id, url="http://job/lead", title="Lead", company="C", raw_text="r")
+    q.update_job_pipeline(conn, lead, simplified_content="", content_type="lead")
+    q.upsert_job_score(conn, lead, scenario_id, 0.3, "", "hash1")
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+
+    assert passed_only == []
+
+
+def test_get_jobs_gate_status_passed_keeps_unscored_and_gate_passed_leads(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
+    unscored_lead = q.insert_job(conn, source_id=source_id, url="http://job/lead1", title="Unscored lead", company="C", raw_text="r")
+    passed_lead = q.insert_job(conn, source_id=source_id, url="http://job/lead2", title="Passed lead", company="C", raw_text="r")
+    q.update_job_pipeline(conn, unscored_lead, simplified_content="", content_type="lead")
+    q.update_job_pipeline(conn, passed_lead, simplified_content="", content_type="lead")
+    q.upsert_job_score(conn, passed_lead, scenario_id, 0.9, "", "hash1")
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+
+    assert {j["title"] for j in passed_only} == {"Unscored lead", "Passed lead"}
 
 
 def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):

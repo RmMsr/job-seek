@@ -34,7 +34,7 @@ def _make_fetcher(source: dict, profile_dir: str, conn: sqlite3.Connection):
     if ft == "http":
         return HttpFetcher(source)
     if ft == "slack":
-        return SlackFetcher(source, profile_dir)
+        return SlackFetcher(source, profile_dir, known_urls=q.get_all_job_urls(conn))
     if ft == "finn_listing":
         return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
     return PlaywrightFetcher(source, profile_dir)
@@ -64,7 +64,7 @@ def _ingest_posting(
     yield _progress(f"{progress_prefix}Classified as {content_type}: {url}")
 
     if content_type in ("job_posting", "lead"):
-        ai_title, headline, job_summary = summarize(client, model, simplified)
+        ai_title, headline, job_summary = summarize(client, model, simplified, content_type=content_type)
         q.update_job_pipeline(
             conn, job_id,
             simplified_content=simplified,
@@ -223,7 +223,9 @@ def run_reevaluate(
 
     for i, job in enumerate(to_evaluate, start=1):
         if job["simplified_content"]:
-            ai_title, headline, new_summary = summarize(client, model, job["simplified_content"])
+            ai_title, headline, new_summary = summarize(
+                client, model, job["simplified_content"], content_type=job["content_type"]
+            )
         else:
             ai_title, headline, new_summary = job["title"], job["headline"], job["summary"]
         score, reasoning = evaluate(client, model, scenario, criteria, new_summary)
