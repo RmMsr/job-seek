@@ -49,11 +49,11 @@ def insert_source(conn: sqlite3.Connection, name: str, url: str, fetcher_type: s
 
 
 def update_source(
-    conn: sqlite3.Connection, source_id: int, url: str, fetcher_type: str, enabled: bool
+    conn: sqlite3.Connection, source_id: int, name: str, url: str, fetcher_type: str, enabled: bool
 ) -> None:
     conn.execute(
-        "UPDATE sources SET url = ?, fetcher_type = ?, enabled = ? WHERE id = ?",
-        (url, fetcher_type, int(enabled), source_id),
+        "UPDATE sources SET name = ?, url = ?, fetcher_type = ?, enabled = ? WHERE id = ?",
+        (name, url, fetcher_type, int(enabled), source_id),
     )
     conn.commit()
 

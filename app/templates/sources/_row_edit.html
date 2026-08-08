@@ -4,7 +4,7 @@
           hx-target="#source-row-{{ source.id }}"
           hx-swap="outerHTML"
           style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-      <strong>{{ source.name }}</strong>
+      <input type="text" name="name" value="{{ source.name }}" required style="min-width:120px;">
       <input type="text" name="url" value="{{ source.url }}" required style="flex:1; min-width:200px;">
       <select name="fetcher_type">
         <option value="http" {% if source.fetcher_type == "http" %}selected{% endif %}>http</option>

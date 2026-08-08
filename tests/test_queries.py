@@ -30,12 +30,14 @@ def test_get_sources_enabled_only(conn):
 
 def test_update_source(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
-    q.update_source(conn, sid, url="https://finn.no/new", fetcher_type="playwright", enabled=False)
+    q.update_source(
+        conn, sid, name="Finn AI", url="https://finn.no/new", fetcher_type="playwright", enabled=False
+    )
     source = q.get_source(conn, sid)
     assert source["url"] == "https://finn.no/new"
     assert source["fetcher_type"] == "playwright"
     assert source["enabled"] == 0
-    assert source["name"] == "finn.no"
+    assert source["name"] == "Finn AI"
 
 
 def test_update_scenario(conn):

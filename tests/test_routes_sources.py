@@ -31,6 +31,8 @@ def test_edit_form_returns_source_fields(client, conn):
     sid = _seed(conn)
     resp = client.get(f"/sources/{sid}/edit")
     assert resp.status_code == 200
+    assert "finn.no" in resp.text
+    assert 'name="name"' in resp.text
     assert "https://finn.no" in resp.text
 
 
@@ -38,21 +40,21 @@ def test_update_source(client, conn):
     sid = _seed(conn)
     resp = client.post(
         f"/sources/{sid}",
-        data={"url": "https://finn.no/new", "fetcher_type": "playwright", "enabled": "on"},
+        data={"name": "Finn AI", "url": "https://finn.no/new", "fetcher_type": "playwright", "enabled": "on"},
     )
     assert resp.status_code == 200
     source = q.get_source(conn, sid)
     assert source["url"] == "https://finn.no/new"
     assert source["fetcher_type"] == "playwright"
     assert source["enabled"] == 1
-    assert source["name"] == "finn.no"
+    assert source["name"] == "Finn AI"
 
 
 def test_update_source_unchecked_enabled_disables(client, conn):
     sid = _seed(conn)
     resp = client.post(
         f"/sources/{sid}",
-        data={"url": "https://finn.no", "fetcher_type": "http"},
+        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http"},
     )
     assert resp.status_code == 200
     assert q.get_source(conn, sid)["enabled"] == 0
@@ -100,7 +102,7 @@ def test_update_source_to_slack_shows_login_prompt_when_needed(client, conn):
     with patch.object(SlackFetcher, "check_needs_login", return_value=True):
         resp = client.post(
             f"/sources/{sid}",
-            data={"url": _SLACK_URL, "fetcher_type": "slack", "enabled": "on"},
+            data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack", "enabled": "on"},
         )
     assert resp.status_code == 200
     assert "Log in" in resp.text
@@ -110,7 +112,12 @@ def test_update_source_with_unsupported_slack_url_does_not_crash(client, conn):
     sid = _seed(conn)
     resp = client.post(
         f"/sources/{sid}",
-        data={"url": "https://not-slack.example.com/x", "fetcher_type": "slack", "enabled": "on"},
+        data={
+            "name": "finn.no",
+            "url": "https://not-slack.example.com/x",
+            "fetcher_type": "slack",
+            "enabled": "on",
+        },
     )
     assert resp.status_code == 200
     assert "Log in" not in resp.text

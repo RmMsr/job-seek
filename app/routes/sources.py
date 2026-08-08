@@ -69,6 +69,7 @@ def source_row(source_id: int, request: Request, conn: sqlite3.Connection = Depe
 def update_source(
     source_id: int,
     request: Request,
+    name: str = Form(...),
     url: str = Form(...),
     fetcher_type: str = Form(...),
     enabled: Optional[str] = Form(None),
@@ -76,7 +77,9 @@ def update_source(
     config=Depends(get_config),
 ):
     _get_source_or_404(conn, source_id)
-    q.update_source(conn, source_id, url=url, fetcher_type=fetcher_type, enabled=enabled is not None)
+    q.update_source(
+        conn, source_id, name=name, url=url, fetcher_type=fetcher_type, enabled=enabled is not None
+    )
     source = q.get_source(conn, source_id)
     needs_login = _check_needs_login(source, config, conn)
     return templates.TemplateResponse(
