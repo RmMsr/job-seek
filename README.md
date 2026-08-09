@@ -1,20 +1,30 @@
-# job-seek
+# job-seeker: Find best job matches for you
 
-A single-user local job research tool. Fetches job postings from curated sources, evaluates them against your profile and search criteria using a local LLM, and surfaces well-matching opportunities for triage in a browser UI.
+You need:
 
-## What it does
+1. **Job sources**: URLs where job offers are published. Like job boards or Slack channel.
+2. **Your portfolio**: A text describing your skills, experience expectations and dislikes.
+3. **Work scenarios**: A set of definitions and rules what you are looking for.
+4. **GenAI LLM API key**: Credentials for an Open AI copatible chat completions API. Either a local LLM (ollama, llama.cpp, LM-Studio, ...) or one of the public providers.
 
-- Fetches from public job boards (HTTP) and login-gated sources like Slack communities (Playwright with a persistent browser session — log in once, reused automatically)
-- Classifies each post as a full job posting, a lead, irrelevant, or an error
-- Summarises and scores each job against your profile and active search scenario
-- Presents results as a filterable triage list — accept, reject, or mark as invalid with a note
-- Refines your search criteria over time based on your feedback
+You get:
+
+- **Filtered list of conrete jobs** matching your scenarios.
+- **Easy to read job summary**: See all relevant facts at once.
+- **Prioritized ranking ob opportunities** evaluated against your skills, career stage and preferences.
+
+Daily workflow:
+
+1. Fetch newly published jobs
+2. Check the findings. Leave feedback to finetune scenario specifications.
+3. Approve or reject jobs. Leave notes to improve your profile.
+4. Apply (not part of the app yet)
 
 ## Requirements
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- A running [Ollama](https://ollama.com/) instance (or any OpenAI-compatible endpoint)
+- OpenAI chat-completion compatible GenAI endpoint
 
 ## Setup
 
