@@ -15,6 +15,7 @@ from app.fetchers.http import HttpFetcher
 from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.slack import SlackFetcher
 from app.fetchers.finn import FinnListingFetcher
+from app.fetchers.generic_listing import GenericListingFetcher
 from app.scenario_version import compute_version_hash, compute_profile_hash
 
 logger = logging.getLogger("job_seek")
@@ -29,7 +30,13 @@ class FetchResult:
     error: str | None
 
 
-def _make_fetcher(source: dict, profile_dir: str, conn: sqlite3.Connection):
+def _make_fetcher(
+    source: dict,
+    profile_dir: str,
+    conn: sqlite3.Connection,
+    client: openai.OpenAI | None = None,
+    model: str | None = None,
+):
     ft = source["fetcher_type"]
     if ft == "http":
         return HttpFetcher(source)
@@ -37,6 +44,8 @@ def _make_fetcher(source: dict, profile_dir: str, conn: sqlite3.Connection):
         return SlackFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "finn_listing":
         return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
+    if ft == "generic_listing":
+        return GenericListingFetcher(source, client, model, known_urls=q.get_all_job_urls(conn))
     return PlaywrightFetcher(source, profile_dir)
 
 
@@ -109,7 +118,7 @@ def run_fetch(
     run_id = q.start_fetch_run(conn, source["id"])
     yield _progress(f"Starting fetch for '{source['name']}' ({source['fetcher_type']})")
     try:
-        fetcher = _make_fetcher(source, profile_dir, conn)
+        fetcher = _make_fetcher(source, profile_dir, conn, client, model)
         raw_jobs: list[RawJob] = fetcher.fetch()
         jobs_found = len(raw_jobs)
         jobs_new = 0

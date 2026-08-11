@@ -6,6 +6,7 @@ from app.db import queries as q
 from app.pipeline import run_fetch, run_reprocess_job, FetchResult, _make_fetcher
 from app.pipeline import run_add_job
 from app.fetchers.finn import FinnListingFetcher
+from app.fetchers.generic_listing import GenericListingFetcher
 from app.fetchers.base import RawJob
 
 
@@ -249,6 +250,37 @@ def test_make_fetcher_http_ignores_conn(conn):
     source = {"id": 1, "name": "test", "url": "http://x", "fetcher_type": "http"}
     fetcher = _make_fetcher(source, "browser-profile", conn)
     assert type(fetcher).__name__ == "HttpFetcher"
+
+
+def test_make_fetcher_dispatches_generic_listing(conn):
+    source = {"id": 1, "name": "Careers", "url": "http://x", "fetcher_type": "generic_listing"}
+    client = MagicMock()
+    fetcher = _make_fetcher(source, "browser-profile", conn, client, "llama3.2")
+    assert isinstance(fetcher, GenericListingFetcher)
+
+
+def test_make_fetcher_generic_listing_passes_known_urls_and_client(conn):
+    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")
+    source = {"id": 1, "name": "Careers", "url": "http://x", "fetcher_type": "generic_listing"}
+    client = MagicMock()
+
+    fetcher = _make_fetcher(source, "browser-profile", conn, client, "llama3.2")
+
+    assert fetcher._known_urls == frozenset({"http://known/1"})
+    assert fetcher._client is client
+    assert fetcher._model == "llama3.2"
+
+
+def test_make_fetcher_slack_still_works_without_client_or_model(conn):
+    source = {
+        "id": 1,
+        "name": "Example Slack",
+        "url": "https://example-workspace.slack.com/archives/C0EXAMPLE1",
+        "fetcher_type": "slack",
+    }
+    fetcher = _make_fetcher(source, "browser-profile", conn)
+    assert type(fetcher).__name__ == "SlackFetcher"
 
 
 def test_run_fetch_scores_against_every_scenario(conn, source):
