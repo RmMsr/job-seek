@@ -2,7 +2,7 @@
   <p>Detected {{ link_count }} job posting link{{ 's' if link_count != 1 else '' }} at <strong>{{ domain }}</strong>.</p>
   <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
     <input type="hidden" id="listing-url" value="{{ url }}">
-    <input type="text" id="listing-name" value="{{ default_name }}" style="flex:1; min-width:160px;">
+    <input type="text" id="listing-name" value="{{ default_name }}" class="text-input" style="flex:1; min-width:160px;">
     <button type="button" class="btn"
       data-progress-url="/jobs/add-listing-source{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
       data-progress-body-url="#listing-url"

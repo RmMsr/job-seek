@@ -67,7 +67,7 @@
     .bulk-clear-x { position: absolute; top: 0.4rem; right: 0.5rem; padding: 0 6px; line-height: 1.4;
       border: none; border-radius: 4px; background: transparent; color: #888; font-size: 1.2rem; cursor: pointer; }
     .bulk-clear-x:hover { color: #333; background: #f1f1f1; }
-    .btn, select { padding: 6px 14px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font: inherit; }
+    .btn, select, .text-input { padding: 6px 14px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; font: inherit; }
     .btn { cursor: pointer; }
     .btn-accept { background: #d4edda; border-color: #28a745; }
     .btn-reject { background: #f8d7da; border-color: #dc3545; }
@@ -115,7 +115,6 @@
   </style>
 </head>
 <body>
-  <div id="notice-stack" aria-live="polite"></div>
   <nav>
     <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Start</a>
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
@@ -310,6 +309,17 @@
       }
 
       document.body.addEventListener("click", onClick);
+
+      // A <form> wrapping one of these buttons (e.g. a text input + Add
+      // button) has no native submit handler of its own — pressing Enter in
+      // the input would otherwise just do a default (and useless) form
+      // submission. Forward it to the button's own click handling instead.
+      document.body.addEventListener("submit", function (evt) {
+        var btn = evt.target.querySelector("[data-progress-url]");
+        if (!btn) return;
+        evt.preventDefault();
+        btn.click();
+      });
     })();
   </script>
   <script>
