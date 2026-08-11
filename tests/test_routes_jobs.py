@@ -1250,6 +1250,38 @@ def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(client, co
     assert len(q.get_jobs(conn)) == 1
 
 
+def _fake_run_fetch(source, conn, client, model, profile_dir):
+    yield f"Starting fetch for '{source['name']}'"
+    q.insert_job(conn, source_id=source["id"], url="https://careers.example.com/jobs/1", title="T", company="C", raw_text="r")
+    yield "Fetch complete"
+
+
+def test_add_listing_source_creates_source_and_streams_fetch(client, conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert "Fetch complete" in resp.text
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
+    assert len(sources) == 1
+    assert sources[0]["name"] == "careers.example.com"
+    assert sources[0]["url"] == "https://careers.example.com/jobs"
+
+
+def test_add_listing_source_stream_ends_with_html_chunk(client, conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert 'HTML:<div class="filter-bar">' in resp.text
+
+
 def test_job_list_has_add_by_url_form(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200

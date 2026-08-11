@@ -6,9 +6,9 @@ import openai
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_ai_client, get_model
+from app.deps import get_db, get_ai_client, get_model, get_config
 from app.db import queries as q
-from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job
+from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job, run_fetch
 from app.fetchers.links import extract_links
 from app.ai.detect_listing import detect_listing
 from app.template_env import templates
@@ -413,6 +413,37 @@ def job_add_by_url(
                         yield next(gen) + "\n"
                 except StopIteration:
                     pass
+
+        html_chunk = templates.get_template("jobs/_content.html").render(
+            request=request, **_content_context(conn, status, content_type)
+        )
+        yield "HTML:" + html_chunk.replace("\n", "") + "\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
+@router.post("/jobs/add-listing-source")
+def job_add_listing_source(
+    request: Request,
+    url: str = Form(...),
+    name: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+    config=Depends(get_config),
+):
+    status = request.query_params.get("status") or None
+    content_type = request.query_params.get("content_type") or None
+
+    def stream():
+        source_id = q.insert_source(conn, name, url, "generic_listing")
+        source = q.get_source(conn, source_id)
+        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+        try:
+            while True:
+                yield next(gen) + "\n"
+        except StopIteration:
+            pass
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)
