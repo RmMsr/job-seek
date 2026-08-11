@@ -182,22 +182,30 @@
             progressEl.textContent = lastLine || "Failed";
             return;
           }
-          progressEl.remove();
-          for (var k = 0; k < bodyFieldNames.length; k++) {
-            var clearFieldEl = document.querySelector(el.getAttribute("data-progress-body-" + bodyFieldNames[k]));
-            if (clearFieldEl) clearFieldEl.value = "";
-          }
-          if (oobMode) {
-            // Each HTML: chunk was already applied as it streamed in via applyOob().
-          } else if (targetSelector) {
-            var target = document.querySelector(targetSelector);
-            if (target && htmlChunk != null) {
-              target.innerHTML = htmlChunk;
-              if (window.htmx) window.htmx.process(target);
+          // The server may stream a final informational line (e.g. "Failed to
+          // fetch: ..." or "Already tracked: ...") without it counting as a
+          // transport-level failure — the request still completes normally.
+          // Leave that line on screen for a moment before wiping it and doing
+          // the swap below, so it's readable instead of flashing by instantly.
+          tick();
+          setTimeout(function () {
+            progressEl.remove();
+            for (var k = 0; k < bodyFieldNames.length; k++) {
+              var clearFieldEl = document.querySelector(el.getAttribute("data-progress-body-" + bodyFieldNames[k]));
+              if (clearFieldEl) clearFieldEl.value = "";
             }
-          } else {
-            location.reload();
-          }
+            if (oobMode) {
+              // Each HTML: chunk was already applied as it streamed in via applyOob().
+            } else if (targetSelector) {
+              var target = document.querySelector(targetSelector);
+              if (target && htmlChunk != null) {
+                target.innerHTML = htmlChunk;
+                if (window.htmx) window.htmx.process(target);
+              }
+            } else {
+              location.reload();
+            }
+          }, 1500);
         }
 
         function applyOob(chunk) {
