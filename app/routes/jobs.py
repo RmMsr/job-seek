@@ -30,12 +30,21 @@ def _fetch_url_html(url: str) -> str:
     return resp.text
 
 
+_MIN_CONTENT_LENGTH = 200  # below this, treat as no real content (e.g. a JS-only page's noscript shell)
+
+
 def _extract_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator="\n")
-    if not text.strip():
-        raise _FetchError("page had no extractable text")
+    if len(text.strip()) < _MIN_CONTENT_LENGTH:
+        raise _FetchError("page had little to no extractable text (it may require JavaScript to render)")
     return text
+
+
+def _insert_error_job(conn: sqlite3.Connection, url: str) -> None:
+    source_id = q.get_or_create_manual_source(conn)
+    job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
+    q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
 
 
 def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
@@ -386,9 +395,7 @@ def job_add_by_url(
             try:
                 html = _fetch_url_html(url)
             except _FetchError as exc:
-                source_id = q.get_or_create_manual_source(conn)
-                job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
-                q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
+                _insert_error_job(conn, url)
                 yield f"Failed to fetch: {exc}\n"
             else:
                 links = extract_links(html, url)
@@ -405,14 +412,19 @@ def job_add_by_url(
                     panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
                     yield "HTML:" + panel.replace("\n", "") + "\n"
                     return
-                source_id = q.get_or_create_manual_source(conn)
-                raw_text = _extract_text(html)
-                gen = run_add_job(conn, client, model, source_id, url, raw_text)
                 try:
-                    while True:
-                        yield next(gen) + "\n"
-                except StopIteration:
-                    pass
+                    raw_text = _extract_text(html)
+                except _FetchError as exc:
+                    _insert_error_job(conn, url)
+                    yield f"Failed to fetch: {exc}\n"
+                else:
+                    source_id = q.get_or_create_manual_source(conn)
+                    gen = run_add_job(conn, client, model, source_id, url, raw_text)
+                    try:
+                        while True:
+                            yield next(gen) + "\n"
+                    except StopIteration:
+                        pass
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)

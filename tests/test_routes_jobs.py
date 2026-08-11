@@ -1128,6 +1128,16 @@ def test_job_collapse_without_detail_flag_shows_checkbox(client, conn):
     assert '<label class="job-select-wrap">' in resp.text
 
 
+_JOB_POSTING_HTML = (
+    "<html><body><p>We are hiring a Senior Software Engineer to join our platform team. "
+    "You will design, build, and operate distributed systems that power our product for "
+    "millions of users worldwide. We're looking for someone with strong experience in "
+    "backend development, a collaborative mindset, and a passion for shipping reliable "
+    "software. This is a full-time, remote-friendly position with competitive pay and "
+    "benefits.</p></body></html>"
+)
+
+
 def _fake_run_add_job(conn, client, model, source_id, url, raw_text):
     jid = q.insert_job(conn, source_id=source_id, url=url, title="Fake Title", company="Acme", raw_text=raw_text)
     q.update_job_pipeline(conn, jid, simplified_content=raw_text, content_type="job_posting", summary="A role")
@@ -1140,7 +1150,7 @@ _NOT_A_LISTING = {"is_listing": False, "job_links": []}
 @respx.mock
 def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
     respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
@@ -1157,7 +1167,7 @@ def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
 @respx.mock
 def test_add_job_by_url_stream_ends_with_single_html_chunk(client, conn):
     respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
@@ -1213,6 +1223,30 @@ def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
     assert jobs[0]["content_type"] == "error"
 
 
+@respx.mock
+def test_add_job_by_url_js_only_page_treated_as_fetch_failure(client, conn):
+    # Real shell HTML from a client-side-rendered job board (Ashby): 200 OK, but the
+    # only text present is a noscript-style placeholder — no real posting content.
+    js_shell_html = (
+        "<html><body>"
+        "<h1>Trener Jobs</h1>"
+        "<noscript>You need to enable JavaScript to run this app.</noscript>"
+        "</body></html>"
+    )
+    respx.get("http://example.com/js-app").mock(return_value=httpx.Response(200, text=js_shell_html))
+
+    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
+
+    assert resp.status_code == 200
+    assert "Failed to fetch" in resp.text
+    assert "JavaScript" in resp.text
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["content_type"] == "error"
+    assert jobs[0]["url"] == "http://example.com/js-app"
+
+
 _IS_A_LISTING = {
     "is_listing": True,
     "job_links": ["https://careers.example.com/jobs/1", "https://careers.example.com/jobs/2"],
@@ -1238,7 +1272,7 @@ def test_add_job_by_url_listing_detected_shows_confirm_panel(client, conn):
 @respx.mock
 def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(client, conn):
     respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p><a href='/apply'>Apply</a></body></html>")
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML.replace("</body>", "<a href='/apply'>Apply</a></body>"))
     )
     one_link_listing = {"is_listing": True, "job_links": ["http://example.com/job/1"]}
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
