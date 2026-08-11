@@ -45,10 +45,12 @@ def _extract_text(html: str) -> str:
     return text
 
 
-def _insert_error_job(conn: sqlite3.Connection, url: str) -> None:
+def _insert_error_job(conn: sqlite3.Connection, url: str, reason: str) -> int:
     source_id = q.get_or_create_manual_source(conn)
     job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
+    q.update_job_feedback(conn, job_id, "trash", reason)
+    return job_id
 
 
 def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
@@ -400,10 +402,16 @@ def job_add_by_url(
     def stream():
         existing_job = q.get_job_by_url(conn, url)
         if existing_job is not None:
-            yield _notice_line(
-                "jobs/_already_tracked.html", request=request, kind="job",
-                link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
-            )
+            if existing_job["content_type"] == "error":
+                yield _notice_line(
+                    "jobs/_already_tracked.html", level="warning", request=request, kind="error",
+                    link_href=f"/jobs/{existing_job['id']}",
+                )
+            else:
+                yield _notice_line(
+                    "jobs/_already_tracked.html", request=request, kind="job",
+                    link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
+                )
         else:
             existing_source = q.get_source_by_url(conn, url)
             if existing_source is not None:
@@ -416,7 +424,7 @@ def job_add_by_url(
                 try:
                     html = _fetch_url_html(url)
                 except _FetchError as exc:
-                    _insert_error_job(conn, url)
+                    _insert_error_job(conn, url, f"Failed to fetch: {exc}")
                     yield _notice_line(
                         "jobs/_fetch_failed_notice.html", level="warning",
                         request=request, url=url, reason=str(exc),
@@ -439,7 +447,9 @@ def job_add_by_url(
                     try:
                         raw_text = _extract_text(html)
                     except _NoContentError:
-                        _insert_error_job(conn, url)
+                        _insert_error_job(
+                            conn, url, "No extractable content — page likely requires JavaScript to render",
+                        )
                         yield _notice_line(
                             "jobs/_no_content_notice.html", level="warning", request=request, url=url,
                         )

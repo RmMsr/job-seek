@@ -1218,6 +1218,22 @@ def test_add_job_by_url_existing_source_url_shows_link_to_source(client, conn):
     assert q.get_jobs(conn) == []
 
 
+def test_add_job_by_url_duplicate_error_job_points_to_trash(client, conn):
+    sid = q.insert_source(conn, "Manual", "", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/broken", title="http://example.com/broken", company="", raw_text="")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="error")
+    q.update_job_feedback(conn, jid, "trash", "Failed to fetch: HTTP 404")
+
+    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/broken"})
+
+    assert resp.status_code == 200
+    assert "NOTICE:warning:" in resp.text
+    assert "recorded as an error" in resp.text
+    assert f'<a href="/jobs/{jid}">view it</a>' in resp.text
+    assert '<a href="/jobs?status=trash">Trash</a>' in resp.text
+    assert len(q.get_jobs(conn)) == 1
+
+
 @respx.mock
 def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
     respx.get("http://example.com/broken").mock(return_value=httpx.Response(404))
@@ -1231,6 +1247,7 @@ def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
+    assert jobs[0]["status"] == "trash"
     assert jobs[0]["url"] == "http://example.com/broken"
 
 
@@ -1246,6 +1263,7 @@ def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
+    assert jobs[0]["status"] == "trash"
 
 
 @respx.mock
@@ -1271,6 +1289,7 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
+    assert jobs[0]["status"] == "trash"
     assert jobs[0]["url"] == "http://example.com/js-app"
 
 

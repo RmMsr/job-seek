@@ -6,13 +6,15 @@
   <input type="hidden" name="status_filter" value="{{ status or '' }}">
   <input type="hidden" name="content_type_filter" value="{{ content_type or '' }}">
 </form>
-<form class="add-job-by-url" style="display:flex; gap:0.5rem; align-items:center; margin-bottom:1rem;">
-  <input type="url" id="add-job-url" name="url" placeholder="Paste a job posting URL…" required class="text-input" style="flex:1; min-width:200px;">
-  <button type="button" class="btn"
-    data-progress-url="/jobs/add-by-url"
-    data-progress-body-url="#add-job-url"
-    data-progress-target="#jobs-content"
-    data-progress-display="#add-job-progress">Add</button>
+<form class="add-job-by-url" style="margin-bottom:1rem;">
+  <div style="display:flex; gap:0.5rem; align-items:center;">
+    <input type="url" id="add-job-url" name="url" placeholder="Paste a job posting URL…" required class="text-input" style="flex:1; min-width:200px;">
+    <button type="button" class="btn"
+      data-progress-url="/jobs/add-by-url"
+      data-progress-body-url="#add-job-url"
+      data-progress-target="#jobs-content"
+      data-progress-display="#add-job-progress">Add</button>
+  </div>
   <span id="add-job-progress" class="reset-progress" aria-live="polite"></span>
 </form>
 <div id="notice-stack" aria-live="polite"></div>

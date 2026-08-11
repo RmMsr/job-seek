@@ -1,1 +1,5 @@
+{% if kind == "error" %}
+<p><span class="tag">error</span> Already tracked, but recorded as an error — <a href="{{ link_href }}">view it</a>, or see it under <a href="/jobs?status=trash">Trash</a>.</p>
+{% else %}
 <p>Already tracked as a {{ kind }} — <a href="{{ link_href }}">{{ link_text }}</a>.</p>
+{% endif %}
