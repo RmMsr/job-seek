@@ -1225,7 +1225,9 @@ def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
     resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/broken"})
 
     assert resp.status_code == 200
-    assert "Failed to fetch" in resp.text
+    assert "NOTICE:warning:" in resp.text
+    assert "Couldn't add" in resp.text
+    assert "HTTP 404" in resp.text
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
@@ -1239,14 +1241,15 @@ def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
     resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/unreachable"})
 
     assert resp.status_code == 200
-    assert "Failed to fetch" in resp.text
+    assert "NOTICE:warning:" in resp.text
+    assert "Couldn't add" in resp.text
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
 
 
 @respx.mock
-def test_add_job_by_url_js_only_page_treated_as_fetch_failure(client, conn):
+def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
     # Real shell HTML from a client-side-rendered job board (Ashby): 200 OK, but the
     # only text present is a noscript-style placeholder — no real posting content.
     js_shell_html = (
@@ -1261,7 +1264,9 @@ def test_add_job_by_url_js_only_page_treated_as_fetch_failure(client, conn):
         resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
 
     assert resp.status_code == 200
-    assert "Failed to fetch" in resp.text
+    assert "NOTICE:warning:" in resp.text
+    assert "No job content detected" in resp.text
+    assert "load its content dynamically" in resp.text
     assert "JavaScript" in resp.text
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1

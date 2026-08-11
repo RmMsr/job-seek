@@ -103,9 +103,19 @@
     .how-it-works li { margin-bottom: 0.5rem; }
     .how-it-works li ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
     .how-it-works li ol li { color: #444; }
+    #notice-stack:empty { display: none; }
+    .notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+      padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; border-radius: 6px;
+      border: 1px solid #dee2e6; background: #f8f9fa; }
+    .notice p { margin: 0; }
+    .notice-warning { background: #fff3cd; border-color: #ffe69c; color: #856404; }
+    .notice-dismiss { flex: none; background: none; border: none; cursor: pointer; font-size: 1.1rem;
+      line-height: 1; color: inherit; opacity: 0.6; padding: 0 0.15rem; }
+    .notice-dismiss:hover { opacity: 1; }
   </style>
 </head>
 <body>
+  <div id="notice-stack" aria-live="polite"></div>
   <nav>
     <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Start</a>
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
@@ -117,6 +127,27 @@
   <main>{% block content %}{% endblock %}</main>
   <script>
     (function () {
+      function showNotice(html, level) {
+        var stack = document.getElementById("notice-stack");
+        if (!stack) return;
+        var wrapper = document.createElement("div");
+        wrapper.className = "notice" + (level === "warning" ? " notice-warning" : "");
+        var content = document.createElement("div");
+        content.innerHTML = html;
+        var dismissBtn = document.createElement("button");
+        dismissBtn.type = "button";
+        dismissBtn.className = "notice-dismiss";
+        dismissBtn.setAttribute("aria-label", "Dismiss");
+        dismissBtn.textContent = "×";
+        dismissBtn.addEventListener("click", function () { wrapper.remove(); });
+        wrapper.appendChild(content);
+        wrapper.appendChild(dismissBtn);
+        stack.appendChild(wrapper);
+        setTimeout(function () {
+          if (wrapper.parentNode) wrapper.remove();
+        }, 10000);
+      }
+
       function onClick(evt) {
         var el = evt.target.closest("[data-progress-url]");
         if (!el) return;
@@ -229,7 +260,15 @@
 
         function handleLine(line) {
           if (!line) return;
-          if (line.indexOf("HTML:") === 0) {
+          if (line.indexOf("NOTICE:") === 0) {
+            var noticeBody = line.slice(7);
+            var noticeLevel = "info";
+            if (noticeBody.indexOf("warning:") === 0) {
+              noticeLevel = "warning";
+              noticeBody = noticeBody.slice(8);
+            }
+            showNotice(noticeBody, noticeLevel);
+          } else if (line.indexOf("HTML:") === 0) {
             var chunk = line.slice(5);
             if (oobMode) {
               applyOob(chunk);

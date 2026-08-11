@@ -20,6 +20,10 @@ class _FetchError(Exception):
     pass
 
 
+class _NoContentError(_FetchError):
+    pass
+
+
 def _fetch_url_html(url: str) -> str:
     try:
         resp = httpx.get(url, timeout=30, follow_redirects=True)
@@ -37,7 +41,7 @@ def _extract_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator="\n")
     if len(text.strip()) < _MIN_CONTENT_LENGTH:
-        raise _FetchError("page had little to no extractable text (it may require JavaScript to render)")
+        raise _NoContentError("page had little to no extractable text")
     return text
 
 
@@ -45,6 +49,12 @@ def _insert_error_job(conn: sqlite3.Connection, url: str) -> None:
     source_id = q.get_or_create_manual_source(conn)
     job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
+
+
+def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
+    rendered = templates.get_template(template_name).render(**context)
+    prefix = "NOTICE:warning:" if level == "warning" else "NOTICE:"
+    return prefix + rendered.replace("\n", "") + "\n"
 
 
 def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
@@ -390,56 +400,57 @@ def job_add_by_url(
     def stream():
         existing_job = q.get_job_by_url(conn, url)
         if existing_job is not None:
-            notice = templates.get_template("jobs/_already_tracked.html").render(
-                request=request, kind="job",
+            yield _notice_line(
+                "jobs/_already_tracked.html", request=request, kind="job",
                 link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
             )
-            yield "HTML:" + notice.replace("\n", "") + "\n"
-            return
-
-        existing_source = q.get_source_by_url(conn, url)
-        if existing_source is not None:
-            notice = templates.get_template("jobs/_already_tracked.html").render(
-                request=request, kind="source",
-                link_href=f"/sources#source-row-{existing_source['id']}",
-                link_text=f'View "{existing_source["name"]}" in Sources',
-            )
-            yield "HTML:" + notice.replace("\n", "") + "\n"
-            return
-
-        try:
-            html = _fetch_url_html(url)
-        except _FetchError as exc:
-            _insert_error_job(conn, url)
-            yield f"Failed to fetch: {exc}\n"
         else:
-            links = extract_links(html, url)
-            detection = detect_listing(client, model, links, url)
-            if detection["is_listing"] and len(detection["job_links"]) >= 2:
-                panel_context = {
-                    "request": request,
-                    "url": url,
-                    "link_count": len(detection["job_links"]),
-                    "domain": urlsplit(url).netloc,
-                    "default_name": urlsplit(url).netloc,
-                }
-                panel_context.update(_filter_context(request))
-                panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
-                yield "HTML:" + panel.replace("\n", "") + "\n"
-                return
-            try:
-                raw_text = _extract_text(html)
-            except _FetchError as exc:
-                _insert_error_job(conn, url)
-                yield f"Failed to fetch: {exc}\n"
+            existing_source = q.get_source_by_url(conn, url)
+            if existing_source is not None:
+                yield _notice_line(
+                    "jobs/_already_tracked.html", request=request, kind="source",
+                    link_href=f"/sources#source-row-{existing_source['id']}",
+                    link_text=f'View "{existing_source["name"]}" in Sources',
+                )
             else:
-                source_id = q.get_or_create_manual_source(conn)
-                gen = run_add_job(conn, client, model, source_id, url, raw_text)
                 try:
-                    while True:
-                        yield next(gen) + "\n"
-                except StopIteration:
-                    pass
+                    html = _fetch_url_html(url)
+                except _FetchError as exc:
+                    _insert_error_job(conn, url)
+                    yield _notice_line(
+                        "jobs/_fetch_failed_notice.html", level="warning",
+                        request=request, url=url, reason=str(exc),
+                    )
+                else:
+                    links = extract_links(html, url)
+                    detection = detect_listing(client, model, links, url)
+                    if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                        panel_context = {
+                            "request": request,
+                            "url": url,
+                            "link_count": len(detection["job_links"]),
+                            "domain": urlsplit(url).netloc,
+                            "default_name": urlsplit(url).netloc,
+                        }
+                        panel_context.update(_filter_context(request))
+                        panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
+                        yield "HTML:" + panel.replace("\n", "") + "\n"
+                        return
+                    try:
+                        raw_text = _extract_text(html)
+                    except _NoContentError:
+                        _insert_error_job(conn, url)
+                        yield _notice_line(
+                            "jobs/_no_content_notice.html", level="warning", request=request, url=url,
+                        )
+                    else:
+                        source_id = q.get_or_create_manual_source(conn)
+                        gen = run_add_job(conn, client, model, source_id, url, raw_text)
+                        try:
+                            while True:
+                                yield next(gen) + "\n"
+                        except StopIteration:
+                            pass
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)
