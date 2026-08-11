@@ -134,11 +134,21 @@
           body = new URLSearchParams();
           checked.forEach(function (cb) { body.append("job_ids", cb.value); });
         }
-        if (el.hasAttribute("data-progress-url-input")) {
-          var urlInputEl = document.querySelector(el.getAttribute("data-progress-url-input"));
-          if (!urlInputEl || !urlInputEl.value) return;
+        var bodyFieldNames = [];
+        for (var i = 0; i < el.attributes.length; i++) {
+          var attrName = el.attributes[i].name;
+          if (attrName.indexOf("data-progress-body-") === 0) {
+            bodyFieldNames.push(attrName.slice("data-progress-body-".length));
+          }
+        }
+        if (bodyFieldNames.length) {
           body = new URLSearchParams();
-          body.append("url", urlInputEl.value);
+          for (var j = 0; j < bodyFieldNames.length; j++) {
+            var fieldName = bodyFieldNames[j];
+            var fieldEl = document.querySelector(el.getAttribute("data-progress-body-" + fieldName));
+            if (!fieldEl || !fieldEl.value) return;
+            body.append(fieldName, fieldEl.value);
+          }
         }
         var displaySelector = el.getAttribute("data-progress-display");
         var displayTarget = displaySelector ? document.querySelector(displaySelector) : null;
@@ -173,9 +183,9 @@
             return;
           }
           progressEl.remove();
-          if (el.hasAttribute("data-progress-url-input")) {
-            var clearInputEl = document.querySelector(el.getAttribute("data-progress-url-input"));
-            if (clearInputEl) clearInputEl.value = "";
+          for (var k = 0; k < bodyFieldNames.length; k++) {
+            var clearFieldEl = document.querySelector(el.getAttribute("data-progress-body-" + bodyFieldNames[k]));
+            if (clearFieldEl) clearFieldEl.value = "";
           }
           if (oobMode) {
             // Each HTML: chunk was already applied as it streamed in via applyOob().

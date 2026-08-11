@@ -1287,5 +1287,12 @@ def test_job_list_has_add_by_url_form(client, conn):
     assert resp.status_code == 200
     assert 'id="add-job-url"' in resp.text
     assert 'data-progress-url="/jobs/add-by-url"' in resp.text
-    assert 'data-progress-url-input="#add-job-url"' in resp.text
+    assert 'data-progress-body-url="#add-job-url"' in resp.text
     assert 'data-progress-target="#jobs-content"' in resp.text
+
+
+def test_job_list_add_by_url_button_uses_generalized_body_attribute(client, conn):
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert 'data-progress-body-url="#add-job-url"' in resp.text
+    assert 'data-progress-url-input' not in resp.text
