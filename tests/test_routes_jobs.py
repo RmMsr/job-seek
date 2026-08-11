@@ -1134,12 +1134,16 @@ def _fake_run_add_job(conn, client, model, source_id, url, raw_text):
     yield f"Classified as job_posting: {url}"
 
 
+_NOT_A_LISTING = {"is_listing": False, "job_links": []}
+
+
 @respx.mock
 def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
     )
-    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
         resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
     assert resp.status_code == 200
     assert "Classified as job_posting" in resp.text
@@ -1155,7 +1159,8 @@ def test_add_job_by_url_stream_ends_with_single_html_chunk(client, conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
     )
-    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
         resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
     assert resp.status_code == 200
     # Only one HTML: chunk should stream back — the target-mode swap in base.html's
@@ -1206,6 +1211,43 @@ def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
+
+
+_IS_A_LISTING = {
+    "is_listing": True,
+    "job_links": ["https://careers.example.com/jobs/1", "https://careers.example.com/jobs/2"],
+}
+
+
+@respx.mock
+def test_add_job_by_url_listing_detected_shows_confirm_panel(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
+    )
+    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+
+    assert resp.status_code == 200
+    assert "Detected 2 job posting" in resp.text
+    assert "careers.example.com" in resp.text
+    assert 'data-progress-url="/jobs/add-listing-source"' in resp.text
+    assert q.get_jobs(conn) == []
+    assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []
+
+
+@respx.mock
+def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p><a href='/apply'>Apply</a></body></html>")
+    )
+    one_link_listing = {"is_listing": True, "job_links": ["http://example.com/job/1"]}
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
+         patch("app.routes.jobs.detect_listing", return_value=one_link_listing):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+
+    assert resp.status_code == 200
+    assert "Classified as job_posting" in resp.text
+    assert len(q.get_jobs(conn)) == 1
 
 
 def test_job_list_has_add_by_url_form(client, conn):

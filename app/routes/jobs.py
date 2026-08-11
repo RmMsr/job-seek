@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sqlite3
+from urllib.parse import urlsplit
 import httpx
 import openai
 from bs4 import BeautifulSoup
@@ -8,6 +9,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job
+from app.fetchers.links import extract_links
+from app.ai.detect_listing import detect_listing
 from app.template_env import templates
 
 router = APIRouter()
@@ -17,14 +20,18 @@ class _FetchError(Exception):
     pass
 
 
-def _fetch_url_text(url: str) -> str:
+def _fetch_url_html(url: str) -> str:
     try:
         resp = httpx.get(url, timeout=30, follow_redirects=True)
     except httpx.HTTPError as exc:
         raise _FetchError(str(exc)) from exc
     if resp.status_code != 200:
         raise _FetchError(f"HTTP {resp.status_code}")
-    soup = BeautifulSoup(resp.text, "html.parser")
+    return resp.text
+
+
+def _extract_text(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(separator="\n")
     if not text.strip():
         raise _FetchError("page had no extractable text")
@@ -376,14 +383,30 @@ def job_add_by_url(
         if existing is not None:
             yield f"Already tracked: {url} (see /jobs/{existing['id']})\n"
         else:
-            source_id = q.get_or_create_manual_source(conn)
             try:
-                raw_text = _fetch_url_text(url)
+                html = _fetch_url_html(url)
             except _FetchError as exc:
+                source_id = q.get_or_create_manual_source(conn)
                 job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
                 q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
                 yield f"Failed to fetch: {exc}\n"
             else:
+                links = extract_links(html, url)
+                detection = detect_listing(client, model, links, url)
+                if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                    panel_context = {
+                        "request": request,
+                        "url": url,
+                        "link_count": len(detection["job_links"]),
+                        "domain": urlsplit(url).netloc,
+                        "default_name": urlsplit(url).netloc,
+                    }
+                    panel_context.update(_filter_context(request))
+                    panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
+                    yield "HTML:" + panel.replace("\n", "") + "\n"
+                    return
+                source_id = q.get_or_create_manual_source(conn)
+                raw_text = _extract_text(html)
                 gen = run_add_job(conn, client, model, source_id, url, raw_text)
                 try:
                     while True:
@@ -391,9 +414,9 @@ def job_add_by_url(
                 except StopIteration:
                     pass
 
-        html = templates.get_template("jobs/_content.html").render(
+        html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)
         )
-        yield "HTML:" + html.replace("\n", "") + "\n"
+        yield "HTML:" + html_chunk.replace("\n", "") + "\n"
 
     return StreamingResponse(stream(), media_type="text/plain")
