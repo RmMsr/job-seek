@@ -747,3 +747,39 @@ def test_init_db_migrates_jobs_status_invalid_to_trash(conn):
     # Idempotent: running init_db again doesn't error or lose data.
     init_db(conn)
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+def test_sources_accepts_generic_listing_fetcher_type(conn):
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('Careers Page', 'http://x', 'generic_listing')"
+    )
+
+
+def test_init_db_migrates_sources_table_missing_generic_listing_type(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('Careers Page', 'http://y', 'generic_listing')"
+    )
+    rows = conn.execute("SELECT name, url, fetcher_type FROM sources ORDER BY id").fetchall()
+    assert [dict(r) for r in rows] == [
+        {"name": "s", "url": "http://x", "fetcher_type": "http"},
+        {"name": "Careers Page", "url": "http://y", "fetcher_type": "generic_listing"},
+    ]
