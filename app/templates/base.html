@@ -106,7 +106,8 @@
     #notice-stack:empty { display: none; }
     .notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
       padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; border-radius: 6px;
-      border: 1px solid #dee2e6; background: #f8f9fa; }
+      border: 1px solid #dee2e6; background: #f8f9fa; transition: opacity 0.6s ease; }
+    .notice.notice-fade-out { opacity: 0; }
     .notice p { margin: 0; }
     .notice-warning { background: #fff3cd; border-color: #ffe69c; color: #856404; }
     .notice-dismiss { flex: none; background: none; border: none; cursor: pointer; font-size: 1.1rem;
@@ -143,8 +144,11 @@
         wrapper.appendChild(dismissBtn);
         stack.appendChild(wrapper);
         setTimeout(function () {
-          if (wrapper.parentNode) wrapper.remove();
-        }, 10000);
+          wrapper.classList.add("notice-fade-out");
+          setTimeout(function () {
+            if (wrapper.parentNode) wrapper.remove();
+          }, 600);
+        }, 30000);
       }
 
       function onClick(evt) {
