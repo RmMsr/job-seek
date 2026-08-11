@@ -62,6 +62,16 @@ def test_get_job_by_url_returns_none_when_missing(conn):
     assert q.get_job_by_url(conn, "http://nope") is None
 
 
+def test_get_source_by_url_returns_source(conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    source = q.get_source_by_url(conn, "http://x")
+    assert source["id"] == sid
+
+
+def test_get_source_by_url_returns_none_when_missing(conn):
+    assert q.get_source_by_url(conn, "http://nope") is None
+
+
 def test_update_scenario(conn):
     sid = q.insert_scenario(conn, "A", "old description")
     q.update_scenario(conn, sid, name="A renamed", description="new description")

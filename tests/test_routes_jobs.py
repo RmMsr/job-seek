@@ -1196,6 +1196,28 @@ def test_add_job_by_url_duplicate_url_does_not_insert(client, conn):
     assert len(q.get_jobs(conn)) == 1
 
 
+def test_add_job_by_url_duplicate_url_shows_persistent_link_to_job(client, conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
+
+    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+
+    assert resp.status_code == 200
+    assert f'<a href="/jobs/{jid}">View this job</a>' in resp.text
+
+
+def test_add_job_by_url_existing_source_url_shows_link_to_source(client, conn):
+    sid = q.insert_source(conn, "Careers Page", "https://careers.example.com/jobs", "generic_listing")
+
+    resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+
+    assert resp.status_code == 200
+    assert "Already tracked as a source" in resp.text
+    assert f'<a href="/sources#source-row-{sid}">' in resp.text
+    assert "Careers Page" in resp.text
+    assert q.get_jobs(conn) == []
+
+
 @respx.mock
 def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
     respx.get("http://example.com/broken").mock(return_value=httpx.Response(404))

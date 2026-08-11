@@ -388,43 +388,58 @@ def job_add_by_url(
     content_type = request.query_params.get("content_type") or None
 
     def stream():
-        existing = q.get_job_by_url(conn, url)
-        if existing is not None:
-            yield f"Already tracked: {url} (see /jobs/{existing['id']})\n"
+        existing_job = q.get_job_by_url(conn, url)
+        if existing_job is not None:
+            notice = templates.get_template("jobs/_already_tracked.html").render(
+                request=request, kind="job",
+                link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
+            )
+            yield "HTML:" + notice.replace("\n", "") + "\n"
+            return
+
+        existing_source = q.get_source_by_url(conn, url)
+        if existing_source is not None:
+            notice = templates.get_template("jobs/_already_tracked.html").render(
+                request=request, kind="source",
+                link_href=f"/sources#source-row-{existing_source['id']}",
+                link_text=f'View "{existing_source["name"]}" in Sources',
+            )
+            yield "HTML:" + notice.replace("\n", "") + "\n"
+            return
+
+        try:
+            html = _fetch_url_html(url)
+        except _FetchError as exc:
+            _insert_error_job(conn, url)
+            yield f"Failed to fetch: {exc}\n"
         else:
+            links = extract_links(html, url)
+            detection = detect_listing(client, model, links, url)
+            if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                panel_context = {
+                    "request": request,
+                    "url": url,
+                    "link_count": len(detection["job_links"]),
+                    "domain": urlsplit(url).netloc,
+                    "default_name": urlsplit(url).netloc,
+                }
+                panel_context.update(_filter_context(request))
+                panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
+                yield "HTML:" + panel.replace("\n", "") + "\n"
+                return
             try:
-                html = _fetch_url_html(url)
+                raw_text = _extract_text(html)
             except _FetchError as exc:
                 _insert_error_job(conn, url)
                 yield f"Failed to fetch: {exc}\n"
             else:
-                links = extract_links(html, url)
-                detection = detect_listing(client, model, links, url)
-                if detection["is_listing"] and len(detection["job_links"]) >= 2:
-                    panel_context = {
-                        "request": request,
-                        "url": url,
-                        "link_count": len(detection["job_links"]),
-                        "domain": urlsplit(url).netloc,
-                        "default_name": urlsplit(url).netloc,
-                    }
-                    panel_context.update(_filter_context(request))
-                    panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
-                    yield "HTML:" + panel.replace("\n", "") + "\n"
-                    return
+                source_id = q.get_or_create_manual_source(conn)
+                gen = run_add_job(conn, client, model, source_id, url, raw_text)
                 try:
-                    raw_text = _extract_text(html)
-                except _FetchError as exc:
-                    _insert_error_job(conn, url)
-                    yield f"Failed to fetch: {exc}\n"
-                else:
-                    source_id = q.get_or_create_manual_source(conn)
-                    gen = run_add_job(conn, client, model, source_id, url, raw_text)
-                    try:
-                        while True:
-                            yield next(gen) + "\n"
-                    except StopIteration:
-                        pass
+                    while True:
+                        yield next(gen) + "\n"
+                except StopIteration:
+                    pass
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)

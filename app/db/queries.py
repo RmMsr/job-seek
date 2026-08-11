@@ -39,6 +39,10 @@ def get_source(conn: sqlite3.Connection, source_id: int) -> dict | None:
     return _row_to_dict(conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone())
 
 
+def get_source_by_url(conn: sqlite3.Connection, url: str) -> dict | None:
+    return _row_to_dict(conn.execute("SELECT * FROM sources WHERE url = ?", (url,)).fetchone())
+
+
 def insert_source(conn: sqlite3.Connection, name: str, url: str, fetcher_type: str) -> int:
     cur = conn.execute(
         "INSERT INTO sources (name, url, fetcher_type) VALUES (?, ?, ?)",
