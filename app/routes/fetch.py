@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/fetch", response_class=HTMLResponse)
 def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    sources = q.get_sources(conn)
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"]
     runs = q.get_recent_fetch_runs(conn)
     runs_by_source = {}
     for run in runs:

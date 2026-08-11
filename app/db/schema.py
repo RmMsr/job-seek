@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
-    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual')),
     enabled INTEGER NOT NULL DEFAULT 1
 );
 
@@ -110,6 +110,31 @@ def _migrate_sources_fetcher_type(conn: sqlite3.Connection) -> None:
             name TEXT NOT NULL,
             url TEXT NOT NULL,
             fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO sources_new SELECT * FROM sources;
+        DROP TABLE sources;
+        ALTER TABLE sources_new RENAME TO sources;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_sources_fetcher_type_manual(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sources'"
+    ).fetchone()
+    if row is None or "'manual'" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE sources_new (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual')),
             enabled INTEGER NOT NULL DEFAULT 1
         );
         INSERT INTO sources_new SELECT * FROM sources;
@@ -358,6 +383,7 @@ def _migrate_jobs_status_invalid_to_trash(conn: sqlite3.Connection) -> None:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
+    _migrate_sources_fetcher_type_manual(conn)
     _migrate_fetch_runs_source_fk(conn)
     _migrate_jobs_scores_to_table(conn)
     _migrate_jobs_add_headline(conn)

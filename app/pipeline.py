@@ -150,6 +150,22 @@ def run_fetch(
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=0, jobs_new=0, error=str(exc))
 
 
+def run_add_job(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    source_id: int,
+    url: str,
+    raw_text: str,
+) -> Generator[str, None, None]:
+    job_id = q.insert_job(conn, source_id=source_id, url=url, title="", company="", raw_text=raw_text)
+    profile = q.get_profile(conn)
+    scenarios = q.get_scenarios(conn)
+    yield from _ingest_posting(
+        conn, client, model, job_id, raw_text, "", False, profile, scenarios, url=url,
+    )
+
+
 def run_reprocess_job(
     conn: sqlite3.Connection,
     client: openai.OpenAI,

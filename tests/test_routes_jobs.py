@@ -1,6 +1,8 @@
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
+import httpx
 import pytest
+import respx
 from app.db import queries as q
 
 
@@ -1124,3 +1126,92 @@ def test_job_collapse_without_detail_flag_shows_checkbox(client, conn):
     resp = client.get(f"/jobs/{jid}/collapse")
     assert resp.status_code == 200
     assert '<label class="job-select-wrap">' in resp.text
+
+
+def _fake_run_add_job(conn, client, model, source_id, url, raw_text):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="Fake Title", company="Acme", raw_text=raw_text)
+    q.update_job_pipeline(conn, jid, simplified_content=raw_text, content_type="job_posting", summary="A role")
+    yield f"Classified as job_posting: {url}"
+
+
+@respx.mock
+def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    assert "Classified as job_posting" in resp.text
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["url"] == "http://example.com/job/1"
+    source = q.get_source(conn, jobs[0]["source_id"])
+    assert source["fetcher_type"] == "manual"
+
+
+@respx.mock
+def test_add_job_by_url_stream_ends_with_single_html_chunk(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text="<html><body><p>We are hiring</p></body></html>")
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    # Only one HTML: chunk should stream back — the target-mode swap in base.html's
+    # progress JS keeps only the *last* HTML: line as the replacement innerHTML, so a
+    # second trailing chunk (e.g. a separate counts_oob fragment) would silently clobber
+    # the real content instead of updating it. _content.html's filter-bar already carries
+    # fresh counts, so no second chunk is needed.
+    assert resp.text.count("HTML:") == 1
+    assert 'HTML:<div class="filter-bar">' in resp.text
+    assert 'id="count-new"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_duplicate_url_does_not_insert(client, conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
+
+    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+
+    assert resp.status_code == 200
+    assert "Already tracked" in resp.text
+    assert f"/jobs/{jid}" in resp.text
+    assert len(q.get_jobs(conn)) == 1
+
+
+@respx.mock
+def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
+    respx.get("http://example.com/broken").mock(return_value=httpx.Response(404))
+
+    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/broken"})
+
+    assert resp.status_code == 200
+    assert "Failed to fetch" in resp.text
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["content_type"] == "error"
+    assert jobs[0]["url"] == "http://example.com/broken"
+
+
+@respx.mock
+def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
+    respx.get("http://example.com/unreachable").mock(side_effect=httpx.ConnectError("boom"))
+
+    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/unreachable"})
+
+    assert resp.status_code == 200
+    assert "Failed to fetch" in resp.text
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["content_type"] == "error"
+
+
+def test_job_list_has_add_by_url_form(client, conn):
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert 'id="add-job-url"' in resp.text
+    assert 'data-progress-url="/jobs/add-by-url"' in resp.text
+    assert 'data-progress-url-input="#add-job-url"' in resp.text
+    assert 'data-progress-target="#jobs-content"' in resp.text

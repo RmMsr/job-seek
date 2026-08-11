@@ -24,7 +24,8 @@ def _check_needs_login(source: dict, config, conn: sqlite3.Connection) -> bool |
 
 @router.get("/sources", response_class=HTMLResponse)
 def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    return templates.TemplateResponse(request, "sources/index.html", {"sources": q.get_sources(conn)})
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"]
+    return templates.TemplateResponse(request, "sources/index.html", {"sources": sources})
 
 
 @router.post("/sources", response_class=HTMLResponse)

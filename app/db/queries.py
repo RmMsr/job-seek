@@ -48,6 +48,13 @@ def insert_source(conn: sqlite3.Connection, name: str, url: str, fetcher_type: s
     return cur.lastrowid
 
 
+def get_or_create_manual_source(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT id FROM sources WHERE fetcher_type = 'manual'").fetchone()
+    if row is not None:
+        return row["id"]
+    return insert_source(conn, "Manual", "", "manual")
+
+
 def update_source(
     conn: sqlite3.Connection, source_id: int, name: str, url: str, fetcher_type: str, enabled: bool
 ) -> None:
@@ -133,6 +140,10 @@ def delete_criterion(conn: sqlite3.Connection, criterion_id: int) -> None:
 
 def url_exists(conn: sqlite3.Connection, url: str) -> bool:
     return conn.execute("SELECT 1 FROM jobs WHERE url = ?", (url,)).fetchone() is not None
+
+
+def get_job_by_url(conn: sqlite3.Connection, url: str) -> dict | None:
+    return _row_to_dict(conn.execute("SELECT * FROM jobs WHERE url = ?", (url,)).fetchone())
 
 
 def insert_job(

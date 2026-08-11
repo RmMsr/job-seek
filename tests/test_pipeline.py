@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
 from app.pipeline import run_fetch, run_reprocess_job, FetchResult, _make_fetcher
+from app.pipeline import run_add_job
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.base import RawJob
 
@@ -52,6 +53,31 @@ def _mock_client(classify_resp, summarize_resp, evaluate_resp,
         return MagicMock(choices=[choice])
     client.chat.completions.create.side_effect = create
     return client
+
+
+def test_run_add_job_stores_job_against_given_source(conn, source):
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer", "headline": "Great role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+    messages, _ = _drain(
+        run_add_job(conn, client, "llama3.2", source["id"], "http://example.com/job/1", "<p>We are hiring</p>")
+    )
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["url"] == "http://example.com/job/1"
+    assert jobs[0]["source_id"] == source["id"]
+    assert jobs[0]["content_type"] == "job_posting"
+    assert any("Classified as job_posting" in m for m in messages)
+
+
+def test_run_add_job_irrelevant_content_not_persisted(conn, source):
+    client = _mock_client(
+        '{"type": "irrelevant", "reason": "not a job"}', "{}", "{}",
+    )
+    _drain(run_add_job(conn, client, "llama3.2", source["id"], "http://example.com/job/2", "<p>Buy socks now</p>"))
+    assert q.get_jobs(conn) == []
 
 
 def test_run_fetch_new_job_stored(conn, source):

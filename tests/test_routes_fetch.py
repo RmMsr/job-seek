@@ -15,6 +15,15 @@ def test_fetch_panel_returns_200(client, conn):
     assert "finn.no" in resp.text
 
 
+def test_fetch_panel_excludes_manual_source(client, conn):
+    q.get_or_create_manual_source(conn)
+    q.insert_source(conn, "Real Source", "http://x", "http")
+    resp = client.get("/fetch")
+    assert resp.status_code == 200
+    assert "Manual" not in resp.text
+    assert "Real Source" in resp.text
+
+
 def test_fetch_panel_empty_sources(client, conn):
     resp = client.get("/fetch")
     assert resp.status_code == 200

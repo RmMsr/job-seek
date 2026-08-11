@@ -655,6 +655,42 @@ def test_jobs_status_check_allows_trash_not_invalid(conn):
         )
 
 
+def test_sources_accepts_manual_fetcher_type(conn):
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('Manual', '', 'manual')"
+    )
+
+
+def test_init_db_migrates_sources_table_missing_manual_type(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('Manual', '', 'manual')"
+    )
+    rows = conn.execute("SELECT name, url, fetcher_type FROM sources ORDER BY id").fetchall()
+    assert [dict(r) for r in rows] == [
+        {"name": "s", "url": "http://x", "fetcher_type": "http"},
+        {"name": "Manual", "url": "", "fetcher_type": "manual"},
+    ]
+
+
 def test_init_db_migrates_jobs_status_invalid_to_trash(conn):
     conn.executescript(
         """

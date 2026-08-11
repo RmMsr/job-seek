@@ -40,6 +40,28 @@ def test_update_source(conn):
     assert source["name"] == "Finn AI"
 
 
+def test_get_or_create_manual_source_creates_once(conn):
+    first_id = q.get_or_create_manual_source(conn)
+    second_id = q.get_or_create_manual_source(conn)
+    assert first_id == second_id
+    source = q.get_source(conn, first_id)
+    assert source["name"] == "Manual"
+    assert source["fetcher_type"] == "manual"
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "manual"]
+    assert len(sources) == 1
+
+
+def test_get_job_by_url_returns_job(conn):
+    sid = q.insert_source(conn, "s", "http://x", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
+    job = q.get_job_by_url(conn, "http://job/1")
+    assert job["id"] == jid
+
+
+def test_get_job_by_url_returns_none_when_missing(conn):
+    assert q.get_job_by_url(conn, "http://nope") is None
+
+
 def test_update_scenario(conn):
     sid = q.insert_scenario(conn, "A", "old description")
     q.update_scenario(conn, sid, name="A renamed", description="new description")

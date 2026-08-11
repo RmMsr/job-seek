@@ -1,14 +1,34 @@
 from __future__ import annotations
 import sqlite3
+import httpx
 import openai
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
-from app.pipeline import run_reprocess_job, run_pass_as_new
+from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job
 from app.template_env import templates
 
 router = APIRouter()
+
+
+class _FetchError(Exception):
+    pass
+
+
+def _fetch_url_text(url: str) -> str:
+    try:
+        resp = httpx.get(url, timeout=30, follow_redirects=True)
+    except httpx.HTTPError as exc:
+        raise _FetchError(str(exc)) from exc
+    if resp.status_code != 200:
+        raise _FetchError(f"HTTP {resp.status_code}")
+    soup = BeautifulSoup(resp.text, "html.parser")
+    text = soup.get_text(separator="\n")
+    if not text.strip():
+        raise _FetchError("page had no extractable text")
+    return text
 
 
 def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
@@ -96,6 +116,18 @@ def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id:
     return templates.get_template("jobs/_feedback.html").render(request=request, **context)
 
 
+def _content_context(conn: sqlite3.Connection, status: str | None, content_type: str | None) -> dict:
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type))
+    counts = q.get_job_counts(conn)
+    scenarios = q.get_scenarios(conn)
+    effective_status = status if (status is not None or content_type is not None) else "new"
+    return {
+        "jobs": jobs, "stale_jobs": [], "counts": counts, "scenarios": scenarios,
+        "status": effective_status, "content_type": content_type,
+        "filter_status": status, "filter_content_type": content_type,
+    }
+
+
 @router.get("/jobs", response_class=HTMLResponse)
 def job_list(
     request: Request,
@@ -103,18 +135,7 @@ def job_list(
     content_type: str | None = None,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type))
-    counts = q.get_job_counts(conn)
-    scenarios = q.get_scenarios(conn)
-    effective_status = status if (status is not None or content_type is not None) else "new"
-    return templates.TemplateResponse(
-        request, "jobs/list.html",
-        {
-            "jobs": jobs, "stale_jobs": [], "counts": counts, "scenarios": scenarios,
-            "status": effective_status, "content_type": content_type,
-            "filter_status": status, "filter_content_type": content_type,
-        },
-    )
+    return templates.TemplateResponse(request, "jobs/list.html", _content_context(conn, status, content_type))
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -337,3 +358,42 @@ def job_bulk_feedback(
             "filter_status": status_filter, "filter_content_type": content_type_filter,
         },
     )
+
+
+@router.post("/jobs/add-by-url")
+def job_add_by_url(
+    request: Request,
+    url: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    status = request.query_params.get("status") or None
+    content_type = request.query_params.get("content_type") or None
+
+    def stream():
+        existing = q.get_job_by_url(conn, url)
+        if existing is not None:
+            yield f"Already tracked: {url} (see /jobs/{existing['id']})\n"
+        else:
+            source_id = q.get_or_create_manual_source(conn)
+            try:
+                raw_text = _fetch_url_text(url)
+            except _FetchError as exc:
+                job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
+                q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
+                yield f"Failed to fetch: {exc}\n"
+            else:
+                gen = run_add_job(conn, client, model, source_id, url, raw_text)
+                try:
+                    while True:
+                        yield next(gen) + "\n"
+                except StopIteration:
+                    pass
+
+        html = templates.get_template("jobs/_content.html").render(
+            request=request, **_content_context(conn, status, content_type)
+        )
+        yield "HTML:" + html.replace("\n", "") + "\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")

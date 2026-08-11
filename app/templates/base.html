@@ -78,7 +78,7 @@
     .feedback-form label { display: block; margin-top: 0.5rem; }
     .feedback-form textarea { width: 100%; min-height: 60px; }
     .feedback-form .actions { margin-top: 0.75rem; }
-    .reset-progress { grid-column: 1 / -1; color: #666; font-size: 0.85em; }
+    .reset-progress { grid-column: 1 / -1; display: block; width: 100%; color: #666; font-size: 0.85em; }
     .reset-progress:empty { display: none; }
     .filter-bar { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
     .filter-bar a { margin-right: 0.5rem; }
@@ -134,6 +134,12 @@
           body = new URLSearchParams();
           checked.forEach(function (cb) { body.append("job_ids", cb.value); });
         }
+        if (el.hasAttribute("data-progress-url-input")) {
+          var urlInputEl = document.querySelector(el.getAttribute("data-progress-url-input"));
+          if (!urlInputEl || !urlInputEl.value) return;
+          body = new URLSearchParams();
+          body.append("url", urlInputEl.value);
+        }
         var displaySelector = el.getAttribute("data-progress-display");
         var displayTarget = displaySelector ? document.querySelector(displaySelector) : null;
         var progressEl = document.createElement("span");
@@ -167,6 +173,10 @@
             return;
           }
           progressEl.remove();
+          if (el.hasAttribute("data-progress-url-input")) {
+            var clearInputEl = document.querySelector(el.getAttribute("data-progress-url-input"));
+            if (clearInputEl) clearInputEl.value = "";
+          }
           if (oobMode) {
             // Each HTML: chunk was already applied as it streamed in via applyOob().
           } else if (targetSelector) {

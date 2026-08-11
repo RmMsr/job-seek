@@ -16,6 +16,15 @@ def test_sources_page_returns_200(client, conn):
     assert "finn.no" in resp.text
 
 
+def test_sources_page_excludes_manual_source(client, conn):
+    q.get_or_create_manual_source(conn)
+    q.insert_source(conn, "Real Source", "http://x", "http")
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "Manual" not in resp.text
+    assert "Real Source" in resp.text
+
+
 def test_create_source(client, conn):
     resp = client.post(
         "/sources",
