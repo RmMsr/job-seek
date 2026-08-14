@@ -35,7 +35,7 @@ For non-trivial feature work, default to this pipeline unless told otherwise:
 1. **Brainstorm** (`superpowers:brainstorming`) — explore the codebase, ask clarifying questions one at a time, present the design in sections, get approval.
 2. **Write the spec** to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
 3. **Write the plan** (`superpowers:writing-plans`) to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`, commit it.
-4. **Implement via a single background subagent** that works through the plan task-by-task (TDD, commit after each task per "Commit frequently" above) inside the same worktree, and reports back only once — when the whole plan is done or it's stuck. If it hits a genuine design question the spec/plan doesn't answer, it should ask directly (e.g. via AskUserQuestion) rather than guessing.
+4. **Implement via background subagent(s)** working through the plan task-by-task (TDD, commit after each task per "Commit frequently" above) inside the same worktree, reporting back only once — when the whole plan is done or it's stuck. Default to a single agent; only split into parallel agents when the plan has genuinely independent tasks where that would clearly help. If it hits a genuine design question the spec/plan doesn't answer, it should ask directly (e.g. via AskUserQuestion) rather than guessing.
 
 This is the default; skip steps only when the user explicitly asks for something lighter-weight.
 

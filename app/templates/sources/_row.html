@@ -9,6 +9,12 @@
       {% elif needs_login is not none %}
         <br><span style="color:#198754;">✓ Slack session cookie set.</span>
       {% endif %}
+      {% if source.d_cookie %}
+        <button type="button" class="btn" style="font-size:0.78em; padding:1px 6px; margin-left:0.4rem;"
+          hx-post="/sources/{{ source.id }}/forget-cookie"
+          hx-target="#source-row-{{ source.id }}" hx-swap="outerHTML"
+          hx-confirm="Forget the stored Slack cookie for this source?">Forget cookie</button>
+      {% endif %}
     {% endif %}
   </td>
   <td style="padding:0.5rem;">{{ source.fetcher_type }}</td>
@@ -28,14 +34,24 @@
     <details>
       <summary style="cursor:pointer; color:#495057; font-size:0.9em;">Slack session cookie</summary>
       <div style="margin-top:0.5rem; padding:0.75rem 1rem; background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px;">
-        <p style="margin:0 0 0.6rem; font-size:0.85em; color:#495057;">
-          Open Slack in your browser, then in DevTools → Cookies for <code>slack.com</code>, copy the value
-          of the <code>d</code> cookie. (Chrome: Application tab · Firefox: Storage tab.)
-        </p>
         <p style="margin:0 0 0.75rem; font-size:0.85em; color:#495057;">
           Heads up — this cookie is your whole Slack login, so with it the app can act as you in
           <strong>every Slack workspace you're signed into</strong>, not just this one. It's kept local to
           this app.
+        </p>
+        <p style="margin:0 0 0.3rem; font-size:0.85em; color:#495057;">
+          Run this on a machine with a browser:
+        </p>
+        <pre style="margin:0 0 0.4rem; padding:0.5rem 0.75rem; background:#212529; color:#e9ecef; border-radius:6px; font-size:0.78em; overflow-x:auto; white-space:pre-wrap; word-break:break-all;"><code>uv run python -m app.cli.slack_login \
+  "{{ source.url }}" \
+  {{ request.base_url }}sources/{{ source.id }}/cookie</code></pre>
+        <p style="margin:0 0 0.75rem; font-size:0.8em; color:#6c757d;">
+          The status above won't update automatically after this finishes — reload this page to see it.
+        </p>
+        <p style="margin:0 0 0.6rem; font-size:0.85em; color:#495057;">
+          Or paste the <code>d</code> cookie directly: open Slack in your browser, then in DevTools →
+          Cookies for <code>slack.com</code>, copy the value of the <code>d</code> cookie — it starts with
+          <code>xoxd-</code>. (Chrome: Application tab · Firefox: Storage tab.)
         </p>
         <form hx-post="/sources/{{ source.id }}/cookie"
               hx-target="#source-row-{{ source.id }}" hx-swap="outerHTML"
@@ -46,12 +62,7 @@
             <input type="checkbox" name="acknowledged" required>
             Yep, I understand — this covers every workspace I'm logged into.
           </label>
-          <div style="display:flex; gap:0.5rem;">
-            <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Save cookie</button>
-            <button type="button" class="btn" style="font-size:0.85em; padding:3px 10px;"
-              data-progress-url="/sources/{{ source.id }}/login"
-              data-progress-target="#source-row-{{ source.id }}">Log in via browser</button>
-          </div>
+          <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Save cookie</button>
         </form>
       </div>
     </details>

@@ -1,7 +1,6 @@
 from unittest.mock import patch
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
-from app.fetchers.slack_login import SlackCookieLogin
 
 _SLACK_URL = "https://example-workspace.slack.com/archives/C0EXAMPLE1"
 
@@ -103,7 +102,7 @@ def test_create_slack_source_shows_login_prompt_when_needed(client, conn):
             data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack"},
         )
     assert resp.status_code == 200
-    assert "Log in" in resp.text
+    assert "Needs Slack login" in resp.text
 
 
 def test_create_slack_source_no_login_prompt_when_already_logged_in(client, conn):
@@ -134,7 +133,7 @@ def test_update_source_to_slack_shows_login_prompt_when_needed(client, conn):
             data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack", "enabled": "on"},
         )
     assert resp.status_code == 200
-    assert "Log in" in resp.text
+    assert "Needs Slack login" in resp.text
 
 
 def test_update_source_with_unsupported_slack_url_does_not_crash(client, conn):
@@ -152,49 +151,86 @@ def test_update_source_with_unsupported_slack_url_does_not_crash(client, conn):
     assert "Needs Slack login" not in resp.text
 
 
-def test_login_route_streams_progress_and_persists_cookie(client, conn):
+def test_set_cookie_stores_value_with_acknowledgment(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
-
-    def fake_login(self):
-        yield "Login successful; captured session cookie."
-        return "xoxd-captured"
-
-    with patch.object(SlackCookieLogin, "login", fake_login):
-        resp = client.post(f"/sources/{sid}/login")
-
+    with patch.object(SlackFetcher, "check_needs_login", return_value=False):
+        resp = client.post(
+            f"/sources/{sid}/cookie",
+            data={"d_cookie": "xoxd-pasted", "acknowledged": "on"},
+        )
     assert resp.status_code == 200
-    assert "captured session cookie" in resp.text
-    assert q.get_source(conn, sid)["d_cookie"] == "xoxd-captured"
-    assert "Needs Slack login" not in resp.text.split("HTML:", 1)[1]
+    assert q.get_source(conn, sid)["d_cookie"] == "xoxd-pasted"
+    assert "Needs Slack login" not in resp.text
 
 
-def test_login_route_reflects_failed_login(client, conn):
+def test_set_cookie_rejected_without_acknowledgment(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    resp = client.post(f"/sources/{sid}/cookie", data={"d_cookie": "xoxd-pasted"})
+    assert resp.status_code == 400
+    assert q.get_source(conn, sid)["d_cookie"] == ""
 
-    def fake_login(self):
-        yield "Timed out waiting for login to Example Slack"
-        return None
 
-    with patch.object(SlackCookieLogin, "login", fake_login):
-        resp = client.post(f"/sources/{sid}/login")
+def test_set_cookie_invalid_shows_needs_login(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
+        resp = client.post(
+            f"/sources/{sid}/cookie",
+            data={"d_cookie": "xoxd-expired", "acknowledged": "on"},
+        )
+    assert resp.status_code == 200
+    assert "Needs Slack login" in resp.text
+
+
+def test_forget_cookie_clears_stored_value(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    q.set_source_cookie(conn, sid, "xoxd-pasted")
+
+    resp = client.post(f"/sources/{sid}/forget-cookie")
 
     assert resp.status_code == 200
     assert q.get_source(conn, sid)["d_cookie"] == ""
-    assert "Needs Slack login" in resp.text.split("HTML:", 1)[1]
+    assert "Needs Slack login" in resp.text
 
 
-def test_login_route_404_for_missing_source(client, conn):
-    resp = client.post("/sources/999/login")
+def test_forget_cookie_404_for_missing_source(client, conn):
+    resp = client.post("/sources/999/forget-cookie")
     assert resp.status_code == 404
 
 
-def test_login_route_rejects_non_slack_source(client, conn):
-    sid = _seed(conn)
-    resp = client.post(f"/sources/{sid}/login")
-    assert resp.status_code == 400
+def test_row_shows_forget_button_only_when_cookie_is_set(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
+        resp_before = client.get("/sources")
+    assert f'hx-post="/sources/{sid}/forget-cookie"' not in resp_before.text
+
+    q.set_source_cookie(conn, sid, "xoxd-pasted")
+    with patch.object(SlackFetcher, "check_needs_login", return_value=False):
+        resp_after = client.get("/sources")
+    assert f'hx-post="/sources/{sid}/forget-cookie"' in resp_after.text
+
+
+def test_slack_row_shows_cookie_security_warning(client, conn):
+    q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
+        resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "every Slack workspace" in resp.text  # warning copy present
+    assert 'name="acknowledged"' in resp.text     # required checkbox present
 
 
 def test_sources_page_add_source_form_includes_generic_listing_option(client, conn):
     resp = client.get("/sources")
     assert resp.status_code == 200
     assert '<option value="generic_listing">generic_listing</option>' in resp.text
+
+
+def test_slack_row_shows_cli_login_command(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
+        resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "python -m app.cli.slack_login" in resp.text
+    assert _SLACK_URL in resp.text
+    assert f"http://testserver/sources/{sid}/cookie" in resp.text
+    assert "Log in via browser" not in resp.text
+    assert "won't update automatically" in resp.text

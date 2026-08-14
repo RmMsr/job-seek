@@ -2,11 +2,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 from app.deps import get_db, get_config
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
-from app.fetchers.slack_login import SlackCookieLogin
 from app.pipeline import _make_fetcher
 from app.template_env import templates
 
@@ -117,36 +116,17 @@ def set_cookie(
     )
 
 
-@router.post("/sources/{source_id}/login")
-def trigger_login(
+@router.post("/sources/{source_id}/forget-cookie", response_class=HTMLResponse)
+def forget_cookie(
     source_id: int,
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
     config=Depends(get_config),
 ):
-    source = _get_source_or_404(conn, source_id)
-    if source["fetcher_type"] != "slack":
-        raise HTTPException(status_code=400, detail="Only Slack sources support browser login")
-    login = SlackCookieLogin(source, config.browser_profile_dir)
-
-    def stream():
-        gen = login.login()
-        cookie = None
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration as stop:
-            cookie = stop.value
-        if cookie:
-            q.set_source_cookie(conn, source_id, cookie)
-        source_after = q.get_source(conn, source_id)
-        # A cookie returned by the login tool was already validated by reaching
-        # the channel page, so trust it directly rather than re-validating over
-        # the network (which the just-captured cookie may not survive in tests).
-        needs_login = not cookie
-        html = templates.get_template("sources/_row.html").render(
-            request=request, source=source_after, needs_login=needs_login
-        )
-        yield "HTML:" + html.replace("\n", "")
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    _get_source_or_404(conn, source_id)
+    q.set_source_cookie(conn, source_id, "")
+    source = q.get_source(conn, source_id)
+    needs_login = _check_needs_login(source, config, conn)
+    return templates.TemplateResponse(
+        request, "sources/_row.html", {"source": source, "needs_login": needs_login}
+    )
