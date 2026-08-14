@@ -1,4 +1,5 @@
-<tr id="source-row-{{ source.id }}" style="border-bottom:1px solid #eee;">
+<tbody id="source-row-{{ source.id }}">
+<tr style="border-bottom:1px solid #eee;">
   <td style="padding:0.5rem;" colspan="4">
     <form hx-post="/sources/{{ source.id }}"
           hx-target="#source-row-{{ source.id }}"
@@ -25,3 +26,4 @@
     </form>
   </td>
 </tr>
+</tbody>

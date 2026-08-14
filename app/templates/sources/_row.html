@@ -1,12 +1,14 @@
-<tr id="source-row-{{ source.id }}" style="border-bottom:1px solid #eee;">
+<tbody id="source-row-{{ source.id }}">
+<tr style="border-bottom:1px solid #eee;">
   <td style="padding:0.5rem;">
     <strong>{{ source.name }}</strong><br>
     <small style="word-break:break-all;">{{ source.url }}</small>
-    {% if needs_login %}
-      <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>
-      <button class="btn" style="font-size:0.85em; padding:3px 10px;"
-        data-progress-url="/sources/{{ source.id }}/login"
-        data-progress-target="#source-row-{{ source.id }}">Log in now</button>
+    {% if source.fetcher_type == "slack" %}
+      {% if needs_login %}
+        <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>
+      {% elif needs_login is not none %}
+        <br><span style="color:#198754;">✓ Slack session cookie set.</span>
+      {% endif %}
     {% endif %}
   </td>
   <td style="padding:0.5rem;">{{ source.fetcher_type }}</td>
@@ -20,3 +22,40 @@
       hx-swap="outerHTML">Edit</button>
   </td>
 </tr>
+{% if source.fetcher_type == "slack" %}
+<tr style="border-bottom:1px solid #eee;">
+  <td colspan="4" style="padding:0 0.5rem 0.75rem;">
+    <details>
+      <summary style="cursor:pointer; color:#495057; font-size:0.9em;">Slack session cookie</summary>
+      <div style="margin-top:0.5rem; padding:0.75rem 1rem; background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px;">
+        <p style="margin:0 0 0.6rem; font-size:0.85em; color:#495057;">
+          Open Slack in your browser, then in DevTools → Cookies for <code>slack.com</code>, copy the value
+          of the <code>d</code> cookie. (Chrome: Application tab · Firefox: Storage tab.)
+        </p>
+        <p style="margin:0 0 0.75rem; font-size:0.85em; color:#495057;">
+          Heads up — this cookie is your whole Slack login, so with it the app can act as you in
+          <strong>every Slack workspace you're signed into</strong>, not just this one. It's kept local to
+          this app.
+        </p>
+        <form hx-post="/sources/{{ source.id }}/cookie"
+              hx-target="#source-row-{{ source.id }}" hx-swap="outerHTML"
+              style="display:flex; flex-direction:column; gap:0.5rem; max-width:560px;">
+          <input type="text" name="d_cookie" placeholder="Paste the `d` cookie value"
+                 style="width:100%; box-sizing:border-box; padding:5px 8px;">
+          <label style="font-size:0.85em; color:#495057;">
+            <input type="checkbox" name="acknowledged" required>
+            Yep, I understand — this covers every workspace I'm logged into.
+          </label>
+          <div style="display:flex; gap:0.5rem;">
+            <button type="submit" class="btn" style="font-size:0.85em; padding:3px 10px;">Save cookie</button>
+            <button type="button" class="btn" style="font-size:0.85em; padding:3px 10px;"
+              data-progress-url="/sources/{{ source.id }}/login"
+              data-progress-target="#source-row-{{ source.id }}">Log in via browser</button>
+          </div>
+        </form>
+      </div>
+    </details>
+  </td>
+</tr>
+{% endif %}
+</tbody>

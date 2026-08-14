@@ -18,12 +18,10 @@
         <th style="padding:0.5rem; border-bottom:2px solid #dee2e6;"></th>
       </tr>
     </thead>
-    <tbody>
     {% for source in sources %}
       {% set needs_login = needs_login_by_id.get(source.id) if needs_login_by_id is defined else None %}
       {% include "sources/_row.html" %}
     {% endfor %}
-    </tbody>
   </table>
 {% else %}
   <p>No sources yet. Add one below.</p>

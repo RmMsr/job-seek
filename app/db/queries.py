@@ -65,6 +65,11 @@ def update_source(
     conn.commit()
 
 
+def set_source_cookie(conn: sqlite3.Connection, source_id: int, cookie: str) -> None:
+    conn.execute("UPDATE sources SET d_cookie = ? WHERE id = ?", (cookie, source_id))
+    conn.commit()
+
+
 # --- Scenarios ---
 
 def get_scenarios(conn: sqlite3.Connection) -> list[dict]:

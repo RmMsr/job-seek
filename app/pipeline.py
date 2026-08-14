@@ -34,7 +34,7 @@ def _make_fetcher(source: dict, profile_dir: str, conn: sqlite3.Connection):
     if ft == "http":
         return HttpFetcher(source)
     if ft == "slack":
-        return SlackFetcher(source, profile_dir, known_urls=q.get_all_job_urls(conn))
+        return SlackFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "finn_listing":
         return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
     return PlaywrightFetcher(source, profile_dir)

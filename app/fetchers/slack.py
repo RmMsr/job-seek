@@ -1,16 +1,19 @@
 from __future__ import annotations
-import json
 import logging
 import re
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 import httpx
-from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.base import RawJob, is_recent
 
 logger = logging.getLogger("job_seek")
 
 _URL_RE = re.compile(r"^https://([a-zA-Z0-9-]+)\.slack\.com/(?:archives|messages)/([A-Za-z0-9]+)/?$")
+_TOKEN_RE = re.compile(r'"api_token":"(xoxc-[A-Za-z0-9-]+)"')
+
+
+def extract_token(html: str) -> str | None:
+    match = _TOKEN_RE.search(html)
+    return match.group(1) if match else None
 _MRKDWN_LINK_RE = re.compile(r"<(https?://[^|>]+)\|([^>]+)>")
 _MRKDWN_BARE_URL_RE = re.compile(r"<(https?://[^>]+)>")
 # Slack bold is a single asterisk with no space inside it (Slack itself
@@ -61,15 +64,16 @@ def _clean_mrkdwn(text: str) -> str:
     return text
 
 
-class SlackFetcher(PlaywrightFetcher):
+class SlackFetcher:
     MAX_HISTORY_PAGES = 20
     PAGE_LIMIT = 100
     MAX_NEW_MESSAGES = 50  # cap on new postings collected per run, matches finn.py's MAX_DETAIL_FETCHES
 
-    def __init__(self, source: dict, profile_dir: str, known_urls: frozenset[str] = frozenset()) -> None:
-        super().__init__(source, profile_dir)
+    def __init__(self, source: dict, known_urls: frozenset[str] = frozenset()) -> None:
+        self._source = source
         self._resolved_url, self._workspace, self._channel_id_value = _resolve_target(source["url"])
         self._known_urls = known_urls
+        self._cookie = source.get("d_cookie", "") or ""
 
     def _target_url(self) -> str:
         return self._resolved_url
@@ -77,32 +81,42 @@ class SlackFetcher(PlaywrightFetcher):
     def _channel_id(self) -> str:
         return self._channel_id_value
 
-    def _needs_login(self, page) -> bool:
-        return self._channel_id() not in urlparse(page.url).path
-
-    def _extract_credentials(self, page) -> tuple[str, str]:
-        page.wait_for_function("() => !!localStorage.getItem('localConfig_v2')", timeout=15000)
-        raw_config = page.evaluate("() => localStorage.getItem('localConfig_v2')")
-        config = json.loads(raw_config or "{}")
-        team = next(
-            (t for t in config.get("teams", {}).values() if t.get("domain") == self._workspace),
-            None,
+    def _fetch_messages_html(self) -> str:
+        resp = httpx.get(
+            self._target_url(),
+            cookies={"d": self._cookie},
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=20,
         )
-        if team is None:
-            raise RuntimeError(f"No Slack session found for workspace {self._workspace!r}")
-        cookie = next((c["value"] for c in page.context.cookies() if c["name"] == "d"), None)
-        if cookie is None:
-            raise RuntimeError("No Slack session cookie ('d') found")
-        return team["token"], cookie
+        resp.raise_for_status()
+        return resp.text
 
-    def _fetch_history_page(self, token: str, cookie: str, cursor: str | None) -> dict:
+    def check_needs_login(self) -> bool:
+        if not self._cookie:
+            return True
+        try:
+            html = self._fetch_messages_html()
+        except Exception:
+            return True
+        return extract_token(html) is None
+
+    def fetch(self) -> list[RawJob]:
+        token = extract_token(self._fetch_messages_html())
+        if token is None:
+            raise RuntimeError(
+                f"No valid Slack session for {self._source['name']!r}: credentials are missing or expired."
+            )
+        return self._collect(token)
+
+    def _fetch_history_page(self, token: str, cursor: str | None) -> dict:
         data = {"token": token, "channel": self._channel_id(), "limit": str(self.PAGE_LIMIT)}
         if cursor:
             data["cursor"] = cursor
         resp = httpx.post(
             f"https://{self._workspace}.slack.com/api/conversations.history",
             data=data,
-            cookies={"d": cookie},
+            cookies={"d": self._cookie},
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=15,
         )
@@ -133,12 +147,11 @@ class SlackFetcher(PlaywrightFetcher):
             published_at=_ts_to_iso(ts),
         )
 
-    def _extract(self, page) -> list[RawJob]:
-        token, cookie = self._extract_credentials(page)
+    def _collect(self, token: str) -> list[RawJob]:
         jobs: list[RawJob] = []
         cursor = None
         for page_num in range(1, self.MAX_HISTORY_PAGES + 1):
-            body = self._fetch_history_page(token, cookie, cursor)
+            body = self._fetch_history_page(token, cursor)
             messages = body.get("messages", [])
             logger.info(
                 "Slack extract for '%s': page %d returned %d message(s)",
