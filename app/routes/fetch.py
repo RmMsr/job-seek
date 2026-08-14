@@ -28,6 +28,34 @@ def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     )
 
 
+@router.post("/fetch/all")
+def trigger_fetch_all(
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+    config=Depends(get_config),
+):
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
+
+    def stream():
+        yield f"Fetching {len(sources)} active source(s)\n"
+        total_found = 0
+        total_new = 0
+        for idx, source in enumerate(sources, start=1):
+            label = f"[Source {idx}/{len(sources)}: {source['name']}] "
+            gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+            try:
+                while True:
+                    yield label + next(gen) + "\n"
+            except StopIteration as stop:
+                result = stop.value
+                total_found += result.jobs_found
+                total_new += result.jobs_new
+        yield f"All sources fetched: {total_new} new / {total_found} found across {len(sources)} source(s)\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
 @router.post("/fetch/{source_id}")
 def trigger_fetch(
     source_id: int,

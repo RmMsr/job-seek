@@ -3,6 +3,9 @@
 {% block content %}
 <h1>Fetch</h1>
 {% if sources %}
+<div style="margin-bottom:1rem;">
+  <button class="btn" data-progress-url="/fetch/all">Fetch all active sources</button>
+</div>
   <table style="width:100%; border-collapse:collapse;">
     <thead>
       <tr>
