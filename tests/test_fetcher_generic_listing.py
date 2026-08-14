@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import httpx
 import respx
 from app.fetchers.generic_listing import GenericListingFetcher
@@ -10,7 +10,15 @@ _LISTING_HTML = """<html><body>
 <a href="/jobs/1">Senior Engineer</a>
 <a href="/jobs/2">Staff Engineer</a>
 <a href="/about">About</a>
+<p>""" + ("We are a fast-growing company building great products. " * 5) + """</p>
 </body></html>"""
+
+# Realistic-length detail page — short fixtures (e.g. just "Senior Engineer role")
+# would themselves fall under the 200-char thin-content threshold and
+# unintentionally trigger the Playwright fallback in tests that aren't testing that.
+_JOB_DETAIL_HTML = (
+    "<html><body><p>" + ("We are hiring a Senior Software Engineer to join our team. " * 5) + "</p></body></html>"
+)
 
 
 def _client_returning(is_listing: bool, job_links: list[str]) -> MagicMock:
@@ -25,10 +33,10 @@ def _client_returning(is_listing: bool, job_links: list[str]) -> MagicMock:
 def test_generic_listing_fetcher_returns_raw_jobs_for_detected_links():
     respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=_LISTING_HTML))
     respx.get("https://example.com/jobs/1").mock(
-        return_value=httpx.Response(200, text="<html><body>Senior Engineer role</body></html>")
+        return_value=httpx.Response(200, text=_JOB_DETAIL_HTML)
     )
     respx.get("https://example.com/jobs/2").mock(
-        return_value=httpx.Response(200, text="<html><body>Staff Engineer role</body></html>")
+        return_value=httpx.Response(200, text=_JOB_DETAIL_HTML)
     )
     client = _client_returning(True, ["https://example.com/jobs/1", "https://example.com/jobs/2"])
 
@@ -43,7 +51,7 @@ def test_generic_listing_fetcher_returns_raw_jobs_for_detected_links():
 def test_generic_listing_fetcher_skips_known_urls():
     respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=_LISTING_HTML))
     respx.get("https://example.com/jobs/2").mock(
-        return_value=httpx.Response(200, text="<html><body>Staff Engineer role</body></html>")
+        return_value=httpx.Response(200, text=_JOB_DETAIL_HTML)
     )
     client = _client_returning(True, ["https://example.com/jobs/1", "https://example.com/jobs/2"])
 
@@ -74,4 +82,88 @@ def test_generic_listing_fetcher_handles_fetch_failure():
     fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
     jobs = fetcher.fetch()
 
+    assert jobs == []
+
+
+_THIN_LISTING_HTML = "<html><body><noscript>Enable JavaScript</noscript></body></html>"
+
+
+@respx.mock
+def test_generic_listing_fetcher_falls_back_to_playwright_for_thin_listing_page():
+    respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=_THIN_LISTING_HTML))
+    respx.get("https://example.com/jobs/1").mock(
+        return_value=httpx.Response(200, text=_JOB_DETAIL_HTML)
+    )
+    client = _client_returning(True, ["https://example.com/jobs/1"])
+
+    with patch("app.fetchers.generic_listing.render_html", return_value=_LISTING_HTML) as mock_render:
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    mock_render.assert_called_once_with("https://example.com/careers")
+    assert {job.url for job in jobs} == {"https://example.com/jobs/1"}
+
+
+@respx.mock
+def test_generic_listing_fetcher_falls_back_to_playwright_for_thin_detail_page():
+    respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=_LISTING_HTML))
+    respx.get("https://example.com/jobs/1").mock(return_value=httpx.Response(200, text=""))
+    client = _client_returning(True, ["https://example.com/jobs/1"])
+
+    rendered_detail_html = "<html><body><p>" + ("Full job description text. " * 10) + "</p></body></html>"
+    with patch("app.fetchers.generic_listing.render_html", return_value=rendered_detail_html) as mock_render:
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    mock_render.assert_called_once_with("https://example.com/jobs/1")
+    assert len(jobs) == 1
+    assert jobs[0].url == "https://example.com/jobs/1"
+    assert "Full job description" in jobs[0].raw_text
+
+
+@respx.mock
+def test_generic_listing_fetcher_falls_back_when_detail_page_returns_nonempty_but_thin_content():
+    # A JS-rendered detail page often comes back 200 OK with real (non-empty) but
+    # useless boilerplate text — e.g. Ashby's "You need to enable JavaScript to run
+    # this app." shell. HttpFetcher treats that as success (non-empty), so the
+    # fallback trigger must check thinness, not just emptiness.
+    respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=_LISTING_HTML))
+    respx.get("https://example.com/jobs/1").mock(
+        return_value=httpx.Response(200, text="<html><body><noscript>Enable JavaScript</noscript></body></html>")
+    )
+    client = _client_returning(True, ["https://example.com/jobs/1"])
+
+    rendered_detail_html = "<html><body><p>" + ("Full job description text. " * 10) + "</p></body></html>"
+    with patch("app.fetchers.generic_listing.render_html", return_value=rendered_detail_html) as mock_render:
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    mock_render.assert_called_once_with("https://example.com/jobs/1")
+    assert len(jobs) == 1
+    assert jobs[0].url == "https://example.com/jobs/1"
+    assert "Full job description" in jobs[0].raw_text
+
+
+@respx.mock
+def test_generic_listing_fetcher_caps_playwright_fallbacks_per_run():
+    # detect_listing filters the LLM's job_links against hrefs actually present
+    # on the page, so the listing page here needs a real anchor for each of the
+    # 15 detail URLs (unlike _LISTING_HTML, which only has 2 job anchors).
+    detail_urls = [f"https://example.com/jobs/{i}" for i in range(15)]
+    listing_html = (
+        "<html><body>"
+        + "".join(f'<a href="/jobs/{i}">Job {i}</a>' for i in range(15))
+        + "<p>" + ("We are a fast-growing company building great products. " * 5) + "</p>"
+        + "</body></html>"
+    )
+    respx.get("https://example.com/careers").mock(return_value=httpx.Response(200, text=listing_html))
+    for url in detail_urls:
+        respx.get(url).mock(return_value=httpx.Response(200, text=""))
+    client = _client_returning(True, detail_urls)
+
+    with patch("app.fetchers.generic_listing.render_html", return_value=None) as mock_render:
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    assert mock_render.call_count == 10
     assert jobs == []

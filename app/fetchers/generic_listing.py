@@ -2,11 +2,14 @@ from __future__ import annotations
 import httpx
 import openai
 from app.fetchers.base import Fetcher, RawJob
+from app.fetchers.content import has_enough_content, has_enough_text, extract_text
 from app.fetchers.http import HttpFetcher
 from app.fetchers.links import extract_links
+from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
 
 MAX_DETAIL_FETCHES = 50  # cap on new posting detail pages fetched per run
+MAX_PLAYWRIGHT_FALLBACKS = 10  # cap on Playwright renders per run, bounds worst-case run time
 
 
 class GenericListingFetcher:
@@ -31,11 +34,24 @@ class GenericListingFetcher:
         except Exception:
             return []
 
+        if not has_enough_content(html):
+            rendered = render_html(self._source["url"])
+            if rendered and has_enough_content(rendered):
+                html = rendered
+
         links = extract_links(html, self._source["url"])
         result = detect_listing(self._client, self._model, links, self._source["url"])
         job_links = [href for href in result["job_links"] if href not in self._known_urls]
 
         jobs: list[RawJob] = []
+        playwright_fallbacks_used = 0
         for href in job_links[:MAX_DETAIL_FETCHES]:
-            jobs.extend(HttpFetcher({"url": href}).fetch())
+            page_jobs = HttpFetcher({"url": href}).fetch()
+            is_thin = not page_jobs or not has_enough_text(page_jobs[0].raw_text)
+            if is_thin and playwright_fallbacks_used < MAX_PLAYWRIGHT_FALLBACKS:
+                playwright_fallbacks_used += 1
+                rendered = render_html(href)
+                if rendered and has_enough_content(rendered):
+                    page_jobs = [RawJob(url=href, title="", company="", raw_text=extract_text(rendered))]
+            jobs.extend(page_jobs)
         return jobs

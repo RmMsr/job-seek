@@ -1278,7 +1278,8 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
     )
     respx.get("http://example.com/js-app").mock(return_value=httpx.Response(200, text=js_shell_html))
 
-    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
+         patch("app.routes.jobs.render_html", return_value=None):
         resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
 
     assert resp.status_code == 200
@@ -1291,6 +1292,45 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
     assert jobs[0]["content_type"] == "error"
     assert jobs[0]["status"] == "trash"
     assert jobs[0]["url"] == "http://example.com/js-app"
+
+
+@respx.mock
+def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(client, conn):
+    js_shell_html = (
+        "<html><body>"
+        "<h1>Trener Jobs</h1>"
+        "<noscript>You need to enable JavaScript to run this app.</noscript>"
+        "</body></html>"
+    )
+    respx.get("http://example.com/js-app").mock(return_value=httpx.Response(200, text=js_shell_html))
+
+    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
+         patch("app.routes.jobs.render_html", return_value=_JOB_POSTING_HTML) as mock_render, \
+         patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
+
+    mock_render.assert_called_once_with("http://example.com/js-app")
+    assert resp.status_code == 200
+    assert "Classified as job_posting" in resp.text
+    jobs = q.get_jobs(conn)
+    assert len(jobs) == 1
+    assert jobs[0]["content_type"] == "job_posting"
+    assert jobs[0]["url"] == "http://example.com/js-app"
+
+
+@respx.mock
+def test_add_job_by_url_thin_page_not_rendered_when_already_rich(client, conn):
+    # Plain HTML already clears the content threshold — render_html must not
+    # be called at all, since that's the whole point of trying cheap HTTP first.
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(200, text=_JOB_POSTING_HTML))
+
+    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
+         patch("app.routes.jobs.render_html") as mock_render, \
+         patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+
+    mock_render.assert_not_called()
+    assert resp.status_code == 200
 
 
 _IS_A_LISTING = {

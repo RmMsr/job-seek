@@ -3,13 +3,14 @@ import sqlite3
 from urllib.parse import urlsplit
 import httpx
 import openai
-from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model, get_config
 from app.db import queries as q
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job, run_fetch
 from app.fetchers.links import extract_links
+from app.fetchers.content import has_enough_content, extract_text as _extract_text_raw
+from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
 from app.template_env import templates
 
@@ -34,15 +35,10 @@ def _fetch_url_html(url: str) -> str:
     return resp.text
 
 
-_MIN_CONTENT_LENGTH = 200  # below this, treat as no real content (e.g. a JS-only page's noscript shell)
-
-
 def _extract_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator="\n")
-    if len(text.strip()) < _MIN_CONTENT_LENGTH:
+    if not has_enough_content(html):
         raise _NoContentError("page had little to no extractable text")
-    return text
+    return _extract_text_raw(html)
 
 
 def _insert_error_job(conn: sqlite3.Connection, url: str, reason: str) -> int:
@@ -430,6 +426,10 @@ def job_add_by_url(
                         request=request, url=url, reason=str(exc),
                     )
                 else:
+                    if not has_enough_content(html):
+                        rendered = render_html(url)
+                        if rendered and has_enough_content(rendered):
+                            html = rendered
                     links = extract_links(html, url)
                     detection = detect_listing(client, model, links, url)
                     if detection["is_listing"] and len(detection["job_links"]) >= 2:
