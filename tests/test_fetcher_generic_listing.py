@@ -85,6 +85,40 @@ def test_generic_listing_fetcher_handles_fetch_failure():
     assert jobs == []
 
 
+@respx.mock
+def test_generic_listing_fetcher_logs_exception_on_listing_fetch_failure(caplog):
+    respx.get("https://example.com/careers").mock(side_effect=httpx.ConnectError("boom"))
+    client = _client_returning(True, [])
+
+    with caplog.at_level("INFO", logger="job_seek"):
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    assert jobs == []
+    failure_records = [
+        r for r in caplog.records
+        if "Careers" in r.message and "https://example.com/careers" in r.message and r.levelname != "INFO"
+    ]
+    assert failure_records
+    assert any(r.exc_info for r in failure_records)
+
+
+@respx.mock
+def test_generic_listing_fetcher_logs_warning_on_non_200_listing_response(caplog):
+    respx.get("https://example.com/careers").mock(return_value=httpx.Response(503))
+    client = _client_returning(True, [])
+
+    with caplog.at_level("INFO", logger="job_seek"):
+        fetcher = GenericListingFetcher(_SOURCE, client, "llama3.2")
+        jobs = fetcher.fetch()
+
+    assert jobs == []
+    assert any(
+        "Careers" in r.message and "503" in r.message and "https://example.com/careers" in r.message
+        for r in caplog.records
+    )
+
+
 _THIN_LISTING_HTML = "<html><body><noscript>Enable JavaScript</noscript></body></html>"
 
 

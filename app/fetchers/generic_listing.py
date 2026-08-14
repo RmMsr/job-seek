@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import httpx
 import openai
 from app.fetchers.base import Fetcher, RawJob
@@ -7,6 +8,8 @@ from app.fetchers.http import HttpFetcher
 from app.fetchers.links import extract_links
 from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
+
+logger = logging.getLogger("job_seek")
 
 MAX_DETAIL_FETCHES = 50  # cap on new posting detail pages fetched per run
 MAX_PLAYWRIGHT_FALLBACKS = 10  # cap on Playwright renders per run, bounds worst-case run time
@@ -29,9 +32,17 @@ class GenericListingFetcher:
         try:
             resp = httpx.get(self._source["url"], timeout=30, follow_redirects=True)
             if resp.status_code != 200:
+                logger.warning(
+                    "generic_listing fetch for '%s' got HTTP %d from %s",
+                    self._source["name"], resp.status_code, self._source["url"],
+                )
                 return []
             html = resp.text
         except Exception:
+            logger.exception(
+                "generic_listing fetch for '%s' failed to fetch listing page %s",
+                self._source["name"], self._source["url"],
+            )
             return []
 
         if not has_enough_content(html):
