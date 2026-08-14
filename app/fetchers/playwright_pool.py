@@ -1,10 +1,14 @@
 from __future__ import annotations
+import logging
 import queue
 import threading
 from playwright.sync_api import sync_playwright
 
+logger = logging.getLogger("job_seek")
+
 DEFAULT_IDLE_TIMEOUT_SECONDS = 10.0
 DEFAULT_TIMEOUT_MS = 30000
+MAX_BROWSER_INSTANCES = 1  # single dedicated worker thread owns at most one browser at a time
 
 
 class BrowserPool:
@@ -24,6 +28,7 @@ class BrowserPool:
         self._thread: threading.Thread | None = None
 
     def render(self, url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
+        logger.info("Escalating to headless-browser render: %s", url)
         self._ensure_thread()
         result_q: queue.Queue = queue.Queue(maxsize=1)
         self._jobs.put((url, timeout_ms, result_q))
@@ -48,14 +53,23 @@ class BrowserPool:
                     pw.stop()
                     browser = None
                     pw = None
+                    logger.info(
+                        "Playwright browser pool: closed idle browser (active=0/%d)",
+                        MAX_BROWSER_INSTANCES,
+                    )
                 continue
             try:
                 if browser is None:
                     pw = sync_playwright().start()
                     browser = pw.chromium.launch(headless=True)
+                    logger.info(
+                        "Playwright browser pool: launched browser (active=1/%d)",
+                        MAX_BROWSER_INSTANCES,
+                    )
                 html = self._render_one(browser, url, timeout_ms)
                 result_q.put(("ok", html))
             except Exception:
+                logger.exception("Playwright render failed for %s", url)
                 result_q.put(("error", None))
 
     def _render_one(self, browser, url: str, timeout_ms: int) -> str:

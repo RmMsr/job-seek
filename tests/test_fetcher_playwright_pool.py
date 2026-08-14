@@ -60,3 +60,42 @@ def test_render_returns_none_on_navigation_error():
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com")
     assert html is None
+
+
+def test_render_logs_escalation_to_headless_browser(caplog):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    pool = BrowserPool(idle_timeout_seconds=1.0)
+    with caplog.at_level("INFO", logger="job_seek"), \
+         patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render("https://example.com/js-app")
+    assert any(
+        "escalat" in r.message.lower() and "https://example.com/js-app" in r.message
+        for r in caplog.records
+    )
+
+
+def test_pool_logs_active_instance_count_on_launch_and_idle_close(caplog):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    pool = BrowserPool(idle_timeout_seconds=0.05)
+    with caplog.at_level("INFO", logger="job_seek"), \
+         patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render("https://example.com")
+        assert any("active=1/1" in r.message for r in caplog.records)
+        time.sleep(0.2)
+        assert any("active=0/1" in r.message for r in caplog.records)
+
+
+def test_render_logs_failure_with_exception_on_navigation_error(caplog):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    page.goto.side_effect = RuntimeError("nav timeout")
+    pool = BrowserPool(idle_timeout_seconds=1.0)
+    with caplog.at_level("INFO", logger="job_seek"), \
+         patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        html = pool.render("https://example.com/broken")
+    assert html is None
+    failure_records = [
+        r for r in caplog.records
+        if "https://example.com/broken" in r.message and r.levelname != "INFO"
+    ]
+    assert failure_records
+    assert any(r.exc_info for r in failure_records)
