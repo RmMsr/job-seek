@@ -56,8 +56,15 @@ def test_fetch_panel_shows_lifetime_stats(client, conn):
     q.complete_fetch_run(conn, run, jobs_found=3, jobs_new=2)
     resp = client.get("/fetch")
     assert resp.status_code == 200
-    assert "2 new" in resp.text
+    assert "2 added" in resp.text
     assert "1 run" in resp.text
+
+
+def test_fetch_panel_has_view_all_jobs_link_per_source(client, conn):
+    sid = _seed(conn)
+    resp = client.get("/fetch")
+    assert resp.status_code == 200
+    assert f'href="/jobs?source_id={sid}"' in resp.text
 
 
 def test_fetch_panel_does_not_repeat_source_url(client, conn):

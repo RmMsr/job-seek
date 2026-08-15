@@ -28,8 +28,15 @@ def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db), c
     needs_login_by_id = {
         s["id"]: _check_needs_login(s, config, conn) for s in sources if s["fetcher_type"] == "slack"
     }
+    job_counts_by_source = q.get_job_counts_by_source(conn)
     return templates.TemplateResponse(
-        request, "sources/index.html", {"sources": sources, "needs_login_by_id": needs_login_by_id}
+        request,
+        "sources/index.html",
+        {
+            "sources": sources,
+            "needs_login_by_id": needs_login_by_id,
+            "job_counts_by_source": job_counts_by_source,
+        },
     )
 
 
@@ -48,7 +55,11 @@ def create_source(
     return templates.TemplateResponse(
         request,
         "sources/index.html",
-        {"sources": q.get_sources(conn), "needs_login_by_id": {source_id: needs_login}},
+        {
+            "sources": q.get_sources(conn),
+            "needs_login_by_id": {source_id: needs_login},
+            "job_counts_by_source": q.get_job_counts_by_source(conn),
+        },
     )
 
 
@@ -68,7 +79,8 @@ def edit_source_form(source_id: int, request: Request, conn: sqlite3.Connection 
 @router.get("/sources/{source_id}", response_class=HTMLResponse)
 def source_row(source_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     source = _get_source_or_404(conn, source_id)
-    return templates.TemplateResponse(request, "sources/_row.html", {"source": source})
+    job_count = q.count_jobs_by_source(conn, source_id)
+    return templates.TemplateResponse(request, "sources/_row.html", {"source": source, "job_count": job_count})
 
 
 @router.post("/sources/{source_id}", response_class=HTMLResponse)
@@ -88,8 +100,9 @@ def update_source(
     )
     source = q.get_source(conn, source_id)
     needs_login = _check_needs_login(source, config, conn)
+    job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
-        request, "sources/_row.html", {"source": source, "needs_login": needs_login}
+        request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}
     )
 
 
@@ -111,8 +124,9 @@ def set_cookie(
     q.set_source_cookie(conn, source_id, d_cookie.strip())
     source = q.get_source(conn, source_id)
     needs_login = _check_needs_login(source, config, conn)
+    job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
-        request, "sources/_row.html", {"source": source, "needs_login": needs_login}
+        request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}
     )
 
 
@@ -127,6 +141,14 @@ def forget_cookie(
     q.set_source_cookie(conn, source_id, "")
     source = q.get_source(conn, source_id)
     needs_login = _check_needs_login(source, config, conn)
+    job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
-        request, "sources/_row.html", {"source": source, "needs_login": needs_login}
+        request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}
     )
+
+
+@router.delete("/sources/{source_id}", response_class=HTMLResponse)
+def delete_source(source_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    _get_source_or_404(conn, source_id)
+    q.delete_source(conn, source_id)
+    return HTMLResponse(content="")

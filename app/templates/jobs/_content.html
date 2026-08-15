@@ -1,18 +1,25 @@
 <div class="filter-bar">
-  <div class="filter-links">
-    <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}
-      title="Job postings awaiting your decision — passed at least one scenario's relevance gate.">New Jobs (<span id="count-new">{{ counts.new }}</span>)</a>
-    <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}
-      title="Leads awaiting your decision — mentions of a possible opportunity, not full postings.">New Leads (<span id="count-lead">{{ counts.lead }}</span>)</a>
-    <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}
-      title="Jobs and leads you've accepted.">Accepted (<span id="count-accepted">{{ counts.accepted }}</span>)</a>
-    <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}
-      title="Jobs and leads you've rejected.">Rejected (<span id="count-rejected">{{ counts.rejected }}</span>)</a>
-    <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}
-      title="Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios.">Not relevant (<span id="count-not_relevant">{{ counts.not_relevant }}</span>)</a>
-    <a href="/jobs?status=trash" {% if status == "trash" %}class="active"{% endif %}
-      title="Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily.">Trash (<span id="count-trash">{{ counts.trash }}</span>)</a>
-  </div>
+  {% if filter_source_id %}
+    <div class="filter-links">
+      <span>All jobs from {{ filter_source.name }} ({{ jobs | length }})</span>
+      <a href="/jobs">Clear filter</a>
+    </div>
+  {% else %}
+    <div class="filter-links">
+      <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}
+        title="Job postings awaiting your decision — passed at least one scenario's relevance gate.">New Jobs (<span id="count-new">{{ counts.new }}</span>)</a>
+      <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}
+        title="Leads awaiting your decision — mentions of a possible opportunity, not full postings.">New Leads (<span id="count-lead">{{ counts.lead }}</span>)</a>
+      <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}
+        title="Jobs and leads you've accepted.">Accepted (<span id="count-accepted">{{ counts.accepted }}</span>)</a>
+      <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}
+        title="Jobs and leads you've rejected.">Rejected (<span id="count-rejected">{{ counts.rejected }}</span>)</a>
+      <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}
+        title="Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios.">Not relevant (<span id="count-not_relevant">{{ counts.not_relevant }}</span>)</a>
+      <a href="/jobs?status=trash" {% if status == "trash" %}class="active"{% endif %}
+        title="Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily.">Trash (<span id="count-trash">{{ counts.trash }}</span>)</a>
+    </div>
+  {% endif %}
   {% if jobs %}
     <label class="select-all">
       <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
@@ -29,7 +36,7 @@
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
       <button type="button" class="btn btn-reset"
-        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
         data-progress-jobs
         data-progress-oob="1"
         data-progress-display="#bulk-reset-progress"

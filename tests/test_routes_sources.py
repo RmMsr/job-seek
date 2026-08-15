@@ -224,6 +224,62 @@ def test_sources_page_add_source_form_includes_generic_listing_option(client, co
     assert '<option value="generic_listing">generic_listing</option>' in resp.text
 
 
+def test_delete_source_removes_row_and_returns_empty_body(client, conn):
+    sid = _seed(conn)
+    resp = client.delete(f"/sources/{sid}")
+    assert resp.status_code == 200
+    assert resp.text == ""
+    assert q.get_source(conn, sid) is None
+
+
+def test_delete_source_removes_its_jobs(client, conn):
+    sid = _seed(conn)
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T", company="C", raw_text="r")
+    resp = client.delete(f"/sources/{sid}")
+    assert resp.status_code == 200
+    assert q.get_job(conn, jid) is None
+
+
+def test_delete_source_404_for_missing_source(client, conn):
+    resp = client.delete("/sources/999")
+    assert resp.status_code == 404
+
+
+def test_sources_page_delete_button_confirm_text_includes_job_count(client, conn):
+    sid = _seed(conn)
+    q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
+    q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="T2", company="C", raw_text="r")
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "Delete 'finn.no' and its 2 jobs? This cannot be undone." in resp.text
+
+
+def test_sources_page_delete_button_confirm_text_singular_for_one_job(client, conn):
+    sid = _seed(conn)
+    q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "Delete 'finn.no' and its 1 job? This cannot be undone." in resp.text
+
+
+def test_sources_page_delete_button_confirm_text_zero_jobs(client, conn):
+    _seed(conn)
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "Delete 'finn.no' and its 0 jobs? This cannot be undone." in resp.text
+
+
+def test_update_source_response_includes_delete_button_with_current_job_count(client, conn):
+    sid = _seed(conn)
+    q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
+    resp = client.post(
+        f"/sources/{sid}",
+        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http", "enabled": "on"},
+    )
+    assert resp.status_code == 200
+    assert "its 1 job?" in resp.text
+
+
 def test_slack_row_shows_cli_login_command(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
     with patch.object(SlackFetcher, "check_needs_login", return_value=True):

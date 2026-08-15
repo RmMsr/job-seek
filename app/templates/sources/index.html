@@ -20,6 +20,7 @@
     </thead>
     {% for source in sources %}
       {% set needs_login = needs_login_by_id.get(source.id) if needs_login_by_id is defined else None %}
+      {% set job_count = job_counts_by_source.get(source.id, 0) if job_counts_by_source is defined else 0 %}
       {% include "sources/_row.html" %}
     {% endfor %}
   </table>

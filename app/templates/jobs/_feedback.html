@@ -11,7 +11,7 @@
     {% endif %}
   </div>
   <div role="button" tabindex="0" style="cursor:pointer"
-    hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+    hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML"
     hx-trigger="click, keyup[key=='Enter']">
@@ -52,7 +52,7 @@
     </section>
   {% endif %}
   <form class="feedback-form" style="margin-top:0.75rem;"
-    hx-post="/jobs/{{ job.id }}/feedback{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+    hx-post="/jobs/{{ job.id }}/feedback{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
     {% if is_detail_page %}<input type="hidden" name="redirect" value="/jobs">{% endif %}
@@ -69,7 +69,7 @@
     <summary>Advanced&hellip;</summary>
     {% if job.content_type == "job_posting" and job.scored_gate_count and not job.passed_gate_count and not job.gate_override %}
       <button type="button" class="btn"
-        data-progress-url="/jobs/{{ job.id }}/pass-as-new{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+        data-progress-url="/jobs/{{ job.id }}/pass-as-new{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
         data-progress-oob="1"
         data-progress-display="#reset-progress-{{ job.id }}"
         title="Bypass the gate threshold for this job and file it as New, keeping its existing scores as a record of why it failed.">
@@ -77,7 +77,7 @@
       </button>
     {% endif %}
     <button type="button" class="btn btn-reset"
-      data-progress-url="/jobs/{{ job.id }}/reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+      data-progress-url="/jobs/{{ job.id }}/reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
       data-progress-oob="1"
       data-progress-display="#reset-progress-{{ job.id }}"
       title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">

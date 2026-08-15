@@ -1416,3 +1416,52 @@ def test_job_list_add_by_url_button_uses_generalized_body_attribute(client, conn
     assert resp.status_code == 200
     assert 'data-progress-body-url="#add-job-url"' in resp.text
     assert 'data-progress-url-input' not in resp.text
+
+
+def test_job_list_source_id_shows_every_status_for_that_source(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    other_sid = q.insert_source(conn, "other.no", "https://other.no", "http")
+    j_new = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="New Job", company="C", raw_text="r")
+    j_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Accepted Job", company="C", raw_text="r")
+    q.update_job_feedback(conn, j_accepted, "accepted", "")
+    j_trash = q.insert_job(conn, source_id=sid, url="http://finn.no/job/3", title="Trashed Job", company="C", raw_text="r")
+    q.update_job_feedback(conn, j_trash, "trash", "")
+    q.insert_job(conn, source_id=other_sid, url="http://other.no/job/1", title="Other Source Job", company="C", raw_text="r")
+
+    resp = client.get(f"/jobs?source_id={sid}")
+
+    assert resp.status_code == 200
+    assert "New Job" in resp.text
+    assert "Accepted Job" in resp.text
+    assert "Trashed Job" in resp.text
+    assert "Other Source Job" not in resp.text
+
+
+def test_job_list_source_id_header_shows_name_and_count(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
+    resp = client.get(f"/jobs?source_id={sid}")
+    assert resp.status_code == 200
+    assert "All jobs from finn.no (1)" in resp.text
+    assert '<a href="/jobs">Clear filter</a>' in resp.text
+
+
+def test_job_list_source_id_hides_status_tabs(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    resp = client.get(f"/jobs?source_id={sid}")
+    assert resp.status_code == 200
+    assert "New Jobs (" not in resp.text
+
+
+def test_job_feedback_within_source_view_stays_visible_no_stale_badge(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
+
+    resp = client.post(
+        f"/jobs/{jid}/feedback?source_id={sid}",
+        data={"status": "accepted", "note": ""},
+    )
+
+    assert resp.status_code == 200
+    assert "Moved to" not in resp.text
+    assert "Job A" in resp.text

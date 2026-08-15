@@ -51,6 +51,77 @@ def test_get_or_create_manual_source_creates_once(conn):
     assert len(sources) == 1
 
 
+def test_get_job_counts_by_source(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.insert_job(conn, source_id=s1, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.insert_job(conn, source_id=s2, url="http://job/3", title="T3", company="C", raw_text="r")
+    counts = q.get_job_counts_by_source(conn)
+    assert counts == {s1: 2, s2: 1}
+
+
+def test_get_job_counts_by_source_omits_sources_with_no_jobs(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    counts = q.get_job_counts_by_source(conn)
+    assert counts == {}
+
+
+def test_count_jobs_by_source(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    assert q.count_jobs_by_source(conn, s1) == 1
+
+
+def test_count_jobs_by_source_zero_when_no_jobs(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    assert q.count_jobs_by_source(conn, s1) == 0
+
+
+def test_delete_source_removes_source_and_its_jobs(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    jid = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.delete_source(conn, s1)
+    assert q.get_source(conn, s1) is None
+    assert q.get_job(conn, jid) is None
+
+
+def test_delete_source_removes_its_fetch_runs(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    run_id = q.start_fetch_run(conn, s1)
+    q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1)
+    q.delete_source(conn, s1)
+    assert q.get_recent_fetch_runs(conn) == []
+
+
+def test_delete_source_cascades_to_job_scores_and_scenario_feedback(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "note", "higher")
+
+    q.delete_source(conn, s1)
+
+    assert q.get_job_scores(conn, jid) == []
+    row = conn.execute(
+        "SELECT 1 FROM scenario_feedback WHERE job_id = ?", (jid,)
+    ).fetchone()
+    assert row is None
+
+
+def test_delete_source_leaves_other_sources_and_jobs_intact(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=s2, url="http://job/2", title="T2", company="C", raw_text="r")
+
+    q.delete_source(conn, s1)
+
+    assert q.get_source(conn, s2) is not None
+    assert q.get_job(conn, j2) is not None
+
+
 def test_get_job_by_url_returns_job(conn):
     sid = q.insert_source(conn, "s", "http://x", "http")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
@@ -346,6 +417,19 @@ def test_get_jobs_filter_by_status(conn):
     result = q.get_jobs(conn, status="accepted")
     assert len(result) == 1
     assert result[0]["id"] == j1
+
+
+def test_get_jobs_filter_by_source_id_ignores_status(conn):
+    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    j1 = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=s1, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.insert_job(conn, source_id=s2, url="http://job/3", title="T3", company="C", raw_text="r")
+    q.update_job_feedback(conn, j2, "accepted", "note")
+
+    result = q.get_jobs(conn, source_id=s1)
+
+    assert {j["id"] for j in result} == {j1, j2}
 
 
 def test_get_job_counts(conn):

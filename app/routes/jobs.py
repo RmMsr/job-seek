@@ -63,8 +63,10 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
 
 
 def _get_filtered_jobs(
-    conn: sqlite3.Connection, status: str | None, content_type: str | None
+    conn: sqlite3.Connection, status: str | None, content_type: str | None, source_id: int | None = None
 ) -> list[dict]:
+    if source_id is not None:
+        return q.get_jobs(conn, source_id=source_id)
     if status == "not_relevant":
         return q.get_jobs(conn, status="new", content_type="job_posting", gate_status="failed")
     if status is None and content_type is None:
@@ -75,11 +77,16 @@ def _get_filtered_jobs(
 
 
 def _filter_context(request: Request) -> dict:
-    if "status" not in request.query_params and "content_type" not in request.query_params:
+    has_status = "status" in request.query_params
+    has_content_type = "content_type" in request.query_params
+    has_source_id = "source_id" in request.query_params
+    if not (has_status or has_content_type or has_source_id):
         return {}
+    source_id_param = request.query_params.get("source_id") or None
     return {
         "filter_status": request.query_params.get("status") or None,
         "filter_content_type": request.query_params.get("content_type") or None,
+        "filter_source_id": int(source_id_param) if source_id_param else None,
     }
 
 
@@ -87,8 +94,10 @@ def _is_detail_page_request(request: Request) -> bool:
     return request.query_params.get("detail") == "1"
 
 
-def _stale_badge(conn: sqlite3.Connection, job: dict, status: str | None, content_type: str | None) -> dict | None:
-    filtered_ids = {j["id"] for j in _get_filtered_jobs(conn, status, content_type)}
+def _stale_badge(
+    conn: sqlite3.Connection, job: dict, status: str | None, content_type: str | None, source_id: int | None = None
+) -> dict | None:
+    filtered_ids = {j["id"] for j in _get_filtered_jobs(conn, status, content_type, source_id)}
     if job["id"] in filtered_ids:
         return None
     anchor = f"#job-{job['id']}"
@@ -124,7 +133,8 @@ def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id:
     stale_badge = None
     if filter_ctx:
         stale_badge = _stale_badge(
-            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type")
+            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
+            filter_ctx.get("filter_source_id"),
         )
 
     if stale_badge:
@@ -140,15 +150,19 @@ def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id:
     return templates.get_template("jobs/_feedback.html").render(request=request, **context)
 
 
-def _content_context(conn: sqlite3.Connection, status: str | None, content_type: str | None) -> dict:
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type))
+def _content_context(
+    conn: sqlite3.Connection, status: str | None, content_type: str | None, source_id: int | None = None
+) -> dict:
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type, source_id))
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
-    effective_status = status if (status is not None or content_type is not None) else "new"
+    effective_status = status if (status is not None or content_type is not None or source_id is not None) else "new"
+    filter_source = q.get_source(conn, source_id) if source_id is not None else None
     return {
         "jobs": jobs, "stale_jobs": [], "counts": counts, "scenarios": scenarios,
         "status": effective_status, "content_type": content_type,
         "filter_status": status, "filter_content_type": content_type,
+        "filter_source_id": source_id, "filter_source": filter_source,
     }
 
 
@@ -157,9 +171,12 @@ def job_list(
     request: Request,
     status: str | None = None,
     content_type: str | None = None,
+    source_id: int | None = None,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    return templates.TemplateResponse(request, "jobs/list.html", _content_context(conn, status, content_type))
+    return templates.TemplateResponse(
+        request, "jobs/list.html", _content_context(conn, status, content_type, source_id)
+    )
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -347,6 +364,7 @@ def job_bulk_feedback(
     note: str | None = Form(None),
     status_filter: str | None = Form(None),
     content_type_filter: str | None = Form(None),
+    source_id_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -354,7 +372,9 @@ def job_bulk_feedback(
 
     status_filter = status_filter or None
     content_type_filter = content_type_filter or None
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter))
+    source_id_filter = source_id_filter or None
+    source_id = int(source_id_filter) if source_id_filter else None
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, source_id))
     matched_ids = {j["id"] for j in jobs}
 
     stale_jobs = []
@@ -364,7 +384,7 @@ def job_bulk_feedback(
         job = q.get_job(conn, job_id)
         if not job:
             continue
-        badge = _stale_badge(conn, job, status_filter, content_type_filter)
+        badge = _stale_badge(conn, job, status_filter, content_type_filter, source_id)
         if not badge:
             continue
         job["stale_badge"] = badge
@@ -373,13 +393,19 @@ def job_bulk_feedback(
 
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
-    effective_status = status_filter if (status_filter is not None or content_type_filter is not None) else "new"
+    effective_status = (
+        status_filter
+        if (status_filter is not None or content_type_filter is not None or source_id is not None)
+        else "new"
+    )
+    filter_source = q.get_source(conn, source_id) if source_id is not None else None
     return templates.TemplateResponse(
         request, "jobs/_content.html",
         {
             "jobs": jobs, "stale_jobs": stale_jobs, "counts": counts, "scenarios": scenarios,
             "status": effective_status, "content_type": content_type_filter,
             "filter_status": status_filter, "filter_content_type": content_type_filter,
+            "filter_source_id": source_id, "filter_source": filter_source,
         },
     )
 

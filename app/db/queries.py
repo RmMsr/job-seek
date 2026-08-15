@@ -74,6 +74,23 @@ def set_source_cookie(conn: sqlite3.Connection, source_id: int, cookie: str) -> 
     conn.commit()
 
 
+def get_job_counts_by_source(conn: sqlite3.Connection) -> dict[int, int]:
+    rows = conn.execute("SELECT source_id, COUNT(*) AS n FROM jobs GROUP BY source_id").fetchall()
+    return {row["source_id"]: row["n"] for row in rows}
+
+
+def count_jobs_by_source(conn: sqlite3.Connection, source_id: int) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM jobs WHERE source_id = ?", (source_id,)).fetchone()
+    return row[0]
+
+
+def delete_source(conn: sqlite3.Connection, source_id: int) -> None:
+    conn.execute("DELETE FROM fetch_runs WHERE source_id = ?", (source_id,))
+    conn.execute("DELETE FROM jobs WHERE source_id = ?", (source_id,))
+    conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    conn.commit()
+
+
 # --- Scenarios ---
 
 def get_scenarios(conn: sqlite3.Connection) -> list[dict]:
@@ -389,6 +406,7 @@ def get_jobs(
     status: str | None = None,
     content_type: str | None = None,
     gate_status: str | None = None,
+    source_id: int | None = None,
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -397,6 +415,9 @@ def get_jobs(
     if content_type is not None:
         clauses.append("jobs.content_type = ?")
         params.append(content_type)
+    if source_id is not None:
+        clauses.append("jobs.source_id = ?")
+        params.append(source_id)
     if gate_status == "passed":
         clauses.append(_GATE_PASSED_CLAUSE)
     elif gate_status == "failed":
