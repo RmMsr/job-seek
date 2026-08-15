@@ -27,10 +27,9 @@
       hx-target="#source-row-{{ source.id }}"
       hx-swap="outerHTML">Edit</button>
     <button class="btn" style="font-size:0.85em; padding:3px 10px; margin-left:0.4rem;"
-      hx-delete="/sources/{{ source.id }}"
+      hx-get="/sources/{{ source.id }}/delete-confirm"
       hx-target="#source-row-{{ source.id }}"
-      hx-swap="outerHTML"
-      hx-confirm="Delete '{{ source.name }}' and its {{ job_count }} job{{ 's' if job_count != 1 else '' }}? This cannot be undone.">Delete</button>
+      hx-swap="outerHTML">Delete</button>
   </td>
 </tr>
 {% if source.fetcher_type == "slack" %}

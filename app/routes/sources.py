@@ -147,6 +147,15 @@ def forget_cookie(
     )
 
 
+@router.get("/sources/{source_id}/delete-confirm", response_class=HTMLResponse)
+def delete_source_confirm(source_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    source = _get_source_or_404(conn, source_id)
+    job_count = q.count_jobs_by_source(conn, source_id)
+    return templates.TemplateResponse(
+        request, "sources/_row_delete_confirm.html", {"source": source, "job_count": job_count}
+    )
+
+
 @router.delete("/sources/{source_id}", response_class=HTMLResponse)
 def delete_source(source_id: int, conn: sqlite3.Connection = Depends(get_db)):
     _get_source_or_404(conn, source_id)

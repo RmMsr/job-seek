@@ -245,28 +245,42 @@ def test_delete_source_404_for_missing_source(client, conn):
     assert resp.status_code == 404
 
 
-def test_sources_page_delete_button_confirm_text_includes_job_count(client, conn):
+def test_sources_page_delete_button_opens_confirm_panel(client, conn):
+    sid = _seed(conn)
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert f'hx-get="/sources/{sid}/delete-confirm"' in resp.text
+
+
+def test_delete_confirm_panel_shows_job_count_and_link_to_jobs(client, conn):
     sid = _seed(conn)
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="T2", company="C", raw_text="r")
-    resp = client.get("/sources")
+    resp = client.get(f"/sources/{sid}/delete-confirm")
     assert resp.status_code == 200
-    assert "Delete 'finn.no' and its 2 jobs? This cannot be undone." in resp.text
+    assert "Delete <strong>finn.no</strong> and its 2 jobs?" in resp.text
+    assert f'href="/jobs?source_id={sid}"' in resp.text
 
 
-def test_sources_page_delete_button_confirm_text_singular_for_one_job(client, conn):
+def test_delete_confirm_panel_singular_for_one_job(client, conn):
     sid = _seed(conn)
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
-    resp = client.get("/sources")
+    resp = client.get(f"/sources/{sid}/delete-confirm")
     assert resp.status_code == 200
-    assert "Delete 'finn.no' and its 1 job? This cannot be undone." in resp.text
+    assert "Delete <strong>finn.no</strong> and its 1 job?" in resp.text
 
 
-def test_sources_page_delete_button_confirm_text_zero_jobs(client, conn):
-    _seed(conn)
-    resp = client.get("/sources")
+def test_delete_confirm_panel_no_jobs_link_when_zero_jobs(client, conn):
+    sid = _seed(conn)
+    resp = client.get(f"/sources/{sid}/delete-confirm")
     assert resp.status_code == 200
-    assert "Delete 'finn.no' and its 0 jobs? This cannot be undone." in resp.text
+    assert "Delete <strong>finn.no</strong> and its 0 jobs?" in resp.text
+    assert f'href="/jobs?source_id={sid}"' not in resp.text
+
+
+def test_delete_confirm_panel_404_for_missing_source(client, conn):
+    resp = client.get("/sources/999/delete-confirm")
+    assert resp.status_code == 404
 
 
 def test_update_source_response_includes_delete_button_with_current_job_count(client, conn):
@@ -277,7 +291,7 @@ def test_update_source_response_includes_delete_button_with_current_job_count(cl
         data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http", "enabled": "on"},
     )
     assert resp.status_code == 200
-    assert "its 1 job?" in resp.text
+    assert f'hx-get="/sources/{sid}/delete-confirm"' in resp.text
 
 
 def test_slack_row_shows_cli_login_command(client, conn):
