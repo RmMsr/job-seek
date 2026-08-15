@@ -1,0 +1,15 @@
+.git
+.claude
+.venv
+__pycache__
+*.pyc
+job-seek.db*
+config.toml
+browser-profile/
+/data/
+docs
+tests
+temp
+*.egg-info
+dist
+.pytest_cache

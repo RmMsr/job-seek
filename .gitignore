@@ -5,6 +5,7 @@ job-seek.db*
 config.toml
 browser-profile/
 job-seek/
+/data/
 temp/
 *.egg-info/
 dist/

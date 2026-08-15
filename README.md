@@ -58,6 +58,56 @@ uv run uvicorn app.main:app --reload --port 8000
 
 Open [http://localhost:8000](http://localhost:8000) in your browser.
 
+### Running in a container
+
+All per-instance state — `config.toml`, the sqlite database, and
+`browser-profile/` — lives under a single `data/` directory inside the
+container, so one volume mount covers everything. On first run, the
+container populates `data/` with a default `config.toml` that points at an
+inference provider running on the container host itself (e.g. a local Ollama
+on port 11434); edit the mounted `data/config.toml` to change the endpoint,
+model, or anything else. The image runs as a fixed non-root uid/gid (1000)
+for hardening.
+
+The Slack login flow still runs on the host (`uv run python -m
+app.cli.slack_login ...`), not inside the container: it needs a real,
+visible browser window.
+
+#### Podman (primary)
+
+```bash
+podman build --file Containerfile --tag job-seek .
+mkdir --parents data
+podman run --detach --publish 8000:8000 \
+  --userns=keep-id:uid=1000,gid=1000 \
+  --volume "$(pwd)/data:/app/data" \
+  job-seek
+```
+
+`--userns=keep-id` maps the container's uid 1000 back to your own host uid,
+so files Podman writes into `data/` (the config, db, browser profile) stay
+owned by you rather than an arbitrary container uid. Podman resolves
+`host.containers.internal` (the default endpoint's hostname) to the host
+automatically — no extra flags needed.
+
+#### Docker
+
+```bash
+docker build --file Containerfile --tag job-seek .
+mkdir --parents data
+docker run --detach --publish 8000:8000 \
+  --add-host=host.containers.internal:host-gateway \
+  --volume "$(pwd)/data:/app/data" \
+  job-seek
+```
+
+Docker has no `--userns=keep-id` equivalent, so make sure `data/` is
+writable by uid 1000 on the host before starting the container (it already
+will be if your own user is uid 1000, the common default for a first Linux
+user account) — otherwise `chown --recursive 1000:1000 data` first. The
+`--add-host` flag is required on Docker (unlike Podman) to resolve
+`host.containers.internal` to the host machine.
+
 ### First-time setup
 
 1. **Profile** — Go to `/profile` and describe your skills, experience, interests, and constraints (plain text or markdown).

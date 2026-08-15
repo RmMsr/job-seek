@@ -1,0 +1,9 @@
+[llm]
+endpoint = "http://host.containers.internal:11434/v1"
+model = "llama3.2"
+
+[database]
+path = "data/job-seek.db"
+
+[browser]
+profile_dir = "data/browser-profile"
