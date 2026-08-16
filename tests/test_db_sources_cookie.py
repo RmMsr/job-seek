@@ -25,6 +25,20 @@ def test_set_source_cookie_persists_value(conn):
     assert q.get_source(conn, sid)["d_cookie"] == "xoxd-fake-cookie"
 
 
+def test_migration_adds_auth_error_column_to_preexisting_fetch_runs_table(conn):
+    # Simulate an older DB whose fetch_runs table predates auth_error.
+    conn.execute("DROP TABLE fetch_runs")
+    conn.execute(
+        "CREATE TABLE fetch_runs (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES sources(id), "
+        "started_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT, "
+        "jobs_found INTEGER NOT NULL DEFAULT 0, jobs_new INTEGER NOT NULL DEFAULT 0, error TEXT)"
+    )
+    conn.commit()
+    init_db(conn)  # idempotent; must add the column
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(fetch_runs)").fetchall()]
+    assert "auth_error" in cols
+
+
 def test_migration_adds_cookie_column_to_preexisting_sources_table(conn):
     # Simulate an older DB whose sources table predates d_cookie.
     conn.execute("DROP TABLE sources")

@@ -4,9 +4,11 @@
     <strong>{{ source.name }}</strong><br>
     <small style="word-break:break-all;">{{ source.url }}</small>
     {% if source.fetcher_type == "slack" %}
-      {% if needs_login %}
+      {% if needs_login == "needs_login" %}
         <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>
-      {% elif needs_login is not none %}
+      {% elif needs_login == "unverified" %}
+        <br><span style="color:#6c757d;">Cookie saved — will be verified on the next fetch.</span>
+      {% elif needs_login == "ok" %}
         <br><span style="color:#198754;">✓ Slack session cookie set.</span>
       {% endif %}
       {% if source.d_cookie %}

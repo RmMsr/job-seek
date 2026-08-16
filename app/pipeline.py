@@ -11,7 +11,7 @@ from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
 from app.ai.assess_fit import assess_fit
 from app.fetchers.base import RawJob
-from app.fetchers.slack import SlackFetcher
+from app.fetchers.slack import SlackFetcher, SlackAuthRequired
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
 from app.scenario_version import compute_version_hash, compute_profile_hash
@@ -150,7 +150,10 @@ def run_fetch(
         yield _progress(f"Fetch complete for '{source['name']}': {jobs_new} new / {jobs_found} found")
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=jobs_found, jobs_new=jobs_new, error=None)
     except Exception as exc:
-        q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error=str(exc))
+        q.complete_fetch_run(
+            conn, run_id, jobs_found=0, jobs_new=0, error=str(exc),
+            auth_error=isinstance(exc, SlackAuthRequired),
+        )
         yield _progress(f"Fetch failed for '{source['name']}': {exc}")
         return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=0, jobs_new=0, error=str(exc))
 

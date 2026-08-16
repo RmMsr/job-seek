@@ -2,7 +2,7 @@ import time
 import httpx
 import pytest
 import respx
-from app.fetchers.slack import SlackFetcher, extract_token, _clean_mrkdwn, _ts_to_iso
+from app.fetchers.slack import SlackFetcher, SlackAuthRequired, extract_token, _clean_mrkdwn, _ts_to_iso
 
 _TARGET_URL = "https://example-workspace.slack.com/messages/C0EXAMPLE1"
 _HISTORY_URL = "https://example-workspace.slack.com/api/conversations.history"
@@ -130,6 +130,28 @@ def test_fetch_raises_when_session_invalid():
     fetcher = SlackFetcher(_SOURCE)
     with pytest.raises(RuntimeError):
         fetcher.fetch()
+
+
+@respx.mock
+def test_fetch_raises_slack_auth_required_specifically_when_session_invalid():
+    # Distinct from other fetch failures so callers (pipeline.run_fetch) can
+    # tell "needs login" apart from a transient/unrelated error.
+    respx.get(_TARGET_URL).mock(return_value=httpx.Response(200, text=_SIGNIN_HTML))
+    fetcher = SlackFetcher(_SOURCE)
+    with pytest.raises(SlackAuthRequired):
+        fetcher.fetch()
+
+
+@respx.mock
+def test_fetch_does_not_raise_slack_auth_required_for_unrelated_api_error():
+    respx.get(_TARGET_URL).mock(return_value=httpx.Response(200, text=_MESSAGES_HTML))
+    respx.post(_HISTORY_URL).mock(
+        return_value=httpx.Response(200, json={"ok": False, "error": "invalid_auth"})
+    )
+    fetcher = SlackFetcher(_SOURCE)
+    with pytest.raises(RuntimeError) as exc_info:
+        fetcher.fetch()
+    assert not isinstance(exc_info.value, SlackAuthRequired)
 
 
 @respx.mock

@@ -558,15 +558,17 @@ def complete_fetch_run(
     jobs_found: int,
     jobs_new: int,
     error: str | None = None,
+    auth_error: bool = False,
 ) -> None:
     conn.execute(
         """UPDATE fetch_runs SET
             completed_at = datetime('now'),
             jobs_found = ?,
             jobs_new = ?,
-            error = ?
+            error = ?,
+            auth_error = ?
         WHERE id = ?""",
-        (jobs_found, jobs_new, error, run_id),
+        (jobs_found, jobs_new, error, int(auth_error), run_id),
     )
     conn.commit()
 
@@ -588,7 +590,8 @@ def get_fetch_stats_by_source(conn: sqlite3.Connection) -> dict[int, dict]:
                COUNT(*) AS run_count,
                SUM(jobs_new) AS total_new,
                SUM(jobs_found) AS total_found,
-               MAX(CASE WHEN error IS NULL THEN completed_at END) AS last_success_at
+               MAX(CASE WHEN error IS NULL THEN completed_at END) AS last_success_at,
+               MAX(CASE WHEN auth_error THEN completed_at END) AS last_auth_error_at
         FROM fetch_runs
         GROUP BY source_id
         """

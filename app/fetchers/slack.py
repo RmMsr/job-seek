@@ -11,6 +11,10 @@ SLACK_URL_RE = re.compile(r"^https://([a-zA-Z0-9-]+)\.slack\.com/(?:archives|mes
 _TOKEN_RE = re.compile(r'"api_token":"(xoxc-[A-Za-z0-9-]+)"')
 
 
+class SlackAuthRequired(RuntimeError):
+    """Slack rejected the stored `d` cookie: no valid session, needs re-login."""
+
+
 def extract_token(html: str) -> str | None:
     match = _TOKEN_RE.search(html)
     return match.group(1) if match else None
@@ -104,7 +108,7 @@ class SlackFetcher:
     def fetch(self) -> list[RawJob]:
         token = extract_token(self._fetch_messages_html())
         if token is None:
-            raise RuntimeError(
+            raise SlackAuthRequired(
                 f"No valid Slack session for {self._source['name']!r}: credentials are missing or expired."
             )
         return self._collect(token)

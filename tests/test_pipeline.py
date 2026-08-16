@@ -180,6 +180,28 @@ def test_run_fetch_records_fetch_run(conn, source):
     assert runs[0]["completed_at"] is not None
 
 
+def test_run_fetch_sets_auth_error_on_slack_auth_required(conn, source):
+    from app.fetchers.slack import SlackAuthRequired
+
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.side_effect = SlackAuthRequired("no valid session")
+        _drain(run_fetch(source, conn, client=MagicMock(), model="llama3.2", profile_dir="bp"))
+
+    run = q.get_recent_fetch_runs(conn)[0]
+    assert run["auth_error"] == 1
+    assert run["error"] == "no valid session"
+
+
+def test_run_fetch_does_not_set_auth_error_on_other_exceptions(conn, source):
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.side_effect = RuntimeError("timeout")
+        _drain(run_fetch(source, conn, client=MagicMock(), model="llama3.2", profile_dir="bp"))
+
+    run = q.get_recent_fetch_runs(conn)[0]
+    assert run["auth_error"] == 0
+    assert run["error"] == "timeout"
+
+
 def test_run_fetch_irrelevant_not_persisted(conn, source):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="meetup next week")]
     client = MagicMock()

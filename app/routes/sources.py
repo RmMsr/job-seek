@@ -14,7 +14,7 @@ from app.fetchers.playwright_pool import render_html
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.detect_listing import detect_listing
 from app.ai.generate_source_name import generate_source_name
-from app.pipeline import _make_fetcher, run_fetch
+from app.pipeline import run_fetch
 from app.template_env import templates
 
 router = APIRouter()
@@ -26,12 +26,34 @@ def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
     return prefix + rendered.replace("\n", "") + "\n"
 
 
-def _check_needs_login(source: dict, config, conn: sqlite3.Connection) -> bool | None:
+def _slack_login_state(source: dict, stats_by_source: dict) -> str | None:
+    """Local-only login state for the sources page: 'needs_login', 'unverified',
+    or 'ok', derived entirely from the stored cookie and past fetch outcomes.
+    Never makes a network call — that only happens on an explicit fetch or
+    cookie save, never as a side effect of rendering this page."""
     if source["fetcher_type"] != "slack":
         return None
     try:
-        fetcher = _make_fetcher(source, config.browser_profile_dir, conn)
-        return fetcher.check_needs_login()
+        SlackFetcher(source)  # validates the URL shape only, no network call
+    except ValueError:
+        return None
+    if not source["d_cookie"]:
+        return "needs_login"
+    stats = stats_by_source.get(source["id"]) or {}
+    last_success_at = stats.get("last_success_at")
+    last_auth_error_at = stats.get("last_auth_error_at")
+    if last_auth_error_at and (not last_success_at or last_auth_error_at > last_success_at):
+        return "needs_login"
+    if last_success_at:
+        return "ok"
+    return "unverified"
+
+
+def _live_slack_check(source: dict) -> bool | None:
+    """One-time live check against Slack, used only right after a cookie is
+    saved so the user gets immediate pass/fail feedback on what they pasted."""
+    try:
+        return SlackFetcher(source).check_needs_login()
     except Exception:
         return None
 
@@ -57,10 +79,11 @@ def _visible_sources(conn: sqlite3.Connection) -> list[dict]:
     return [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"]
 
 
-def _sources_context(conn: sqlite3.Connection, config) -> dict:
+def _sources_context(conn: sqlite3.Connection) -> dict:
     sources = _visible_sources(conn)
+    stats_by_source = q.get_fetch_stats_by_source(conn)
     needs_login_by_id = {
-        s["id"]: _check_needs_login(s, config, conn) for s in sources if s["fetcher_type"] == "slack"
+        s["id"]: _slack_login_state(s, stats_by_source) for s in sources if s["fetcher_type"] == "slack"
     }
     return {
         "sources": sources,
@@ -70,8 +93,8 @@ def _sources_context(conn: sqlite3.Connection, config) -> dict:
 
 
 @router.get("/sources", response_class=HTMLResponse)
-def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db), config=Depends(get_config)):
-    return templates.TemplateResponse(request, "sources/index.html", _sources_context(conn, config))
+def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    return templates.TemplateResponse(request, "sources/index.html", _sources_context(conn))
 
 
 @router.post("/sources/detect")
@@ -143,7 +166,7 @@ def confirm_source(
         if already_tracked is not None:
             yield already_tracked
             table = templates.get_template("sources/_table.html").render(
-                request=request, **_sources_context(conn, config)
+                request=request, **_sources_context(conn)
             )
             yield "HTML:" + table.replace("\n", "") + "\n"
             add_form = templates.get_template("sources/_add_form.html").render(request=request)
@@ -167,7 +190,7 @@ def confirm_source(
             )
 
         table = templates.get_template("sources/_table.html").render(
-            request=request, **_sources_context(conn, config)
+            request=request, **_sources_context(conn)
         )
         yield "HTML:" + table.replace("\n", "") + "\n"
         add_form = templates.get_template("sources/_add_form.html").render(request=request)
@@ -205,14 +228,13 @@ def update_source(
     fetcher_type: str = Form(...),
     enabled: Optional[str] = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
-    config=Depends(get_config),
 ):
     _get_source_or_404(conn, source_id)
     q.update_source(
         conn, source_id, name=name, url=url, fetcher_type=fetcher_type, enabled=enabled is not None
     )
     source = q.get_source(conn, source_id)
-    needs_login = _check_needs_login(source, config, conn)
+    needs_login = _slack_login_state(source, q.get_fetch_stats_by_source(conn))
     job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
         request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}
@@ -226,7 +248,6 @@ def set_cookie(
     d_cookie: str = Form(...),
     acknowledged: Optional[str] = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
-    config=Depends(get_config),
 ):
     _get_source_or_404(conn, source_id)
     if acknowledged is None:
@@ -236,7 +257,13 @@ def set_cookie(
         )
     q.set_source_cookie(conn, source_id, d_cookie.strip())
     source = q.get_source(conn, source_id)
-    needs_login = _check_needs_login(source, config, conn)
+    live_result = _live_slack_check(source)
+    if live_result is True:
+        needs_login = "needs_login"
+    elif live_result is False:
+        needs_login = "ok"
+    else:
+        needs_login = _slack_login_state(source, q.get_fetch_stats_by_source(conn))
     job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
         request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}
@@ -248,12 +275,11 @@ def forget_cookie(
     source_id: int,
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
-    config=Depends(get_config),
 ):
     _get_source_or_404(conn, source_id)
     q.set_source_cookie(conn, source_id, "")
     source = q.get_source(conn, source_id)
-    needs_login = _check_needs_login(source, config, conn)
+    needs_login = _slack_login_state(source, q.get_fetch_stats_by_source(conn))
     job_count = q.count_jobs_by_source(conn, source_id)
     return templates.TemplateResponse(
         request, "sources/_row.html", {"source": source, "needs_login": needs_login, "job_count": job_count}

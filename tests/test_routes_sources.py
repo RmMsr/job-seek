@@ -28,21 +28,66 @@ def test_source_row_has_source_row_class_for_hash_highlight(client, conn):
 
 def test_sources_page_shows_needs_login_for_slack_source_without_cookie(client, conn):
     q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp = client.get("/sources")
+    resp = client.get("/sources")
     assert resp.status_code == 200
     assert "Needs Slack login" in resp.text
     assert "session cookie set" not in resp.text
 
 
-def test_sources_page_shows_cookie_set_for_slack_source_with_valid_cookie(client, conn):
+def test_sources_page_shows_unverified_for_slack_source_with_cookie_but_no_fetch_yet(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
     q.set_source_cookie(conn, sid, "xoxd-fake-cookie")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=False):
-        resp = client.get("/sources")
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "will be verified on the next fetch" in resp.text
+    assert "Needs Slack login" not in resp.text
+    assert "session cookie set" not in resp.text
+
+
+def test_sources_page_shows_cookie_set_after_a_successful_fetch(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    q.set_source_cookie(conn, sid, "xoxd-fake-cookie")
+    run_id = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1)
+    resp = client.get("/sources")
     assert resp.status_code == 200
     assert "session cookie set" in resp.text
     assert "Needs Slack login" not in resp.text
+
+
+def test_sources_page_shows_needs_login_after_an_auth_error_fetch_run(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    q.set_source_cookie(conn, sid, "xoxd-fake-cookie")
+    run_id = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error="expired", auth_error=True)
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "Needs Slack login" in resp.text
+    assert "session cookie set" not in resp.text
+
+
+def test_sources_page_stays_ok_after_a_non_auth_error_following_success(client, conn):
+    # A transient failure (network blip, rate limit) after a prior successful
+    # fetch must not flip the badge to "needs login" -- only an auth-specific
+    # failure should ever do that.
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    q.set_source_cookie(conn, sid, "xoxd-fake-cookie")
+    ok_run = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, ok_run, jobs_found=1, jobs_new=1)
+    bad_run = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, bad_run, jobs_found=0, jobs_new=0, error="timeout")
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "session cookie set" in resp.text
+    assert "Needs Slack login" not in resp.text
+
+
+def test_sources_page_does_not_contact_slack(client, conn):
+    sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
+    q.set_source_cookie(conn, sid, "xoxd-fake-cookie")
+    with patch.object(SlackFetcher, "check_needs_login", side_effect=AssertionError("must not check live")):
+        resp = client.get("/sources")
+    assert resp.status_code == 200
 
 
 def test_sources_page_excludes_manual_source(client, conn):
@@ -111,11 +156,10 @@ def test_cancel_edit_returns_display_row(client, conn):
 
 def test_update_source_to_slack_shows_login_prompt_when_needed(client, conn):
     sid = _seed(conn)
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp = client.post(
-            f"/sources/{sid}",
-            data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack", "enabled": "on"},
-        )
+    resp = client.post(
+        f"/sources/{sid}",
+        data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack", "enabled": "on"},
+    )
     assert resp.status_code == 200
     assert "Needs Slack login" in resp.text
 
@@ -183,20 +227,17 @@ def test_forget_cookie_404_for_missing_source(client, conn):
 
 def test_row_shows_forget_button_only_when_cookie_is_set(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp_before = client.get("/sources")
+    resp_before = client.get("/sources")
     assert f'hx-post="/sources/{sid}/forget-cookie"' not in resp_before.text
 
     q.set_source_cookie(conn, sid, "xoxd-pasted")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=False):
-        resp_after = client.get("/sources")
+    resp_after = client.get("/sources")
     assert f'hx-post="/sources/{sid}/forget-cookie"' in resp_after.text
 
 
 def test_slack_row_shows_cookie_security_warning(client, conn):
     q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp = client.get("/sources")
+    resp = client.get("/sources")
     assert resp.status_code == 200
     assert "every Slack workspace" in resp.text  # warning copy present
     assert 'name="acknowledged"' in resp.text     # required checkbox present
@@ -274,8 +315,7 @@ def test_update_source_response_includes_delete_button_with_current_job_count(cl
 
 def test_slack_row_shows_cli_login_command(client, conn):
     sid = q.insert_source(conn, "Example Slack", _SLACK_URL, "slack")
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp = client.get("/sources")
+    resp = client.get("/sources")
     assert resp.status_code == 200
     assert "python -m app.cli.slack_login" in resp.text
     assert _SLACK_URL in resp.text
@@ -559,8 +599,7 @@ def test_confirm_source_rejects_invalid_fetcher_type(client, conn):
 
 
 def test_confirm_source_slack_shows_needs_login(client, conn):
-    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch), \
-         patch.object(SlackFetcher, "check_needs_login", return_value=True):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
         resp = client.post(
             "/sources/detect/confirm",
             data={"url": _SLACK_URL, "name": "Example Slack", "fetcher_type": "slack"},

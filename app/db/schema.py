@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     completed_at TEXT,
     jobs_found INTEGER NOT NULL DEFAULT 0,
     jobs_new INTEGER NOT NULL DEFAULT 0,
-    error TEXT
+    error TEXT,
+    auth_error INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS scenario_feedback (
@@ -442,6 +443,20 @@ def _migrate_jobs_status_invalid_to_trash(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_fetch_runs_add_auth_error(conn: sqlite3.Connection) -> None:
+    # Purely additive column, same shape as the jobs-table additive migrations
+    # above. Lets a fetch failure record whether it was specifically a Slack
+    # auth failure, so the sources page can show login state without ever
+    # making its own live request to Slack.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='fetch_runs'"
+    ).fetchone()
+    if row is None or "auth_error" in row[0]:
+        return
+    conn.execute("ALTER TABLE fetch_runs ADD COLUMN auth_error INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -459,3 +474,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_gate_override(conn)
     _migrate_scenarios_gate_threshold(conn)
     _migrate_jobs_status_invalid_to_trash(conn)
+    _migrate_fetch_runs_add_auth_error(conn)
