@@ -220,6 +220,34 @@ def job_collapse(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     return templates.TemplateResponse(request, "jobs/_row.html", context)
 
 
+@router.get("/jobs/{job_id}/delete-confirm", response_class=HTMLResponse)
+def job_delete_confirm(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    job = q.get_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "trash":
+        raise HTTPException(status_code=400, detail="Only trashed jobs can be deleted")
+    context = {"job": job}
+    context.update(_filter_context(request))
+    if _is_detail_page_request(request):
+        context["is_detail_page"] = True
+    return templates.TemplateResponse(request, "jobs/_row_delete_confirm.html", context)
+
+
+@router.delete("/jobs/{job_id}", response_class=HTMLResponse)
+def job_delete(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    job = q.get_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "trash":
+        raise HTTPException(status_code=400, detail="Only trashed jobs can be deleted")
+    q.delete_job(conn, job_id)
+    counts_html = templates.get_template("jobs/_counts_oob.html").render(
+        request=request, counts=q.get_job_counts(conn)
+    )
+    return HTMLResponse(content=counts_html)
+
+
 @router.post("/jobs/{job_id}/feedback", response_class=HTMLResponse)
 def job_feedback(
     job_id: int,
@@ -408,6 +436,43 @@ def job_bulk_feedback(
             "filter_source_id": source_id, "filter_source": filter_source,
         },
     )
+
+
+@router.post("/jobs/bulk-delete-confirm", response_class=HTMLResponse)
+def job_bulk_delete_confirm(
+    request: Request,
+    job_ids: list[int] = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    return templates.TemplateResponse(request, "jobs/_bulk_delete_confirm.html", {"job_ids": job_ids})
+
+
+@router.post("/jobs/bulk-delete", response_class=HTMLResponse)
+def job_bulk_delete(
+    request: Request,
+    job_ids: list[int] = Form(...),
+    status_filter: str | None = Form(None),
+    content_type_filter: str | None = Form(None),
+    source_id_filter: str | None = Form(None),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    q.delete_jobs(conn, job_ids)
+    status_filter = status_filter or None
+    content_type_filter = content_type_filter or None
+    source_id_filter = source_id_filter or None
+    source_id = int(source_id_filter) if source_id_filter else None
+    return templates.TemplateResponse(
+        request, "jobs/_content.html", _content_context(conn, status_filter, content_type_filter, source_id)
+    )
+
+
+@router.post("/jobs/bulk-actions-cancel", response_class=HTMLResponse)
+def job_bulk_actions_cancel(
+    request: Request,
+    status_filter: str | None = Form(None),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    return templates.TemplateResponse(request, "jobs/_bulk_actions.html", {"status": status_filter or None})
 
 
 @router.post("/jobs/add-by-url")

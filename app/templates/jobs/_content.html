@@ -44,11 +44,7 @@
         Reset to new
       </button>
     </details>
-    <div class="actions" role="group" aria-label="Bulk decision">
-      <button type="submit" form="bulk-form" name="status" value="accepted" class="btn btn-accept">Accept</button>
-      <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
-      <button type="submit" form="bulk-form" name="status" value="trash" class="btn btn-trash" title="Not a usable posting (expired, spam, duplicate, wrong content).">Trash</button>
-    </div>
+    {% include "jobs/_bulk_actions.html" %}
   </div>
   <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>
 </div>

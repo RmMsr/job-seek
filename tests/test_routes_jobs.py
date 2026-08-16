@@ -322,12 +322,78 @@ def test_job_expand_reject_trash_buttons_have_tooltips(client, conn):
     assert 'title="Not a usable posting (expired, spam, duplicate, wrong content)."' in resp.text
 
 
+def test_job_expand_shows_delete_instead_of_trash_when_already_trash(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", None)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'hx-get="/jobs/{jid}/delete-confirm"' in resp.text
+    assert 'name="status" value="trash"' not in resp.text
+
+
+def test_job_expand_shows_trash_when_not_trash(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'name="status" value="trash"' in resp.text
+    assert "delete-confirm" not in resp.text
+
+
 def test_job_collapse_returns_row_view(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/collapse")
     assert resp.status_code == 200
     assert f'hx-get="/jobs/{jid}/expand"' in resp.text
     assert f'id="job-{jid}"' in resp.text
+
+
+def test_job_delete_confirm_renders_confirm_panel(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", None)
+    resp = client.get(f"/jobs/{jid}/delete-confirm")
+    assert resp.status_code == 200
+    assert "Delete this job?" in resp.text
+    assert f'hx-delete="/jobs/{jid}"' in resp.text
+    assert f'id="job-{jid}"' in resp.text
+
+
+def test_job_delete_confirm_404_for_missing_job(client, conn):
+    resp = client.get("/jobs/999/delete-confirm")
+    assert resp.status_code == 404
+
+
+def test_job_delete_confirm_rejects_non_trash_job(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/delete-confirm")
+    assert resp.status_code == 400
+
+
+def test_job_delete_removes_trash_job(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", None)
+    resp = client.delete(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert q.get_job(conn, jid) is None
+
+
+def test_job_delete_response_includes_updated_trash_count(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", None)
+    resp = client.delete(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert '<span id="count-trash" hx-swap-oob="true">0</span>' in resp.text
+
+
+def test_job_delete_rejects_non_trash_job(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.delete(f"/jobs/{jid}")
+    assert resp.status_code == 400
+    assert q.get_job(conn, jid) is not None
+
+
+def test_job_delete_404_for_missing_job(client, conn):
+    resp = client.delete("/jobs/999")
+    assert resp.status_code == 404
 
 
 def test_job_expand_header_is_collapsible(client, conn):
@@ -665,6 +731,74 @@ def test_job_bulk_feedback_shows_no_jobs_found_when_nothing_matches_or_moved(cli
     )
     assert resp.status_code == 200
     assert "No jobs found" in resp.text
+
+
+def test_job_bulk_delete_confirm_shows_count(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    resp = client.post("/jobs/bulk-delete-confirm", data={"job_ids": [j1, j2]})
+    assert resp.status_code == 200
+    assert "Delete 2 selected jobs? This cannot be undone." in resp.text
+
+
+def test_job_bulk_delete_confirm_singular_for_one_job(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    resp = client.post("/jobs/bulk-delete-confirm", data={"job_ids": [j1]})
+    assert resp.status_code == 200
+    assert "Delete 1 selected job? This cannot be undone." in resp.text
+
+
+def test_job_bulk_delete_removes_only_trash_jobs(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, j1, "trash", None)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    resp = client.post(
+        "/jobs/bulk-delete",
+        data={"job_ids": [j1, j2], "status_filter": "trash", "content_type_filter": "", "source_id_filter": ""},
+    )
+    assert resp.status_code == 200
+    assert q.get_job(conn, j1) is None
+    assert q.get_job(conn, j2) is not None
+
+
+def test_job_bulk_delete_response_reflects_remaining_trash_jobs(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, j1, "trash", None)
+    resp = client.post(
+        "/jobs/bulk-delete",
+        data={"job_ids": [j1], "status_filter": "trash", "content_type_filter": "", "source_id_filter": ""},
+    )
+    assert resp.status_code == 200
+    assert "No jobs found" in resp.text
+
+
+def test_job_bulk_actions_cancel_shows_trash_outside_trash_view(client, conn):
+    resp = client.post("/jobs/bulk-actions-cancel", data={"status_filter": ""})
+    assert resp.status_code == 200
+    assert 'name="status" value="trash"' in resp.text
+    assert "bulk-delete-confirm" not in resp.text
+
+
+def test_job_bulk_actions_cancel_shows_delete_in_trash_view(client, conn):
+    resp = client.post("/jobs/bulk-actions-cancel", data={"status_filter": "trash"})
+    assert resp.status_code == 200
+    assert 'hx-post="/jobs/bulk-delete-confirm"' in resp.text
+    assert 'name="status" value="trash"' not in resp.text
+
+
+def test_job_list_bulk_bar_shows_delete_in_trash_view(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", None)
+    resp = client.get("/jobs?status=trash")
+    assert resp.status_code == 200
+    assert 'hx-post="/jobs/bulk-delete-confirm"' in resp.text
+
+
+def test_job_list_bulk_bar_shows_trash_outside_trash_view(client, conn):
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert 'name="status" value="trash"' in resp.text
+    assert 'hx-post="/jobs/bulk-delete-confirm"' not in resp.text
 
 
 def test_scenario_feedback_saves_note_and_direction(client, conn):

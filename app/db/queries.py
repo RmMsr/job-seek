@@ -91,6 +91,14 @@ def delete_source(conn: sqlite3.Connection, source_id: int) -> None:
     conn.commit()
 
 
+def delete_jobs(conn: sqlite3.Connection, job_ids: list[int]) -> None:
+    if not job_ids:
+        return
+    placeholders = ",".join("?" for _ in job_ids)
+    conn.execute(f"DELETE FROM jobs WHERE status = 'trash' AND id IN ({placeholders})", job_ids)
+    conn.commit()
+
+
 # --- Scenarios ---
 
 def get_scenarios(conn: sqlite3.Connection) -> list[dict]:

@@ -122,6 +122,53 @@ def test_delete_source_leaves_other_sources_and_jobs_intact(conn):
     assert q.get_job(conn, j2) is not None
 
 
+def test_delete_job_removes_job(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_feedback(conn, jid, "trash", None)
+
+    q.delete_job(conn, jid)
+
+    assert q.get_job(conn, jid) is None
+
+
+def test_delete_job_cascades_to_job_scores_and_scenario_feedback(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "http")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "note", "higher")
+    q.update_job_feedback(conn, jid, "trash", None)
+
+    q.delete_job(conn, jid)
+
+    assert q.get_job_scores(conn, jid) == []
+    row = conn.execute("SELECT 1 FROM scenario_feedback WHERE job_id = ?", (jid,)).fetchone()
+    assert row is None
+
+
+def test_delete_jobs_removes_only_trash_status_jobs(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "http")
+    trash_id = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_feedback(conn, trash_id, "trash", None)
+    new_id = q.insert_job(conn, source_id=sid, url="http://job/2", title="T2", company="C", raw_text="r")
+
+    q.delete_jobs(conn, [trash_id, new_id])
+
+    assert q.get_job(conn, trash_id) is None
+    assert q.get_job(conn, new_id) is not None
+
+
+def test_delete_jobs_empty_list_is_noop(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "http")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.update_job_feedback(conn, jid, "trash", None)
+
+    q.delete_jobs(conn, [])
+
+    assert q.get_job(conn, jid) is not None
+
+
 def test_get_job_by_url_returns_job(conn):
     sid = q.insert_source(conn, "s", "http://x", "http")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")

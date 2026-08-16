@@ -62,7 +62,14 @@
     <div class="actions" role="group" aria-label="Decision">
       <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
       <button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
+      {% if job.status == "trash" %}
+      <button type="button" class="btn btn-delete"
+        hx-get="/jobs/{{ job.id }}/delete-confirm{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
+        hx-target="#job-{{ job.id }}"
+        hx-swap="outerHTML">Delete</button>
+      {% else %}
       <button type="submit" name="status" value="trash" class="btn btn-trash" title="Not a usable posting (expired, spam, duplicate, wrong content).">Trash</button>
+      {% endif %}
     </div>
   </form>
   <details class="job-advanced">

@@ -1,0 +1,13 @@
+<div class="actions" role="group" aria-label="Bulk decision">
+  <button type="submit" form="bulk-form" name="status" value="accepted" class="btn btn-accept">Accept</button>
+  <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
+  {% if status == "trash" %}
+  <button type="button" class="btn btn-delete"
+    hx-post="/jobs/bulk-delete-confirm"
+    hx-include="#bulk-form"
+    hx-target=".decision-panel-left .actions"
+    hx-swap="outerHTML">Delete</button>
+  {% else %}
+  <button type="submit" form="bulk-form" name="status" value="trash" class="btn btn-trash" title="Not a usable posting (expired, spam, duplicate, wrong content).">Trash</button>
+  {% endif %}
+</div>

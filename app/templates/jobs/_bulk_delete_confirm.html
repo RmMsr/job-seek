@@ -1,0 +1,13 @@
+<div class="actions bulk-delete-confirm" role="group" aria-label="Confirm bulk delete">
+  <span style="color:#dc3545; font-weight:600;">Delete {{ job_ids | length }} selected job{{ 's' if job_ids | length != 1 else '' }}? This cannot be undone.</span>
+  <button type="button" class="btn btn-delete"
+    hx-post="/jobs/bulk-delete"
+    hx-include="#bulk-form"
+    hx-target="#jobs-content"
+    hx-swap="innerHTML">Confirm delete</button>
+  <button type="button" class="btn"
+    hx-post="/jobs/bulk-actions-cancel"
+    hx-include="#bulk-form"
+    hx-target=".decision-panel-left .actions"
+    hx-swap="outerHTML">Cancel</button>
+</div>
