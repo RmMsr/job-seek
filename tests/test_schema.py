@@ -34,7 +34,7 @@ def test_init_db_is_idempotent(conn):
 def test_jobs_url_is_unique(conn):
     init_db(conn)
     conn.execute(
-        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')"
     )
     conn.execute(
         "INSERT INTO jobs (source_id, url, title, company, raw_text) VALUES (1, 'http://job/1', 'T', 'C', 'r')"
@@ -79,7 +79,7 @@ def test_init_db_migration_preserves_referencing_jobs_with_fk_enforced(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
     conn.commit()
 
@@ -105,7 +105,7 @@ def test_init_db_migrates_sources_table_missing_finn_listing_type(conn):
         """
     )
     conn.execute(
-        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')"
     )
     conn.commit()
 
@@ -116,7 +116,7 @@ def test_init_db_migrates_sources_table_missing_finn_listing_type(conn):
     )
     rows = conn.execute("SELECT name, url, fetcher_type FROM sources ORDER BY id").fetchall()
     assert [dict(r) for r in rows] == [
-        {"name": "s", "url": "http://x", "fetcher_type": "http"},
+        {"name": "s", "url": "http://x", "fetcher_type": "slack"},
         {"name": "finn.no", "url": "http://y", "fetcher_type": "finn_listing"},
     ]
 
@@ -155,9 +155,9 @@ def test_init_db_migrates_fetch_runs_off_stale_sources_old_fk(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources_old (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'http')")
-    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'http')")
-    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (2, 'new', 'http://y', 'http')")
+    conn.execute("INSERT INTO sources_old (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'slack')")
+    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (1, 'old', 'http://x', 'slack')")
+    conn.execute("INSERT INTO sources (id, name, url, fetcher_type) VALUES (2, 'new', 'http://y', 'slack')")
     conn.execute("INSERT INTO fetch_runs (id, source_id, jobs_found) VALUES (1, 1, 3)")
     conn.commit()
 
@@ -178,7 +178,7 @@ def test_init_db_migrates_fetch_runs_off_stale_sources_old_fk(conn):
 
 def test_job_scores_unique_per_job_and_scenario(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
     conn.execute("INSERT INTO scenarios (name) VALUES ('Remote ML')")
     conn.execute(
@@ -229,7 +229,7 @@ def test_init_db_migrates_jobs_scores_to_job_scores_table(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO scenarios (name) VALUES ('Remote ML')")
     conn.execute(
         "INSERT INTO jobs (source_id, url, content_type, summary, relevance_score, score_reasoning, scenario_id) "
@@ -284,7 +284,7 @@ def test_scenario_feedback_table_created(conn):
 
 def test_scenario_feedback_unique_per_job_and_scenario(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
     conn.execute("INSERT INTO scenarios (name) VALUES ('A')")
     conn.execute("INSERT INTO scenario_feedback (job_id, scenario_id, note) VALUES (1, 1, 'note')")
@@ -294,7 +294,7 @@ def test_scenario_feedback_unique_per_job_and_scenario(conn):
 
 def test_scenario_feedback_direction_constrained(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
     conn.execute("INSERT INTO scenarios (name) VALUES ('A')")
     with pytest.raises(sqlite3.IntegrityError):
@@ -353,7 +353,7 @@ def test_init_db_migrates_jobs_drops_feedback_scenario_id_with_backfill(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO scenarios (name) VALUES ('Remote ML')")  # id 1
     conn.execute(
         "INSERT INTO jobs (source_id, url, status, feedback_note, feedback_scenario_id) "
@@ -408,7 +408,7 @@ def test_init_db_migrates_jobs_adds_headline_column(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
     conn.commit()
 
@@ -458,7 +458,7 @@ def test_init_db_migrates_jobs_adds_published_at_column(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
     conn.commit()
 
@@ -512,7 +512,7 @@ def test_init_db_migrates_jobs_adds_fit_scorecard_columns(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
     conn.commit()
 
@@ -534,7 +534,7 @@ def test_init_db_migrates_jobs_adds_fit_scorecard_columns(conn):
 
 def test_jobs_table_has_gate_override_column_defaulting_false(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Title')")
     conn.commit()
     row = conn.execute("SELECT gate_override FROM jobs WHERE url = 'http://job/1'").fetchone()
@@ -576,7 +576,7 @@ def test_init_db_migrates_jobs_adds_gate_override_column(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1, 'http://job/1', 'Existing Title')")
     conn.commit()
 
@@ -641,7 +641,7 @@ def test_init_db_migrates_scenarios_replaces_boosted_with_gate_threshold(conn):
 
 def test_jobs_status_check_allows_trash_not_invalid(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute(
         "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/1', 'Title', 'trash')"
     )
@@ -675,7 +675,7 @@ def test_init_db_migrates_sources_table_missing_manual_type(conn):
         """
     )
     conn.execute(
-        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')"
     )
     conn.commit()
 
@@ -686,7 +686,7 @@ def test_init_db_migrates_sources_table_missing_manual_type(conn):
     )
     rows = conn.execute("SELECT name, url, fetcher_type FROM sources ORDER BY id").fetchall()
     assert [dict(r) for r in rows] == [
-        {"name": "s", "url": "http://x", "fetcher_type": "http"},
+        {"name": "s", "url": "http://x", "fetcher_type": "slack"},
         {"name": "Manual", "url": "", "fetcher_type": "manual"},
     ]
 
@@ -727,7 +727,7 @@ def test_init_db_migrates_jobs_status_invalid_to_trash(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
     conn.execute(
         "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/1', 'Existing Title', 'invalid')"
     )
@@ -769,7 +769,7 @@ def test_init_db_migrates_sources_table_missing_generic_listing_type(conn):
         """
     )
     conn.execute(
-        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')"
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')"
     )
     conn.commit()
 
@@ -780,16 +780,16 @@ def test_init_db_migrates_sources_table_missing_generic_listing_type(conn):
     )
     rows = conn.execute("SELECT name, url, fetcher_type FROM sources ORDER BY id").fetchall()
     assert [dict(r) for r in rows] == [
-        {"name": "s", "url": "http://x", "fetcher_type": "http"},
+        {"name": "s", "url": "http://x", "fetcher_type": "slack"},
         {"name": "Careers Page", "url": "http://y", "fetcher_type": "generic_listing"},
     ]
 
 
 def test_sources_url_is_unique(conn):
     init_db(conn)
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s1', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s1', 'http://x', 'generic_listing')")
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'http')")
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'generic_listing')")
 
 
 def test_init_db_migrates_existing_sources_table_to_unique_url(conn):
@@ -804,10 +804,49 @@ def test_init_db_migrates_existing_sources_table_to_unique_url(conn):
         );
         """
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'generic_listing')")
     conn.commit()
 
     init_db(conn)
 
     with pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'http')")
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'generic_listing')")
+
+
+def test_sources_check_rejects_http_and_playwright(conn):
+    init_db(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'playwright')")
+
+
+def test_init_db_migrates_sources_table_dropping_http_playwright_types(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual', 'generic_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            d_cookie TEXT NOT NULL DEFAULT ''
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type, d_cookie) VALUES ('s', 'http://x', 'generic_listing', 'xoxd-abc')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    row = conn.execute("SELECT name, url, fetcher_type, d_cookie FROM sources WHERE name = 's'").fetchone()
+    assert dict(row) == {"name": "s", "url": "http://x", "fetcher_type": "generic_listing", "d_cookie": "xoxd-abc"}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://y', 'http')")
+
+    # Idempotent: running init_db again doesn't error or duplicate rows.
+    init_db(conn)
+    assert conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1

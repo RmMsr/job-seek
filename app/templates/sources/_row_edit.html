@@ -8,8 +8,6 @@
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
         <input type="text" name="name" value="{{ source.name }}" required style="min-width:140px; flex:1;">
         <select name="fetcher_type">
-          <option value="http" {% if source.fetcher_type == "http" %}selected{% endif %}>http</option>
-          <option value="playwright" {% if source.fetcher_type == "playwright" %}selected{% endif %}>playwright</option>
           <option value="slack" {% if source.fetcher_type == "slack" %}selected{% endif %}>slack</option>
           <option value="finn_listing" {% if source.fetcher_type == "finn_listing" %}selected{% endif %}>finn_listing</option>
           <option value="generic_listing" {% if source.fetcher_type == "generic_listing" %}selected{% endif %}>generic_listing</option>

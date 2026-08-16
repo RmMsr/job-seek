@@ -8,7 +8,7 @@ from app.pipeline import FetchResult
 
 
 def _seed(conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="ML Eng", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Great role")
     scenario_id = q.insert_scenario(conn, "Remote ML", "")
@@ -244,7 +244,7 @@ def test_job_expand_shows_fit_scorecard(client, conn):
 
 
 def test_job_expand_shows_not_yet_assessed_when_fit_missing(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="No Fit Yet", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -255,7 +255,7 @@ def test_job_expand_shows_not_yet_assessed_when_fit_missing(client, conn):
 
 
 def test_job_expand_no_score_box_when_unscored(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="No Score", company="Acme", raw_text="r")
     q.insert_scenario(conn, "First", "")
     resp = client.get(f"/jobs/{jid}/expand")
@@ -264,7 +264,7 @@ def test_job_expand_no_score_box_when_unscored(client, conn):
 
 
 def test_job_expand_shows_pass_as_new_button_when_gate_failed(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -285,7 +285,7 @@ def test_job_expand_omits_pass_as_new_button_when_gate_passed(client, conn):
 
 
 def test_job_expand_omits_pass_as_new_button_when_already_overridden(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -468,7 +468,7 @@ def test_job_reset_stream_ends_with_html_chunk_for_updated_row(client, conn):
 
 
 def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -488,7 +488,7 @@ def test_job_reset_stream_includes_counts_html_chunk(client, conn):
 
 
 def test_job_pass_as_new_stream_includes_counts_html_chunk(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -524,7 +524,7 @@ def _fake_run_reprocess_job_to_passing(conn, client, model, job, scenarios, prof
 
 
 def test_job_reset_from_not_relevant_tab_shows_moved_to_new_badge(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -548,7 +548,7 @@ def test_job_reset_that_stays_in_current_filter_shows_no_badge(client, conn):
 
 def test_job_reset_without_filter_query_shows_no_badge(client, conn):
     # Simulates the standalone /jobs/{id} page, which never sends filter params.
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -562,7 +562,7 @@ def test_job_reset_without_filter_query_shows_no_badge(client, conn):
 
 
 def test_job_pass_as_new_shows_moved_to_new_badge(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
@@ -639,7 +639,7 @@ def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, c
 
 
 def test_job_bulk_reset_with_filter_shows_moved_marker_per_job(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -666,7 +666,7 @@ def _fake_run_pass_as_new(conn, client, model, job, profile):
 
 
 def test_job_pass_as_new_streams_progress_and_marks_override(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -970,7 +970,7 @@ def test_job_bulk_feedback_respects_status_filter_for_response(client, conn):
 
 
 def test_job_list_new_tab_excludes_gate_failed_postings(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -984,7 +984,7 @@ def test_job_list_new_tab_excludes_gate_failed_postings(client, conn):
 
 
 def test_job_list_not_relevant_tab_excludes_leads(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Lead", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="lead", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -995,7 +995,7 @@ def test_job_list_not_relevant_tab_excludes_leads(client, conn):
 
 
 def test_job_list_leads_tab_includes_gate_failed_leads(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Lead", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="lead", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -1006,7 +1006,7 @@ def test_job_list_leads_tab_includes_gate_failed_leads(client, conn):
 
 
 def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Accepted Lead", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid_accepted, simplified_content="clean", content_type="lead", summary="role")
     q.update_job_feedback(conn, jid_accepted, "accepted", "")
@@ -1022,7 +1022,7 @@ def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
 
 
 def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Low Score Accepted", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -1034,7 +1034,7 @@ def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
 
 
 def test_job_list_shows_status_badge_for_accepted_rejected_trash(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
 
     jid_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Accepted Job", company="Acme", raw_text="r")
     q.update_job_feedback(conn, jid_accepted, "accepted", "")
@@ -1064,7 +1064,7 @@ def test_job_list_new_tab_shows_no_status_badge(client, conn):
 
 
 def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -1182,7 +1182,7 @@ def test_job_accept_from_new_tab_shows_stale_short_row(client, conn):
 
 
 def test_job_reject_from_not_relevant_tab_shows_stale_short_row(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
@@ -1408,7 +1408,7 @@ def test_add_job_by_url_stream_ends_with_single_html_chunk(client, conn):
 
 @respx.mock
 def test_add_job_by_url_duplicate_url_does_not_insert(client, conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
 
     resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
@@ -1420,7 +1420,7 @@ def test_add_job_by_url_duplicate_url_does_not_insert(client, conn):
 
 
 def test_add_job_by_url_duplicate_url_shows_persistent_link_to_job(client, conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
 
     resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
@@ -1782,8 +1782,8 @@ def test_job_list_add_by_url_button_uses_generalized_body_attribute(client, conn
 
 
 def test_job_list_source_id_shows_every_status_for_that_source(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
-    other_sid = q.insert_source(conn, "other.no", "https://other.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    other_sid = q.insert_source(conn, "other.no", "https://other.no", "generic_listing")
     j_new = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="New Job", company="C", raw_text="r")
     j_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Accepted Job", company="C", raw_text="r")
     q.update_job_feedback(conn, j_accepted, "accepted", "")
@@ -1801,7 +1801,7 @@ def test_job_list_source_id_shows_every_status_for_that_source(client, conn):
 
 
 def test_job_list_source_id_header_shows_name_and_count(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
     resp = client.get(f"/jobs?source_id={sid}")
     assert resp.status_code == 200
@@ -1810,14 +1810,14 @@ def test_job_list_source_id_header_shows_name_and_count(client, conn):
 
 
 def test_job_list_source_id_hides_status_tabs(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     resp = client.get(f"/jobs?source_id={sid}")
     assert resp.status_code == 200
     assert "New Jobs (" not in resp.text
 
 
 def test_job_feedback_within_source_view_stays_visible_no_stale_badge(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
 
     resp = client.post(

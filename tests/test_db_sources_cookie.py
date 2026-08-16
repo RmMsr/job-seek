@@ -33,7 +33,7 @@ def test_migration_adds_cookie_column_to_preexisting_sources_table(conn):
         "fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http','playwright','slack','finn_listing','manual')), "
         "enabled INTEGER NOT NULL DEFAULT 1)"
     )
-    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('Old', 'http://x', 'http')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('Old', 'http://x', 'slack')")
     conn.commit()
     init_db(conn)  # idempotent; must add the column
     cols = [r[1] for r in conn.execute("PRAGMA table_info(sources)").fetchall()]

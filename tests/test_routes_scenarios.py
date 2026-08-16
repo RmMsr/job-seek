@@ -290,7 +290,7 @@ def test_refine_alone_does_not_mark_feedback_handled(client, conn):
     # shouldn't consume it.
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
@@ -304,7 +304,7 @@ def test_refine_alone_does_not_mark_feedback_handled(client, conn):
 
 def test_refine_embeds_feedback_anchor_in_apply_form(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
@@ -321,7 +321,7 @@ def test_manual_add_criterion_does_not_mark_feedback_handled(client, conn):
     # is unrelated to the LLM-suggestion batch-apply flow and carries no
     # feedback_anchor — it must never mark anything handled.
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
@@ -376,7 +376,7 @@ def test_apply_batch_marks_feedback_handled_even_when_all_rows_skipped(client, c
     # individual rows were applied — even an all-skip submission means the
     # batch was looked at and consciously rejected.
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
@@ -394,7 +394,7 @@ def test_apply_batch_marks_feedback_handled_even_when_all_rows_skipped(client, c
 def test_apply_batch_only_marks_this_scenarios_feedback_handled(client, conn):
     sid_a = q.insert_scenario(conn, "Remote ML", "")
     sid_b = q.insert_scenario(conn, "Robotics", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid_a, "too junior", "lower")
@@ -463,7 +463,7 @@ def test_refine_all_scenarios_oob_wrapper_preserves_layout_style(client, conn):
 
 def test_refine_all_scenarios_embeds_feedback_anchor(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="job_posting")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
@@ -495,7 +495,7 @@ def test_refine_accept_adds_criteria(client, conn):
 def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
@@ -515,7 +515,7 @@ def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
 def test_reevaluate_skips_jobs_already_current(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     job_id = q.get_jobs(conn)[0]["id"]
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
@@ -535,7 +535,7 @@ def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
     q.insert_criterion(conn, sid_a, "Must be remote", "must")
     sid_b = q.insert_scenario(conn, "Robotics", "")
     q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
@@ -555,7 +555,7 @@ def test_reevaluate_all_scenarios_shows_global_job_position(client, conn):
     q.insert_criterion(conn, sid_a, "Must be remote", "must")
     sid_b = q.insert_scenario(conn, "Robotics", "")
     q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
@@ -570,7 +570,7 @@ def test_reevaluate_all_scenarios_shows_global_job_position(client, conn):
 def test_reevaluate_single_scenario_route_unaffected_by_global_labeling(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
@@ -585,7 +585,7 @@ def test_reevaluate_single_scenario_route_unaffected_by_global_labeling(client, 
 def test_reevaluate_keeps_existing_title_when_ai_title_empty(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
@@ -617,7 +617,7 @@ def test_refine_proposals_sorted_must_prefer_avoid(client, conn):
 
 def test_scenarios_page_shows_too_loose_verdict(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, job_id, sid, "too junior", "lower")
 
@@ -632,7 +632,7 @@ def test_scenarios_page_shows_too_loose_verdict(client, conn):
 
 def test_scenarios_page_shows_too_strict_verdict(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, job_id, sid, "worth it", "higher")
 
@@ -643,7 +643,7 @@ def test_scenarios_page_shows_too_strict_verdict(client, conn):
 
 def test_scenarios_page_shows_balanced_verdict(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, sid, "a", "higher")
@@ -656,7 +656,7 @@ def test_scenarios_page_shows_balanced_verdict(client, conn):
 
 def test_scenarios_page_shows_already_applied_line_after_handling(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, job_id, sid, "worth it", "higher")
     anchor = q.get_recent_feedback_anchor(conn, sid)

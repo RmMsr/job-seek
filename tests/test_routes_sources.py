@@ -9,7 +9,7 @@ _SLACK_URL = "https://example-workspace.slack.com/archives/C0EXAMPLE1"
 
 
 def _seed(conn):
-    return q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    return q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
 
 
 def test_sources_page_returns_200(client, conn):
@@ -47,7 +47,7 @@ def test_sources_page_shows_cookie_set_for_slack_source_with_valid_cookie(client
 
 def test_sources_page_excludes_manual_source(client, conn):
     q.get_or_create_manual_source(conn)
-    q.insert_source(conn, "Real Source", "http://x", "http")
+    q.insert_source(conn, "Real Source", "http://x", "generic_listing")
     resp = client.get("/sources")
     assert resp.status_code == 200
     assert "Manual" not in resp.text
@@ -82,12 +82,12 @@ def test_update_source(client, conn):
     sid = _seed(conn)
     resp = client.post(
         f"/sources/{sid}",
-        data={"name": "Finn AI", "url": "https://finn.no/new", "fetcher_type": "playwright", "enabled": "on"},
+        data={"name": "Finn AI", "url": "https://finn.no/new", "fetcher_type": "finn_listing", "enabled": "on"},
     )
     assert resp.status_code == 200
     source = q.get_source(conn, sid)
     assert source["url"] == "https://finn.no/new"
-    assert source["fetcher_type"] == "playwright"
+    assert source["fetcher_type"] == "finn_listing"
     assert source["enabled"] == 1
     assert source["name"] == "Finn AI"
 
@@ -96,7 +96,7 @@ def test_update_source_unchecked_enabled_disables(client, conn):
     sid = _seed(conn)
     resp = client.post(
         f"/sources/{sid}",
-        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http"},
+        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "generic_listing"},
     )
     assert resp.status_code == 200
     assert q.get_source(conn, sid)["enabled"] == 0
@@ -266,7 +266,7 @@ def test_update_source_response_includes_delete_button_with_current_job_count(cl
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="T1", company="C", raw_text="r")
     resp = client.post(
         f"/sources/{sid}",
-        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http", "enabled": "on"},
+        data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "generic_listing", "enabled": "on"},
     )
     assert resp.status_code == 200
     assert f'hx-get="/sources/{sid}/delete-confirm"' in resp.text

@@ -11,8 +11,9 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
-    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual', 'generic_listing')),
-    enabled INTEGER NOT NULL DEFAULT 1
+    fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('slack', 'finn_listing', 'manual', 'generic_listing')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    d_cookie TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS scenarios (
@@ -161,6 +162,35 @@ def _migrate_sources_fetcher_type_generic_listing(conn: sqlite3.Connection) -> N
             url TEXT NOT NULL,
             fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual', 'generic_listing')),
             enabled INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO sources_new SELECT * FROM sources;
+        DROP TABLE sources;
+        ALTER TABLE sources_new RENAME TO sources;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_sources_drop_http_playwright_types(conn: sqlite3.Connection) -> None:
+    # 'http' and 'playwright' were standalone fetcher_type choices for a
+    # manually-configured source; classify_known_source/DETECTABLE_FETCHER_TYPES
+    # already stopped offering them, so no source can have either value.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sources'"
+    ).fetchone()
+    if row is None or "'http'" not in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE sources_new (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('slack', 'finn_listing', 'manual', 'generic_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            d_cookie TEXT NOT NULL DEFAULT ''
         );
         INSERT INTO sources_new SELECT * FROM sources;
         DROP TABLE sources;
@@ -417,6 +447,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_sources_fetcher_type(conn)
     _migrate_sources_fetcher_type_manual(conn)
     _migrate_sources_fetcher_type_generic_listing(conn)
+    _migrate_sources_drop_http_playwright_types(conn)
     _migrate_sources_url_unique(conn)
     _migrate_fetch_runs_source_fk(conn)
     _migrate_jobs_scores_to_table(conn)

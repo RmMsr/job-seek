@@ -21,7 +21,7 @@ def conn():
 
 @pytest.fixture
 def source(conn):
-    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    sid = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     q.insert_scenario(conn, "Remote ML", "")
     q.upsert_profile(conn, "I am an ML engineer.")
     return q.get_source(conn, sid)
@@ -103,7 +103,7 @@ def test_run_fetch_new_job_stored(conn, source):
         return m
     client.chat.completions.create.side_effect = create
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -125,7 +125,7 @@ def test_run_fetch_lead_uses_organization_focused_summary(conn, source):
         evaluate_resp='{"score": 0.5, "reasoning": "Some relevance"}',
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -148,7 +148,7 @@ def test_run_fetch_stores_published_at(conn, source):
         evaluate_resp='{"score": 0.5, "reasoning": "Some relevance"}',
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -161,7 +161,7 @@ def test_run_fetch_skips_existing_url(conn, source):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="text")]
     client = MagicMock()
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -171,7 +171,7 @@ def test_run_fetch_skips_existing_url(conn, source):
 
 
 def test_run_fetch_records_fetch_run(conn, source):
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = []
         _drain(run_fetch(source, conn, client=MagicMock(), model="llama3.2", profile_dir="bp"))
 
@@ -187,7 +187,7 @@ def test_run_fetch_irrelevant_not_persisted(conn, source):
     choice.message.content = '{"type": "irrelevant", "reason": "not a job"}'
     client.chat.completions.create.return_value = MagicMock(choices=[choice])
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -205,7 +205,7 @@ def test_run_fetch_yields_progress_and_logs_each_line(conn, source, caplog):
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher, caplog.at_level("INFO", logger="job_seek"):
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher, caplog.at_level("INFO", logger="job_seek"):
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -222,7 +222,7 @@ def test_make_fetcher_dispatches_finn_listing(conn):
 
 
 def test_make_fetcher_finn_listing_passes_known_urls(conn):
-    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    sid = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")
     source = {"id": 1, "name": "finn.no", "url": "http://x", "fetcher_type": "finn_listing"}
 
@@ -232,7 +232,7 @@ def test_make_fetcher_finn_listing_passes_known_urls(conn):
 
 
 def test_make_fetcher_slack_passes_known_urls(conn):
-    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    sid = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")
     source = {
         "id": 1,
@@ -246,10 +246,10 @@ def test_make_fetcher_slack_passes_known_urls(conn):
     assert fetcher._known_urls == frozenset({"http://known/1"})
 
 
-def test_make_fetcher_http_ignores_conn(conn):
-    source = {"id": 1, "name": "test", "url": "http://x", "fetcher_type": "http"}
-    fetcher = _make_fetcher(source, "browser-profile", conn)
-    assert type(fetcher).__name__ == "HttpFetcher"
+def test_make_fetcher_raises_for_unsupported_fetcher_type(conn):
+    source = {"id": 1, "name": "test", "url": "http://x", "fetcher_type": "manual"}
+    with pytest.raises(ValueError):
+        _make_fetcher(source, "browser-profile", conn)
 
 
 def test_make_fetcher_dispatches_generic_listing(conn):
@@ -260,7 +260,7 @@ def test_make_fetcher_dispatches_generic_listing(conn):
 
 
 def test_make_fetcher_generic_listing_passes_known_urls_and_client(conn):
-    sid = q.insert_source(conn, "test", "http://example.com", "http")
+    sid = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")
     source = {"id": 1, "name": "Careers", "url": "http://x", "fetcher_type": "generic_listing"}
     client = MagicMock()
@@ -295,7 +295,7 @@ def test_run_fetch_scores_against_every_scenario(conn, source):
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -306,7 +306,7 @@ def test_run_fetch_scores_against_every_scenario(conn, source):
 
 
 def test_run_fetch_with_no_scenarios_still_summarizes(conn):
-    source_id = q.insert_source(conn, "test", "http://example.com", "http")
+    source_id = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     source_dict = q.get_source(conn, source_id)
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>We are hiring</p>")]
     client = _mock_client(
@@ -315,7 +315,7 @@ def test_run_fetch_with_no_scenarios_still_summarizes(conn):
         '{"score": 0.9, "reasoning": "Great match"}',
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, result = _drain(run_fetch(source_dict, conn, client, "llama3.2", "browser-profile"))
 
@@ -334,7 +334,7 @@ def test_run_fetch_runs_stage_two_once_when_gate_passes(conn, source):
         '{"score": 0.9, "reasoning": "Great match"}',  # 0.9 >= default gate_threshold 0.7
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, _ = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -355,7 +355,7 @@ def test_run_fetch_skips_stage_two_when_gate_not_passed(conn, source):
         '{"score": 0.9, "reasoning": "Great match"}',  # 0.9 < 0.95, gate fails
     )
 
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         messages, _ = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -371,7 +371,7 @@ def test_run_fetch_stores_ai_title_and_headline(conn, source):
         '{"title": "ML Engineer - Remote @ Acme", "headline": "Great remote ML role", "summary": "Good ML role"}',
         '{"score": 0.9, "reasoning": "Great match"}',
     )
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 
@@ -444,7 +444,7 @@ def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
         '{"title": "", "headline": "", "summary": "Good ML role"}',
         '{"score": 0.9, "reasoning": "Great match"}',
     )
-    with patch("app.pipeline.HttpFetcher") as MockFetcher:
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
         MockFetcher.return_value.fetch.return_value = raw_jobs
         _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
 

@@ -5,7 +5,7 @@ from app.pipeline import FetchResult
 
 
 def _seed(conn):
-    return q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    return q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
 
 
 def test_fetch_panel_returns_200(client, conn):
@@ -17,7 +17,7 @@ def test_fetch_panel_returns_200(client, conn):
 
 def test_fetch_panel_excludes_manual_source(client, conn):
     q.get_or_create_manual_source(conn)
-    q.insert_source(conn, "Real Source", "http://x", "http")
+    q.insert_source(conn, "Real Source", "http://x", "generic_listing")
     resp = client.get("/fetch")
     assert resp.status_code == 200
     assert "Manual" not in resp.text
@@ -95,8 +95,8 @@ def _fake_run_fetch_all(source, *args, **kwargs):
 
 
 def test_post_fetch_all_streams_each_enabled_source(client, conn):
-    q.insert_source(conn, "finn.no", "https://finn.no", "http")
-    q.insert_source(conn, "other.no", "https://other.no", "http")
+    q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    q.insert_source(conn, "other.no", "https://other.no", "generic_listing")
     with patch("app.routes.fetch.run_fetch", side_effect=_fake_run_fetch_all):
         resp = client.post("/fetch/all")
     assert resp.status_code == 200
@@ -108,9 +108,9 @@ def test_post_fetch_all_streams_each_enabled_source(client, conn):
 
 def test_post_fetch_all_skips_disabled_and_manual_sources(client, conn):
     q.get_or_create_manual_source(conn)
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
-    other_id = q.insert_source(conn, "disabled.no", "https://disabled.no", "http")
-    q.update_source(conn, other_id, name="disabled.no", url="https://disabled.no", fetcher_type="http", enabled=False)
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    other_id = q.insert_source(conn, "disabled.no", "https://disabled.no", "generic_listing")
+    q.update_source(conn, other_id, name="disabled.no", url="https://disabled.no", fetcher_type="generic_listing", enabled=False)
     with patch("app.routes.fetch.run_fetch", side_effect=_fake_run_fetch_all):
         resp = client.post("/fetch/all")
     assert resp.status_code == 200

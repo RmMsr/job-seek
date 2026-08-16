@@ -11,8 +11,6 @@ from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
 from app.ai.assess_fit import assess_fit
 from app.fetchers.base import RawJob
-from app.fetchers.http import HttpFetcher
-from app.fetchers.playwright_base import PlaywrightFetcher
 from app.fetchers.slack import SlackFetcher
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
@@ -38,15 +36,13 @@ def _make_fetcher(
     model: str | None = None,
 ):
     ft = source["fetcher_type"]
-    if ft == "http":
-        return HttpFetcher(source)
     if ft == "slack":
         return SlackFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "finn_listing":
         return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "generic_listing":
         return GenericListingFetcher(source, client, model, known_urls=q.get_all_job_urls(conn))
-    return PlaywrightFetcher(source, profile_dir)
+    raise ValueError(f"Unsupported fetcher_type: {ft!r}")
 
 
 def _progress(msg: str) -> str:

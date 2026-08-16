@@ -14,7 +14,7 @@ def test_upsert_profile(conn):
 
 
 def test_insert_and_get_source(conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no/job/browse.html", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no/job/browse.html", "generic_listing")
     sources = q.get_sources(conn)
     assert len(sources) == 1
     assert sources[0]["name"] == "finn.no"
@@ -22,20 +22,20 @@ def test_insert_and_get_source(conn):
 
 
 def test_get_sources_enabled_only(conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     conn.execute("UPDATE sources SET enabled = 0 WHERE id = ?", (sid,))
     assert q.get_sources(conn, enabled_only=True) == []
     assert len(q.get_sources(conn)) == 1
 
 
 def test_update_source(conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     q.update_source(
-        conn, sid, name="Finn AI", url="https://finn.no/new", fetcher_type="playwright", enabled=False
+        conn, sid, name="Finn AI", url="https://finn.no/new", fetcher_type="finn_listing", enabled=False
     )
     source = q.get_source(conn, sid)
     assert source["url"] == "https://finn.no/new"
-    assert source["fetcher_type"] == "playwright"
+    assert source["fetcher_type"] == "finn_listing"
     assert source["enabled"] == 0
     assert source["name"] == "Finn AI"
 
@@ -52,8 +52,8 @@ def test_get_or_create_manual_source_creates_once(conn):
 
 
 def test_get_job_counts_by_source(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
-    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    s2 = q.insert_source(conn, "s2", "http://y", "generic_listing")
     q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     q.insert_job(conn, source_id=s1, url="http://job/2", title="T2", company="C", raw_text="r")
     q.insert_job(conn, source_id=s2, url="http://job/3", title="T3", company="C", raw_text="r")
@@ -62,24 +62,24 @@ def test_get_job_counts_by_source(conn):
 
 
 def test_get_job_counts_by_source_omits_sources_with_no_jobs(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     counts = q.get_job_counts_by_source(conn)
     assert counts == {}
 
 
 def test_count_jobs_by_source(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     assert q.count_jobs_by_source(conn, s1) == 1
 
 
 def test_count_jobs_by_source_zero_when_no_jobs(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     assert q.count_jobs_by_source(conn, s1) == 0
 
 
 def test_delete_source_removes_source_and_its_jobs(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     q.delete_source(conn, s1)
     assert q.get_source(conn, s1) is None
@@ -87,7 +87,7 @@ def test_delete_source_removes_source_and_its_jobs(conn):
 
 
 def test_delete_source_removes_its_fetch_runs(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     run_id = q.start_fetch_run(conn, s1)
     q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1)
     q.delete_source(conn, s1)
@@ -95,7 +95,7 @@ def test_delete_source_removes_its_fetch_runs(conn):
 
 
 def test_delete_source_cascades_to_job_scores_and_scenario_feedback(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
@@ -111,8 +111,8 @@ def test_delete_source_cascades_to_job_scores_and_scenario_feedback(conn):
 
 
 def test_delete_source_leaves_other_sources_and_jobs_intact(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
-    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    s2 = q.insert_source(conn, "s2", "http://y", "generic_listing")
     q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=s2, url="http://job/2", title="T2", company="C", raw_text="r")
 
@@ -123,7 +123,7 @@ def test_delete_source_leaves_other_sources_and_jobs_intact(conn):
 
 
 def test_delete_job_removes_job(conn):
-    sid = q.insert_source(conn, "s1", "http://x", "http")
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
     q.update_job_feedback(conn, jid, "trash", None)
 
@@ -133,7 +133,7 @@ def test_delete_job_removes_job(conn):
 
 
 def test_delete_job_cascades_to_job_scores_and_scenario_feedback(conn):
-    sid = q.insert_source(conn, "s1", "http://x", "http")
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
@@ -148,7 +148,7 @@ def test_delete_job_cascades_to_job_scores_and_scenario_feedback(conn):
 
 
 def test_delete_jobs_removes_only_trash_status_jobs(conn):
-    sid = q.insert_source(conn, "s1", "http://x", "http")
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
     trash_id = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
     q.update_job_feedback(conn, trash_id, "trash", None)
     new_id = q.insert_job(conn, source_id=sid, url="http://job/2", title="T2", company="C", raw_text="r")
@@ -160,7 +160,7 @@ def test_delete_jobs_removes_only_trash_status_jobs(conn):
 
 
 def test_delete_jobs_empty_list_is_noop(conn):
-    sid = q.insert_source(conn, "s1", "http://x", "http")
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
     q.update_job_feedback(conn, jid, "trash", None)
 
@@ -170,7 +170,7 @@ def test_delete_jobs_empty_list_is_noop(conn):
 
 
 def test_get_job_by_url_returns_job(conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
     job = q.get_job_by_url(conn, "http://job/1")
     assert job["id"] == jid
@@ -181,7 +181,7 @@ def test_get_job_by_url_returns_none_when_missing(conn):
 
 
 def test_get_source_by_url_returns_source(conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     source = q.get_source_by_url(conn, "http://x")
     assert source["id"] == sid
 
@@ -213,7 +213,7 @@ def test_update_scenario_gate_threshold_defaults_to_0_7(conn):
 
 
 def test_get_job_scores_returns_all_scenarios_ordered_by_raw_score(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -230,7 +230,7 @@ def test_get_job_scores_returns_all_scenarios_ordered_by_raw_score(conn):
 
 
 def test_get_job_scores_empty_for_unscored_job(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     assert q.get_job_scores(conn, jid) == []
 
@@ -290,7 +290,7 @@ def test_update_criterion_leaves_source_unchanged(conn):
 
 
 def test_url_exists(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     assert not q.url_exists(conn, "http://job/1")
     q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     assert q.url_exists(conn, "http://job/1")
@@ -307,7 +307,7 @@ def test_insert_job_stores_published_at(conn):
 
 
 def test_insert_job_published_at_defaults_to_none(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     job = q.get_job(conn, jid)
     assert job["published_at"] is None
@@ -318,14 +318,14 @@ def test_get_all_job_urls_empty(conn):
 
 
 def test_get_all_job_urls_returns_all_urls(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C2", raw_text="r2")
     assert q.get_all_job_urls(conn) == frozenset({"http://job/1", "http://job/2"})
 
 
 def test_insert_and_get_job(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="Acme", raw_text="raw")
     job = q.get_job(conn, jid)
     assert job["title"] == "ML Eng"
@@ -333,7 +333,7 @@ def test_insert_and_get_job(conn):
 
 
 def test_update_job_pipeline(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(
         conn, jid,
@@ -348,7 +348,7 @@ def test_update_job_pipeline(conn):
 
 
 def test_update_job_pipeline_sets_title_and_headline(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Scraped Title", company="C", raw_text="r")
     q.update_job_pipeline(
         conn, jid,
@@ -364,7 +364,7 @@ def test_update_job_pipeline_sets_title_and_headline(conn):
 
 
 def test_update_job_pipeline_leaves_title_unchanged_when_not_passed(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Scraped Title", company="C", raw_text="r")
     q.update_job_pipeline(
         conn, jid,
@@ -377,7 +377,7 @@ def test_update_job_pipeline_leaves_title_unchanged_when_not_passed(conn):
 
 
 def test_update_job_feedback(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_feedback(conn, jid, "accepted", "Great match")
     job = q.get_job(conn, jid)
@@ -386,7 +386,7 @@ def test_update_job_feedback(conn):
 
 
 def test_reset_job_clears_pipeline_output_and_scores(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_pipeline(
@@ -416,7 +416,7 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
 
 
 def test_reset_job_clears_gate_override(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.mark_job_gate_override(conn, jid)
 
@@ -427,7 +427,7 @@ def test_reset_job_clears_gate_override(conn):
 
 
 def test_mark_job_gate_override_sets_flag(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
 
     q.mark_job_gate_override(conn, jid)
@@ -437,7 +437,7 @@ def test_mark_job_gate_override_sets_flag(conn):
 
 
 def test_get_job_exposes_top_passed_scenario_id(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -451,13 +451,13 @@ def test_get_job_exposes_top_passed_scenario_id(conn):
 def test_get_jobs_works_without_feedback_scenario_id_column(conn):
     # Regression guard: _GATE_JOIN used to join on jobs.feedback_scenario_id,
     # which Task 1 dropped — this must not raise sqlite3.OperationalError.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     assert q.get_jobs(conn) is not None
 
 
 def test_get_jobs_filter_by_status(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
     q.update_job_feedback(conn, j1, "accepted", "note")
@@ -467,8 +467,8 @@ def test_get_jobs_filter_by_status(conn):
 
 
 def test_get_jobs_filter_by_source_id_ignores_status(conn):
-    s1 = q.insert_source(conn, "s1", "http://x", "http")
-    s2 = q.insert_source(conn, "s2", "http://y", "http")
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    s2 = q.insert_source(conn, "s2", "http://y", "generic_listing")
     j1 = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=s1, url="http://job/2", title="T2", company="C", raw_text="r")
     q.insert_job(conn, source_id=s2, url="http://job/3", title="T3", company="C", raw_text="r")
@@ -480,7 +480,7 @@ def test_get_jobs_filter_by_source_id_ignores_status(conn):
 
 
 def test_get_job_counts(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
     j3 = q.insert_job(conn, source_id=source_id, url="http://job/3", title="T3", company="C", raw_text="r")
@@ -492,7 +492,7 @@ def test_get_job_counts(conn):
 
 
 def test_get_job_counts_splits_new_from_not_relevant(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     passed = q.insert_job(conn, source_id=source_id, url="http://job/passed", title="Passed", company="C", raw_text="r")
     failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
@@ -509,7 +509,7 @@ def test_get_job_counts_splits_new_from_not_relevant(conn):
 
 
 def test_get_job_counts_excludes_overridden_job_from_not_relevant(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
@@ -522,7 +522,7 @@ def test_get_job_counts_excludes_overridden_job_from_not_relevant(conn):
 
 
 def test_get_job_counts_new_excludes_irrelevant_and_error(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     posting = q.insert_job(conn, source_id=source_id, url="http://job/post", title="Post", company="C", raw_text="r")
     irrelevant = q.insert_job(conn, source_id=source_id, url="http://job/irr", title="Irr", company="C", raw_text="r")
     error = q.insert_job(conn, source_id=source_id, url="http://job/err", title="Err", company="C", raw_text="r")
@@ -536,7 +536,7 @@ def test_get_job_counts_new_excludes_irrelevant_and_error(conn):
 
 
 def test_get_recent_feedback_notes(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -545,7 +545,7 @@ def test_get_recent_feedback_notes(conn):
 
 
 def test_get_recent_feedback_notes_reports_direction(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "should have counted", "higher")
@@ -554,7 +554,7 @@ def test_get_recent_feedback_notes_reports_direction(conn):
 
 
 def test_get_recent_feedback_notes_scoped_to_scenario(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -566,7 +566,7 @@ def test_get_recent_feedback_notes_scoped_to_scenario(conn):
 def test_get_recent_feedback_notes_excludes_undirected_comments(conn):
     # A note left with no direction chosen is pure commentary — propose_criteria
     # has no polarity to act on, so it must not see it.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "just a thought", None)
@@ -574,7 +574,7 @@ def test_get_recent_feedback_notes_excludes_undirected_comments(conn):
 
 
 def test_get_recent_feedback_notes_excludes_feedback_older_than_window(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -587,7 +587,7 @@ def test_get_recent_feedback_notes_excludes_feedback_older_than_window(conn):
 
 
 def test_get_recent_feedback_notes_includes_feedback_within_window(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -600,7 +600,7 @@ def test_get_recent_feedback_notes_includes_feedback_within_window(conn):
 
 
 def test_get_recent_feedback_notes_row_cap_applies_within_window(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     for i in range(3):
         j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
@@ -610,7 +610,7 @@ def test_get_recent_feedback_notes_row_cap_applies_within_window(conn):
 
 
 def test_get_recent_feedback_notes_excludes_handled(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -620,7 +620,7 @@ def test_get_recent_feedback_notes_excludes_handled(conn):
 
 
 def test_get_recent_feedback_anchor_is_newest_created_at(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -638,7 +638,7 @@ def test_get_recent_feedback_anchor_none_when_no_recent_feedback(conn):
 def test_mark_feedback_handled_scoped_to_one_scenario(conn):
     # A job can carry independent gate feedback for two scenarios — handling
     # one scenario's proposals must not clear the other's pending feedback.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
@@ -655,7 +655,7 @@ def test_mark_feedback_handled_sweeps_rows_beyond_the_cap(conn):
     # batch's proposals should clear every unhandled row up to that point,
     # not just the 20 that were sampled — otherwise stragglers beyond the
     # cap can never be marked handled.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     for i in range(3):
         j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
@@ -673,7 +673,7 @@ def test_mark_feedback_handled_leaves_rows_created_after_anchor(conn):
     # created_at has only second-level resolution, so backdate the first
     # row explicitly rather than relying on real-time ordering between two
     # upserts in the same test.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -700,7 +700,7 @@ def test_mark_feedback_handled_none_anchor_is_noop(conn):
 def test_upsert_scenario_feedback_resets_handled_state(conn):
     # Re-saving feedback on a job is fresh input the LLM hasn't seen yet,
     # even if its prior feedback had already been handled.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "too junior", "lower")
@@ -711,7 +711,7 @@ def test_upsert_scenario_feedback_resets_handled_state(conn):
 
 
 def test_fetch_run_lifecycle(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     run_id = q.start_fetch_run(conn, source_id)
     q.complete_fetch_run(conn, run_id, jobs_found=5, jobs_new=3)
     runs = q.get_recent_fetch_runs(conn)
@@ -720,7 +720,7 @@ def test_fetch_run_lifecycle(conn):
 
 
 def test_upsert_job_score_inserts_then_updates(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_id, 0.4, "first pass", "hash1")
@@ -732,14 +732,14 @@ def test_upsert_job_score_inserts_then_updates(conn):
 
 
 def test_get_job_score_missing_returns_none(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     assert q.get_job_score(conn, jid, scenario_id) is None
 
 
 def test_get_job_score_hashes_scoped_to_scenario(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -750,7 +750,7 @@ def test_get_job_score_hashes_scoped_to_scenario(conn):
 
 
 def test_get_jobs_reports_all_passed_scenario_names(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_a = q.insert_scenario(conn, "A", "")
     scenario_b = q.insert_scenario(conn, "B", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -763,7 +763,7 @@ def test_get_jobs_reports_all_passed_scenario_names(conn):
 
 
 def test_get_jobs_excludes_scenario_below_its_own_gate_threshold(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     strict = q.insert_scenario(conn, "Strict", "")
     q.update_scenario(conn, strict, name="Strict", description="", gate_threshold=0.9)
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
@@ -773,7 +773,7 @@ def test_get_jobs_excludes_scenario_below_its_own_gate_threshold(conn):
 
 
 def test_get_jobs_gate_status_passed_excludes_below_threshold(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     below = q.insert_job(conn, source_id=source_id, url="http://job/below", title="Below", company="C", raw_text="r")
     above = q.insert_job(conn, source_id=source_id, url="http://job/above", title="Above", company="C", raw_text="r")
@@ -793,7 +793,7 @@ def test_get_jobs_gate_status_passed_keeps_never_scored_jobs(conn):
     # A job with zero job_scores rows (e.g. no scenarios existed at fetch
     # time) hasn't failed a gate — it was never gated at all — so it must
     # stay visible, unlike a job that was scored and failed every scenario.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     scored_and_failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
     never_scored = q.insert_job(conn, source_id=source_id, url="http://job/unscored", title="Unscored", company="C", raw_text="r")
@@ -809,7 +809,7 @@ def test_get_jobs_gate_status_passed_excludes_irrelevant_and_error(conn):
     # irrelevant/error content is never scored (evaluate() only runs for
     # job_posting/lead), so the old "content_type != job_posting" escape
     # hatch let it slip into the default New view as if it were pending.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     irrelevant = q.insert_job(conn, source_id=source_id, url="http://job/irr", title="Irr", company="C", raw_text="r")
     error = q.insert_job(conn, source_id=source_id, url="http://job/err", title="Err", company="C", raw_text="r")
     posting = q.insert_job(conn, source_id=source_id, url="http://job/post", title="Post", company="C", raw_text="r")
@@ -823,7 +823,7 @@ def test_get_jobs_gate_status_passed_excludes_irrelevant_and_error(conn):
 
 
 def test_get_jobs_gate_status_passed_excludes_lead_below_threshold(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     lead = q.insert_job(conn, source_id=source_id, url="http://job/lead", title="Lead", company="C", raw_text="r")
     q.update_job_pipeline(conn, lead, simplified_content="", content_type="lead")
@@ -835,7 +835,7 @@ def test_get_jobs_gate_status_passed_excludes_lead_below_threshold(conn):
 
 
 def test_get_jobs_gate_status_passed_keeps_unscored_and_gate_passed_leads(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     unscored_lead = q.insert_job(conn, source_id=source_id, url="http://job/lead1", title="Unscored lead", company="C", raw_text="r")
     passed_lead = q.insert_job(conn, source_id=source_id, url="http://job/lead2", title="Passed lead", company="C", raw_text="r")
@@ -849,7 +849,7 @@ def test_get_jobs_gate_status_passed_keeps_unscored_and_gate_passed_leads(conn):
 
 
 def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
     passed = q.insert_job(conn, source_id=source_id, url="http://job/passed", title="Passed", company="C", raw_text="r")
@@ -865,7 +865,7 @@ def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):
 
 
 def test_get_jobs_gate_status_passed_includes_overridden_job_that_failed_score(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
@@ -878,7 +878,7 @@ def test_get_jobs_gate_status_passed_includes_overridden_job_that_failed_score(c
 
 
 def test_get_jobs_gate_status_failed_excludes_overridden_job(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Overridden", company="C", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
@@ -893,7 +893,7 @@ def test_get_jobs_gate_status_failed_excludes_overridden_job(conn):
 def test_get_jobs_gate_status_failed_paired_with_job_posting_excludes_leads(conn):
     # Route layer always pairs gate_status="failed" with content_type="job_posting"
     # so a gate-failed lead never shows up in "Not relevant" — it's Leads-only.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     lead = q.insert_job(conn, source_id=source_id, url="http://job/lead", title="Lead", company="C", raw_text="r")
     q.update_job_pipeline(conn, lead, simplified_content="", content_type="lead")
@@ -905,7 +905,7 @@ def test_get_jobs_gate_status_failed_paired_with_job_posting_excludes_leads(conn
 
 
 def test_get_jobs_job_with_no_score_has_no_passed_scenarios(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     job = q.get_jobs(conn)[0]
     assert job["passed_gate_count"] is None
@@ -914,7 +914,7 @@ def test_get_jobs_job_with_no_score_has_no_passed_scenarios(conn):
 
 
 def test_update_job_fit_sets_scores_and_computed_fit_score(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.update_job_fit(conn, jid, 0.8, "Strong domain fit", 0.6, "Slightly junior", "phash1")
     job = q.get_job(conn, jid)
@@ -927,7 +927,7 @@ def test_update_job_fit_sets_scores_and_computed_fit_score(conn):
 
 
 def test_get_jobs_orders_by_fit_score_desc(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     low = q.insert_job(conn, source_id=source_id, url="http://job/low", title="Low", company="C", raw_text="r")
     high = q.insert_job(conn, source_id=source_id, url="http://job/high", title="High", company="C", raw_text="r")
     q.update_job_fit(conn, low, 0.2, "", 0.2, "", "h")
@@ -937,7 +937,7 @@ def test_get_jobs_orders_by_fit_score_desc(conn):
 
 
 def test_upsert_scenario_feedback_inserts_and_updates(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too broad", "lower")
@@ -951,7 +951,7 @@ def test_upsert_scenario_feedback_inserts_and_updates(conn):
 
 
 def test_upsert_scenario_feedback_deletes_when_both_blank(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "note", "higher")
@@ -960,7 +960,7 @@ def test_upsert_scenario_feedback_deletes_when_both_blank(conn):
 
 
 def test_upsert_scenario_feedback_keeps_row_with_only_note(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "just a comment", None)
@@ -972,7 +972,7 @@ def test_upsert_scenario_feedback_keeps_row_with_only_note(conn):
 
 
 def test_upsert_scenario_feedback_keeps_row_with_only_direction(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "", "higher")
@@ -988,7 +988,7 @@ def test_upsert_scenario_feedback_blank_note_preserves_existing_note(conn):
     # a save, so a later submit touching only a different scenario's fields
     # must not wipe this one's previously-saved note just because its box
     # is now visually blank.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
@@ -997,7 +997,7 @@ def test_upsert_scenario_feedback_blank_note_preserves_existing_note(conn):
 
 
 def test_upsert_scenario_feedback_blank_note_with_new_direction_preserves_note(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
@@ -1006,7 +1006,7 @@ def test_upsert_scenario_feedback_blank_note_with_new_direction_preserves_note(c
 
 
 def test_upsert_scenario_feedback_resubmitting_unchanged_values_does_not_reset_handled_state(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "too junior", "lower")
@@ -1017,7 +1017,7 @@ def test_upsert_scenario_feedback_resubmitting_unchanged_values_does_not_reset_h
 
 
 def test_get_job_scores_surfaces_feedback_note_and_direction(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
@@ -1028,7 +1028,7 @@ def test_get_job_scores_surfaces_feedback_note_and_direction(conn):
 
 
 def test_get_job_scores_feedback_fields_none_when_no_feedback(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     q.upsert_job_score(conn, jid, scenario_id, 0.5, "reasoning", "hash1")
@@ -1038,7 +1038,7 @@ def test_get_job_scores_feedback_fields_none_when_no_feedback(conn):
 
 
 def test_get_recent_feedback_counts_splits_unhandled_by_direction(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
@@ -1053,7 +1053,7 @@ def test_get_recent_feedback_counts_splits_unhandled_by_direction(conn):
 
 
 def test_get_recent_feedback_counts_splits_handled_by_direction(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
@@ -1068,7 +1068,7 @@ def test_get_recent_feedback_counts_splits_handled_by_direction(conn):
 
 
 def test_get_recent_feedback_counts_excludes_rows_older_than_window(conn):
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
     q.upsert_scenario_feedback(conn, j1, scenario_id, "a", "higher")
@@ -1086,7 +1086,7 @@ def test_get_recent_feedback_counts_excludes_rows_older_than_window(conn):
 def test_get_recent_feedback_counts_unhandled_matches_notes_row_count(conn):
     # The displayed unhandled count must be mechanically identical to what
     # propose_criteria actually receives.
-    source_id = q.insert_source(conn, "s", "http://x", "http")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     for i in range(25):
         j = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
@@ -1099,7 +1099,7 @@ def test_get_recent_feedback_counts_unhandled_matches_notes_row_count(conn):
 
 
 def test_get_fetch_stats_by_source_aggregates_runs(conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     run1 = q.start_fetch_run(conn, sid)
     q.complete_fetch_run(conn, run1, jobs_found=3, jobs_new=2)
     run2 = q.start_fetch_run(conn, sid)
@@ -1114,6 +1114,6 @@ def test_get_fetch_stats_by_source_aggregates_runs(conn):
 
 
 def test_get_fetch_stats_by_source_omits_sources_with_no_runs(conn):
-    sid = q.insert_source(conn, "s", "http://x", "http")
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     stats = q.get_fetch_stats_by_source(conn)
     assert sid not in stats

@@ -64,7 +64,7 @@ def test_home_full_setup_shows_actionable_block(client, conn):
     _use_test_db(conn)
     q.upsert_profile(conn, "Python engineer")
     scenario_id = q.insert_scenario(conn, "Remote ML", "")
-    source_id = q.insert_source(conn, "finn.no", "https://finn.no", "http")
+    source_id = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     run_id = q.start_fetch_run(conn, source_id)
     q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1)
 
