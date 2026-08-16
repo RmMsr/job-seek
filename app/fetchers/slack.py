@@ -7,7 +7,7 @@ from app.fetchers.base import RawJob, is_recent
 
 logger = logging.getLogger("job_seek")
 
-_URL_RE = re.compile(r"^https://([a-zA-Z0-9-]+)\.slack\.com/(?:archives|messages)/([A-Za-z0-9]+)/?$")
+SLACK_URL_RE = re.compile(r"^https://([a-zA-Z0-9-]+)\.slack\.com/(?:archives|messages)/([A-Za-z0-9]+)/?$")
 _TOKEN_RE = re.compile(r'"api_token":"(xoxc-[A-Za-z0-9-]+)"')
 
 
@@ -42,7 +42,7 @@ _SYSTEM_SUBTYPES = frozenset({
 
 def _resolve_target(source_url: str) -> tuple[str, str, str]:
     """Returns (target_url, workspace_subdomain, channel_id)."""
-    match = _URL_RE.match(source_url)
+    match = SLACK_URL_RE.match(source_url)
     if not match:
         raise ValueError(
             f"Unsupported Slack source URL {source_url!r}: expected "

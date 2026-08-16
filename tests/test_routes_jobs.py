@@ -1,9 +1,10 @@
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
+from unittest.mock import patch, ANY
 import httpx
 import pytest
 import respx
 from app.db import queries as q
+from app.pipeline import FetchResult
 
 
 def _seed(conn):
@@ -1278,6 +1279,12 @@ def _fake_run_add_job(conn, client, model, source_id, url, raw_text):
     yield f"Classified as job_posting: {url}"
 
 
+def _fake_run_add_job_lead(conn, client, model, source_id, url, raw_text):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="Fake Lead", company="", raw_text=raw_text)
+    q.update_job_pipeline(conn, jid, simplified_content=raw_text, content_type="lead", summary="Maybe hiring")
+    yield f"Classified as lead: {url}"
+
+
 _NOT_A_LISTING = {"is_listing": False, "job_links": []}
 
 
@@ -1296,6 +1303,88 @@ def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
     assert jobs[0]["url"] == "http://example.com/job/1"
     source = q.get_source(conn, jobs[0]["source_id"])
     assert source["fetcher_type"] == "manual"
+    # No scenarios configured, so this job_posting can't pass any gate — lands on
+    # the "Not relevant" tab rather than the default view. Still gets a notice.
+    assert "NOTICE:" in resp.text
+    assert f'href="/jobs?status=not_relevant#job-{jobs[0]["id"]}"' in resp.text
+
+
+def _fake_run_add_job_passed_gate(conn, client, model, source_id, url, raw_text):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="Fake Title", company="Acme", raw_text=raw_text)
+    q.update_job_pipeline(conn, jid, simplified_content=raw_text, content_type="job_posting", summary="A role")
+    scenario_id = q.insert_scenario(conn, "Remote ML", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "Good match", "hash1")
+    yield f"Classified as job_posting: {url}"
+
+
+def _fake_run_add_job_error(conn, client, model, source_id, url, raw_text):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="", company="", raw_text=raw_text)
+    q.update_job_pipeline(conn, jid, simplified_content=raw_text, content_type="error")
+    yield f"Classified as error: {url}"
+
+
+def _fake_run_add_job_irrelevant(conn, client, model, source_id, url, raw_text):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="", company="", raw_text=raw_text)
+    yield f"Classified as irrelevant: {url}"
+    q.delete_job(conn, jid)
+
+
+@respx.mock
+def test_add_job_by_url_job_posting_passed_gate_shows_notice(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_passed_gate), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    job = q.get_job_by_url(conn, "http://example.com/job/1")
+    assert "NOTICE:" in resp.text
+    assert f'href="/jobs#job-{job["id"]}"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_error_shows_persistent_notice(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_error), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    job = q.get_job_by_url(conn, "http://example.com/job/1")
+    assert job["content_type"] == "error"
+    assert "NOTICE:warning:" in resp.text
+    assert f'href="/jobs/{job["id"]}"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_irrelevant_shows_discarded_notice(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_irrelevant), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    assert q.get_job_by_url(conn, "http://example.com/job/1") is None
+    assert "NOTICE:" in resp.text
+    assert "discarded" in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_lead_shows_persistent_notice_with_link(client, conn):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
+    )
+    with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_lead), \
+         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    assert resp.status_code == 200
+    assert "NOTICE:" in resp.text
+    job = q.get_job_by_url(conn, "http://example.com/job/1")
+    assert job["content_type"] == "lead"
+    assert f'href="/jobs?content_type=lead#job-{job["id"]}"' in resp.text
 
 
 @respx.mock
@@ -1485,6 +1574,8 @@ def test_add_job_by_url_listing_detected_shows_confirm_panel(client, conn):
     assert "Detected 2 job posting" in resp.text
     assert "careers.example.com" in resp.text
     assert 'data-progress-url="/jobs/add-listing-source"' in resp.text
+    assert '<label for="listing-name"' in resp.text
+    assert ">Name:</label>" in resp.text
     assert q.get_jobs(conn) == []
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []
 
@@ -1508,13 +1599,19 @@ def _fake_run_fetch(source, conn, client, model, profile_dir):
     yield f"Starting fetch for '{source['name']}'"
     q.insert_job(conn, source_id=source["id"], url="https://careers.example.com/jobs/1", title="T", company="C", raw_text="r")
     yield "Fetch complete"
+    return FetchResult(source_id=source["id"], run_id=1, jobs_found=1, jobs_new=1, error=None)
+
+
+def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir):
+    yield f"Starting fetch for '{source['name']}'"
+    return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error=None)
 
 
 def test_add_listing_source_creates_source_and_streams_fetch(client, conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
         resp = client.post(
             "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com"},
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
         )
 
     assert resp.status_code == 200
@@ -1522,18 +1619,150 @@ def test_add_listing_source_creates_source_and_streams_fetch(client, conn):
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
     assert len(sources) == 1
     assert sources[0]["name"] == "careers.example.com"
-    assert sources[0]["url"] == "https://careers.example.com/jobs"
+
+
+def test_add_listing_source_rejects_url_already_tracked_as_source(client, conn):
+    sid = q.insert_source(conn, "Existing", "https://careers.example.com/jobs", "generic_listing")
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "Already tracked as a source" in resp.text
+    assert len(q.get_sources(conn)) == 1
+    assert q.get_source(conn, sid)["name"] == "Existing"
+
+
+def test_add_listing_source_rejects_url_already_tracked_as_job(client, conn):
+    manual_sid = q.insert_source(conn, "Manual", "", "manual")
+    jid = q.insert_job(conn, source_id=manual_sid, url="https://careers.example.com/jobs", title="T", company="C", raw_text="r")
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "Already tracked as a job" in resp.text
+    assert f'href="/jobs/{jid}"' in resp.text
+    assert [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"] == []
 
 
 def test_add_listing_source_stream_ends_with_html_chunk(client, conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
         resp = client.post(
             "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com"},
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
         )
 
     assert resp.status_code == 200
     assert 'HTML:<div class="filter-bar">' in resp.text
+
+
+def test_add_listing_source_shows_persistent_notice_with_link(client, conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "NOTICE:" in resp.text
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
+    assert len(sources) == 1
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+
+
+def test_add_listing_source_shows_warning_notice_when_nothing_found(client, conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch_nothing_found):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "NOTICE:warning:" in resp.text
+    assert "found nothing" in resp.text
+    sources = q.get_sources(conn)
+    assert len(sources) == 1
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+
+
+def test_add_listing_source_passes_through_finn_listing_type(client, conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/jobs/add-listing-source",
+            data={"url": "https://www.finn.no/job/search", "name": "Finn AI", "fetcher_type": "finn_listing"},
+        )
+    assert resp.status_code == 200
+    sources = q.get_sources(conn)
+    assert len(sources) == 1
+    assert sources[0]["fetcher_type"] == "finn_listing"
+
+
+def test_add_listing_source_rejects_invalid_fetcher_type(client, conn):
+    resp = client.post(
+        "/jobs/add-listing-source",
+        data={"url": "https://example.com", "name": "example.com", "fetcher_type": "http"},
+    )
+    assert resp.status_code == 400
+    assert q.get_sources(conn) == []
+
+
+@respx.mock
+def test_add_job_by_url_listing_confirm_panel_carries_detected_fetcher_type(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
+    )
+    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
+        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    assert 'id="listing-fetcher-type" value="generic_listing"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_listing_confirm_panel_detects_finn_no(client, conn):
+    respx.get("https://www.finn.no/job/search").mock(
+        return_value=httpx.Response(200, text="<html><body><a href='/job/1'>A</a><a href='/job/2'>B</a></body></html>")
+    )
+    finn_listing = {"is_listing": True, "job_links": ["https://www.finn.no/job/1", "https://www.finn.no/job/2"]}
+    with patch("app.routes.jobs.detect_listing", return_value=finn_listing):
+        resp = client.post("/jobs/add-by-url", data={"url": "https://www.finn.no/job/search"})
+    assert resp.status_code == 200
+    assert 'id="listing-fetcher-type" value="finn_listing"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_title(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(
+            200,
+            text="<html><head><title>Frontend Developer Jobs in Oslo | Careers</title></head>"
+                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
+        )
+    )
+    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
+         patch("app.routes.jobs.generate_source_name", return_value="careers/frontend-oslo") as mock_gen:
+        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    mock_gen.assert_called_once_with(
+        ANY, ANY, "careers.example.com", "Frontend Developer Jobs in Oslo | Careers"
+    )
+    assert 'id="listing-name" value="careers/frontend-oslo"' in resp.text
+
+
+@respx.mock
+def test_add_job_by_url_listing_confirm_panel_falls_back_to_domain_when_name_generation_fails(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(
+            200,
+            text="<html><head><title>Frontend Developer Jobs</title></head>"
+                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
+        )
+    )
+    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
+         patch("app.routes.jobs.generate_source_name", return_value=None):
+        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    assert 'id="listing-name" value="careers.example.com"' in resp.text
 
 
 def test_job_list_has_add_by_url_form(client, conn):

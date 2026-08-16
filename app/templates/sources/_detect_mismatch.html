@@ -1,0 +1,19 @@
+<p style="margin:0 0 0.5rem; color:#dc3545;">This looks like a single job posting, not a listing page.</p>
+<input type="hidden" id="detect-url" value="{{ url }}">
+<input type="hidden" id="detect-name" value="{{ name }}">
+<input type="hidden" id="detect-fetcher-type" value="generic_listing">
+<div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <button type="button" class="btn"
+    data-progress-url="/jobs/add-by-url"
+    data-progress-body-url="#detect-url"
+    data-progress-display="#detect-mismatch-progress">Add as job instead</button>
+  <button type="button" class="btn"
+    data-progress-url="/sources/detect/confirm"
+    data-progress-body-url="#detect-url"
+    data-progress-body-name="#detect-name"
+    data-progress-body-fetcher_type="#detect-fetcher-type"
+    data-progress-oob
+    data-progress-display="#detect-mismatch-progress">Add as source anyway</button>
+  <a href="/sources" class="btn">Cancel</a>
+</div>
+<span id="detect-mismatch-progress" class="reset-progress" aria-live="polite"></span>

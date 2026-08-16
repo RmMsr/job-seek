@@ -171,6 +171,13 @@ def _migrate_sources_fetcher_type_generic_listing(conn: sqlite3.Connection) -> N
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_sources_url_unique(conn: sqlite3.Connection) -> None:
+    # A unique index enforces this without a table rebuild, unlike the CHECK-constraint
+    # migrations above.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_url ON sources(url)")
+    conn.commit()
+
+
 def _migrate_fetch_runs_source_fk(conn: sqlite3.Connection) -> None:
     # A historical migration renamed "sources" to "sources_old" (which
     # auto-rewrites dependent tables' REFERENCES clauses to follow the
@@ -410,6 +417,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_sources_fetcher_type(conn)
     _migrate_sources_fetcher_type_manual(conn)
     _migrate_sources_fetcher_type_generic_listing(conn)
+    _migrate_sources_url_unique(conn)
     _migrate_fetch_runs_source_fk(conn)
     _migrate_jobs_scores_to_table(conn)
     _migrate_jobs_add_headline(conn)

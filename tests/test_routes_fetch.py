@@ -67,6 +67,13 @@ def test_fetch_panel_has_view_all_jobs_link_per_source(client, conn):
     assert f'href="/jobs?source_id={sid}"' in resp.text
 
 
+def test_fetch_panel_row_has_source_row_class_for_hash_highlight(client, conn):
+    sid = _seed(conn)
+    resp = client.get("/fetch")
+    assert resp.status_code == 200
+    assert f'id="fetch-row-{sid}" class="source-row"' in resp.text
+
+
 def test_fetch_panel_does_not_repeat_source_url(client, conn):
     _seed(conn)
     resp = client.get("/fetch")

@@ -27,7 +27,7 @@
     {% for source in sources %}
       {% set run = runs_by_source.get(source.id) %}
       {% set stats = stats_by_source.get(source.id) %}
-      <tr>
+      <tr id="fetch-row-{{ source.id }}" class="source-row">
         <td style="padding:0.5rem;">
           <strong>{{ source.name }}</strong>
         </td>

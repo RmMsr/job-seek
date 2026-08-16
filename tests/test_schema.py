@@ -783,3 +783,31 @@ def test_init_db_migrates_sources_table_missing_generic_listing_type(conn):
         {"name": "s", "url": "http://x", "fetcher_type": "http"},
         {"name": "Careers Page", "url": "http://y", "fetcher_type": "generic_listing"},
     ]
+
+
+def test_sources_url_is_unique(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s1', 'http://x', 'http')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'http')")
+
+
+def test_init_db_migrates_existing_sources_table_to_unique_url(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual', 'generic_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'http')")
+    conn.commit()
+
+    init_db(conn)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s2', 'http://x', 'http')")

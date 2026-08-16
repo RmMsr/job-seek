@@ -1,6 +1,9 @@
-from unittest.mock import patch
+from unittest.mock import patch, ANY
+import httpx
+import respx
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
+from app.pipeline import FetchResult
 
 _SLACK_URL = "https://example-workspace.slack.com/archives/C0EXAMPLE1"
 
@@ -14,6 +17,13 @@ def test_sources_page_returns_200(client, conn):
     resp = client.get("/sources")
     assert resp.status_code == 200
     assert "finn.no" in resp.text
+
+
+def test_source_row_has_source_row_class_for_hash_highlight(client, conn):
+    sid = _seed(conn)
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert f'id="source-row-{sid}" class="source-row"' in resp.text
 
 
 def test_sources_page_shows_needs_login_for_slack_source_without_cookie(client, conn):
@@ -44,15 +54,19 @@ def test_sources_page_excludes_manual_source(client, conn):
     assert "Real Source" in resp.text
 
 
-def test_create_source(client, conn):
+def test_sources_page_table_has_wrapper_id(client, conn):
+    _seed(conn)
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert 'id="sources-table"' in resp.text
+
+
+def test_post_sources_route_removed(client, conn):
     resp = client.post(
         "/sources",
         data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http"},
     )
-    assert resp.status_code == 200
-    sources = q.get_sources(conn)
-    assert len(sources) == 1
-    assert sources[0]["name"] == "finn.no"
+    assert resp.status_code == 405
 
 
 def test_edit_form_returns_source_fields(client, conn):
@@ -93,36 +107,6 @@ def test_cancel_edit_returns_display_row(client, conn):
     resp = client.get(f"/sources/{sid}")
     assert resp.status_code == 200
     assert "finn.no" in resp.text
-
-
-def test_create_slack_source_shows_login_prompt_when_needed(client, conn):
-    with patch.object(SlackFetcher, "check_needs_login", return_value=True):
-        resp = client.post(
-            "/sources",
-            data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack"},
-        )
-    assert resp.status_code == 200
-    assert "Needs Slack login" in resp.text
-
-
-def test_create_slack_source_no_login_prompt_when_already_logged_in(client, conn):
-    with patch.object(SlackFetcher, "check_needs_login", return_value=False):
-        resp = client.post(
-            "/sources",
-            data={"name": "Example Slack", "url": _SLACK_URL, "fetcher_type": "slack"},
-        )
-    assert resp.status_code == 200
-    assert "Needs Slack login" not in resp.text
-
-
-def test_create_http_source_does_not_attempt_login_check(client, conn):
-    with patch.object(SlackFetcher, "check_needs_login") as mock_check:
-        resp = client.post(
-            "/sources",
-            data={"name": "finn.no", "url": "https://finn.no", "fetcher_type": "http"},
-        )
-    assert resp.status_code == 200
-    mock_check.assert_not_called()
 
 
 def test_update_source_to_slack_shows_login_prompt_when_needed(client, conn):
@@ -218,12 +202,6 @@ def test_slack_row_shows_cookie_security_warning(client, conn):
     assert 'name="acknowledged"' in resp.text     # required checkbox present
 
 
-def test_sources_page_add_source_form_includes_generic_listing_option(client, conn):
-    resp = client.get("/sources")
-    assert resp.status_code == 200
-    assert '<option value="generic_listing">generic_listing</option>' in resp.text
-
-
 def test_delete_source_removes_row_and_returns_empty_body(client, conn):
     sid = _seed(conn)
     resp = client.delete(f"/sources/{sid}")
@@ -304,3 +282,303 @@ def test_slack_row_shows_cli_login_command(client, conn):
     assert f"http://testserver/sources/{sid}/cookie" in resp.text
     assert "Log in via browser" not in resp.text
     assert "won't update automatically" in resp.text
+
+
+def test_detect_source_already_tracked_as_source_skips_detection(client, conn):
+    sid = q.insert_source(conn, "Careers Page", "https://careers.example.com/jobs", "generic_listing")
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert "Already tracked as a source" in resp.text
+    assert f'href="/sources#source-row-{sid}"' in resp.text
+
+
+def test_detect_source_already_tracked_as_job_skips_detection(client, conn):
+    sid = q.insert_source(conn, "Manual", "", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="https://example.com/job/1", title="T", company="C", raw_text="r")
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert "Already tracked as a job" in resp.text
+    assert f'href="/jobs/{jid}"' in resp.text
+
+
+def test_confirm_source_rejects_url_already_tracked_as_source(client, conn):
+    sid = q.insert_source(conn, "Careers Page", "https://careers.example.com/jobs", "generic_listing")
+    resp = client.post(
+        "/sources/detect/confirm",
+        data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
+    )
+    assert resp.status_code == 200
+    assert "Already tracked as a source" in resp.text
+    assert len(q.get_sources(conn)) == 1
+    assert q.get_source(conn, sid)["name"] == "Careers Page"
+
+
+def test_confirm_source_rejects_url_already_tracked_as_job(client, conn):
+    sid = q.insert_source(conn, "Manual", "", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="https://example.com/job/1", title="T", company="C", raw_text="r")
+    resp = client.post(
+        "/sources/detect/confirm",
+        data={"url": "https://example.com/job/1", "name": "Dup", "fetcher_type": "generic_listing"},
+    )
+    assert resp.status_code == 200
+    assert "Already tracked as a job" in resp.text
+    assert f'href="/jobs/{jid}"' in resp.text
+    assert [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"] == []
+
+
+def test_detect_source_fast_path_slack_skips_fetch(client, conn):
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert "Detected type: <strong>slack</strong>" in resp.text
+    assert f'value="{_SLACK_URL}"' in resp.text
+
+
+def test_detect_source_fast_path_finn_skips_fetch(client, conn):
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": "https://www.finn.no/job/search"})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert "Detected type: <strong>finn_listing</strong>" in resp.text
+
+
+_IS_A_LISTING = {
+    "is_listing": True,
+    "job_links": ["https://careers.example.com/jobs/1", "https://careers.example.com/jobs/2"],
+}
+_NOT_A_LISTING = {"is_listing": False, "job_links": []}
+
+
+@respx.mock
+def test_detect_source_slow_path_listing_detected(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING):
+        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    assert "Detected type: <strong>generic_listing</strong>" in resp.text
+    assert 'value="careers.example.com"' in resp.text  # default name
+
+
+def test_detect_source_confirm_panel_has_name_label(client, conn):
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert '<label for="detect-name"' in resp.text
+    assert ">Name:</label>" in resp.text
+
+
+def test_detect_source_confirm_panel_has_cancel_link(client, conn):
+    with patch("app.routes.sources.fetch_url_html") as mock_fetch:
+        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+    mock_fetch.assert_not_called()
+    assert resp.status_code == 200
+    assert '<a href="/sources" class="btn">Cancel</a>' in resp.text
+
+
+@respx.mock
+def test_detect_source_mismatch_panel_has_cancel_link(client, conn):
+    respx.get("https://example.com/job/1").mock(
+        return_value=httpx.Response(200, text="<html><body><p>A single job posting.</p></body></html>")
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
+    assert resp.status_code == 200
+    assert '<a href="/sources" class="btn">Cancel</a>' in resp.text
+
+
+@respx.mock
+def test_detect_source_slow_path_not_a_listing_shows_mismatch(client, conn):
+    respx.get("https://example.com/job/1").mock(
+        return_value=httpx.Response(200, text="<html><body><p>A single job posting.</p></body></html>")
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING):
+        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
+    assert resp.status_code == 200
+    assert "looks like a single job posting" in resp.text
+    assert 'data-progress-url="/jobs/add-by-url"' in resp.text
+    assert "Add as source anyway" in resp.text
+
+
+@respx.mock
+def test_detect_source_fetch_failure_falls_back_to_generic_listing(client, conn):
+    respx.get("https://example.com/unreachable").mock(side_effect=httpx.ConnectError("boom"))
+    resp = client.post("/sources/detect", data={"url": "https://example.com/unreachable"})
+    assert resp.status_code == 200
+    assert "Detected type: <strong>generic_listing</strong>" in resp.text
+
+
+@respx.mock
+def test_detect_source_uses_generated_name_when_page_has_title(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(
+            200,
+            text="<html><head><title>Frontend Developer Jobs in Oslo | Careers</title></head>"
+                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
+        )
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING), \
+         patch("app.routes.sources.generate_source_name", return_value="careers/frontend-oslo") as mock_gen:
+        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    mock_gen.assert_called_once_with(
+        ANY, ANY, "careers.example.com", "Frontend Developer Jobs in Oslo | Careers"
+    )
+    assert 'value="careers/frontend-oslo"' in resp.text
+
+
+@respx.mock
+def test_detect_source_falls_back_to_domain_when_name_generation_fails(client, conn):
+    respx.get("https://careers.example.com/jobs").mock(
+        return_value=httpx.Response(
+            200,
+            text="<html><head><title>Frontend Developer Jobs</title></head>"
+                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
+        )
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING), \
+         patch("app.routes.sources.generate_source_name", return_value=None):
+        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
+    assert resp.status_code == 200
+    assert 'value="careers.example.com"' in resp.text
+
+
+@respx.mock
+def test_detect_source_mismatch_panel_also_uses_generated_name(client, conn):
+    respx.get("https://example.com/job/1").mock(
+        return_value=httpx.Response(
+            200, text="<html><head><title>Senior Engineer at Acme</title></head><body><p>Role details.</p></body></html>"
+        )
+    )
+    with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING), \
+         patch("app.routes.sources.generate_source_name", return_value="acme/senior-engineer"):
+        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
+    assert resp.status_code == 200
+    assert "looks like a single job posting" in resp.text
+    assert 'value="acme/senior-engineer"' in resp.text
+
+
+def _fake_run_fetch(source, conn, client, model, profile_dir):
+    yield f"Starting fetch for '{source['name']}'"
+    yield "Fetch complete"
+    return FetchResult(source_id=source["id"], run_id=1, jobs_found=1, jobs_new=1, error=None)
+
+
+def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir):
+    yield f"Starting fetch for '{source['name']}'"
+    yield "Fetch complete for '{}': 0 new / 0 found".format(source["name"])
+    return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error=None)
+
+
+def _fake_run_fetch_error(source, conn, client, model, profile_dir):
+    yield f"Starting fetch for '{source['name']}'"
+    yield "Fetch failed for '{}': boom".format(source["name"])
+    return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error="boom")
+
+
+def test_confirm_source_creates_source_and_streams_fetch(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "Fetch complete" in resp.text
+    sources = q.get_sources(conn)
+    assert len(sources) == 1
+    assert sources[0]["fetcher_type"] == "generic_listing"
+    assert sources[0]["name"] == "careers.example.com"
+
+
+def test_confirm_source_response_has_both_oob_chunks(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert 'HTML:<div id="sources-table">' in resp.text
+    assert 'HTML:<div id="add-source-panel"' in resp.text
+
+
+def test_confirm_source_no_notice_when_jobs_found(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "NOTICE:" not in resp.text
+
+
+def test_confirm_source_shows_persistent_notice_when_nothing_found(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch_nothing_found):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "NOTICE:warning:" in resp.text
+    assert "careers.example.com" in resp.text
+    sources = q.get_sources(conn)
+    assert len(sources) == 1
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+
+
+def test_confirm_source_shows_persistent_notice_on_fetch_error(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch_error):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
+        )
+    assert resp.status_code == 200
+    assert "NOTICE:warning:" in resp.text
+    assert "boom" in resp.text
+
+
+def test_sources_page_has_notice_stack(client, conn):
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert 'id="notice-stack"' in resp.text
+
+
+def test_confirm_source_rejects_invalid_fetcher_type(client, conn):
+    resp = client.post(
+        "/sources/detect/confirm",
+        data={"url": "https://example.com", "name": "example.com", "fetcher_type": "http"},
+    )
+    assert resp.status_code == 400
+    assert q.get_sources(conn) == []
+
+
+def test_confirm_source_slack_shows_needs_login(client, conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch), \
+         patch.object(SlackFetcher, "check_needs_login", return_value=True):
+        resp = client.post(
+            "/sources/detect/confirm",
+            data={"url": _SLACK_URL, "name": "Example Slack", "fetcher_type": "slack"},
+        )
+    assert resp.status_code == 200
+    assert "Needs Slack login" in resp.text
+
+
+def test_sources_page_has_add_source_unfold(client, conn):
+    resp = client.get("/sources")
+    assert resp.status_code == 200
+    assert "+ Add source" in resp.text
+    assert 'data-progress-url="/sources/detect"' in resp.text
+    assert 'id="add-source-panel"' in resp.text
+
+
+def test_edit_form_includes_generic_listing_option(client, conn):
+    sid = q.insert_source(conn, "mlai.work/norway", "https://mlai.work/l/norway", "generic_listing")
+    resp = client.get(f"/sources/{sid}/edit")
+    assert resp.status_code == 200
+    assert '<option value="generic_listing" selected>generic_listing</option>' in resp.text

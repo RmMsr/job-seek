@@ -52,7 +52,7 @@
       0%, 60% { opacity:1; max-height:3rem; margin-bottom:0.5rem; padding-top:0.3rem; padding-bottom:0.3rem; }
       100% { opacity:0; max-height:0; margin-bottom:0; padding-top:0; padding-bottom:0; }
     }
-    .job-row-target-highlight { animation: target-highlight 2.5s ease-out; }
+    .job-row-target-highlight, .source-row-target-highlight { animation: target-highlight 2.5s ease-out; }
     @keyframes target-highlight {
       0% { background: #fff3cd; }
       100% { background: transparent; }
@@ -445,14 +445,30 @@ document.body.addEventListener('click', function (e) {
   </script>
   <script>
     (function () {
-      if (!location.hash) return;
-      var el;
-      try { el = document.querySelector(location.hash); } catch (err) { return; }
-      if (!el || !el.classList.contains("job-row")) return;
-      el.classList.add("job-row-target-highlight");
-      el.addEventListener("animationend", function () {
-        el.classList.remove("job-row-target-highlight");
-      }, { once: true });
+      function highlightFromHash() {
+        if (!location.hash) return;
+        var el;
+        try { el = document.querySelector(location.hash); } catch (err) { return; }
+        if (!el) return;
+        var highlightClass = el.classList.contains("job-row") ? "job-row-target-highlight"
+          : el.classList.contains("source-row") ? "source-row-target-highlight"
+          : null;
+        if (!highlightClass) return;
+        // Re-triggering the CSS animation needs the class removed and re-added on a
+        // fresh frame — without this, clicking a same-page link to an already-highlighted
+        // (or mid-animation) row is a no-op since the class never toggles off/on.
+        el.classList.remove(highlightClass);
+        void el.offsetWidth;
+        el.classList.add(highlightClass);
+        el.addEventListener("animationend", function () {
+          el.classList.remove(highlightClass);
+        }, { once: true });
+      }
+      highlightFromHash();
+      // Same-page anchor clicks (e.g. a notice link to a row already on screen) change
+      // location.hash without a navigation/reload, so the initial run above never fires
+      // for those — hashchange is the only event that does.
+      window.addEventListener("hashchange", highlightFromHash);
     })();
   </script>
 </body>

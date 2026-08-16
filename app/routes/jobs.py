@@ -1,7 +1,6 @@
 from __future__ import annotations
 import sqlite3
 from urllib.parse import urlsplit
-import httpx
 import openai
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -9,36 +8,17 @@ from app.deps import get_db, get_ai_client, get_model, get_config
 from app.db import queries as q
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job, run_fetch
 from app.fetchers.links import extract_links
-from app.fetchers.content import has_enough_content, extract_text as _extract_text_raw
+from app.fetchers.content import (
+    has_enough_content, FetchError, NoContentError, fetch_url_html, extract_text_or_raise, extract_page_title,
+)
 from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
+from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
+from app.ai.generate_source_name import generate_source_name
+from app.routes.sources import check_already_tracked_notice
 from app.template_env import templates
 
 router = APIRouter()
-
-
-class _FetchError(Exception):
-    pass
-
-
-class _NoContentError(_FetchError):
-    pass
-
-
-def _fetch_url_html(url: str) -> str:
-    try:
-        resp = httpx.get(url, timeout=30, follow_redirects=True)
-    except httpx.HTTPError as exc:
-        raise _FetchError(str(exc)) from exc
-    if resp.status_code != 200:
-        raise _FetchError(f"HTTP {resp.status_code}")
-    return resp.text
-
-
-def _extract_text(html: str) -> str:
-    if not has_enough_content(html):
-        raise _NoContentError("page had little to no extractable text")
-    return _extract_text_raw(html)
 
 
 def _insert_error_job(conn: sqlite3.Connection, url: str, reason: str) -> int:
@@ -509,8 +489,8 @@ def job_add_by_url(
                 )
             else:
                 try:
-                    html = _fetch_url_html(url)
-                except _FetchError as exc:
+                    html = fetch_url_html(url)
+                except FetchError as exc:
                     _insert_error_job(conn, url, f"Failed to fetch: {exc}")
                     yield _notice_line(
                         "jobs/_fetch_failed_notice.html", level="warning",
@@ -524,20 +504,28 @@ def job_add_by_url(
                     links = extract_links(html, url)
                     detection = detect_listing(client, model, links, url)
                     if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                        domain = urlsplit(url).netloc
+                        default_name = domain
+                        page_title = extract_page_title(html)
+                        if page_title:
+                            generated_name = generate_source_name(client, model, domain, page_title)
+                            if generated_name:
+                                default_name = generated_name
                         panel_context = {
                             "request": request,
                             "url": url,
+                            "fetcher_type": classify_known_source(url) or "generic_listing",
                             "link_count": len(detection["job_links"]),
-                            "domain": urlsplit(url).netloc,
-                            "default_name": urlsplit(url).netloc,
+                            "domain": domain,
+                            "default_name": default_name,
                         }
                         panel_context.update(_filter_context(request))
                         panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
                         yield "HTML:" + panel.replace("\n", "") + "\n"
                         return
                     try:
-                        raw_text = _extract_text(html)
-                    except _NoContentError:
+                        raw_text = extract_text_or_raise(html)
+                    except NoContentError:
                         _insert_error_job(
                             conn, url, "No extractable content — page likely requires JavaScript to render",
                         )
@@ -552,6 +540,29 @@ def job_add_by_url(
                                 yield next(gen) + "\n"
                         except StopIteration:
                             pass
+                        added_job = q.get_job_by_url(conn, url)
+                        if added_job is None:
+                            yield _notice_line("jobs/_discarded_notice.html", request=request)
+                        else:
+                            added_job = q.get_job(conn, added_job["id"])
+                            if added_job["content_type"] == "lead":
+                                yield _notice_line(
+                                    "jobs/_lead_added_notice.html", request=request, job_id=added_job["id"],
+                                )
+                            elif added_job["content_type"] == "error":
+                                yield _notice_line(
+                                    "jobs/_error_added_notice.html", level="warning",
+                                    request=request, job_id=added_job["id"],
+                                )
+                            elif added_job["content_type"] == "job_posting":
+                                passed_gate = bool(added_job["passed_gate_count"]) or bool(added_job["gate_override"])
+                                template_name = (
+                                    "jobs/_job_added_notice.html" if passed_gate
+                                    else "jobs/_not_relevant_added_notice.html"
+                                )
+                                yield _notice_line(
+                                    template_name, request=request, job_id=added_job["id"],
+                                )
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)
@@ -566,23 +577,47 @@ def job_add_listing_source(
     request: Request,
     url: str = Form(...),
     name: str = Form(...),
+    fetcher_type: str = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
     client: openai.OpenAI = Depends(get_ai_client),
     model: str = Depends(get_model),
     config=Depends(get_config),
 ):
+    if fetcher_type not in DETECTABLE_FETCHER_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid fetcher_type")
+
     status = request.query_params.get("status") or None
     content_type = request.query_params.get("content_type") or None
 
     def stream():
-        source_id = q.insert_source(conn, name, url, "generic_listing")
+        already_tracked = check_already_tracked_notice(conn, request, url)
+        if already_tracked is not None:
+            yield already_tracked
+            html_chunk = templates.get_template("jobs/_content.html").render(
+                request=request, **_content_context(conn, status, content_type)
+            )
+            yield "HTML:" + html_chunk.replace("\n", "") + "\n"
+            return
+
+        source_id = q.insert_source(conn, name, url, fetcher_type)
         source = q.get_source(conn, source_id)
         gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+        fetch_result = None
         try:
             while True:
                 yield next(gen) + "\n"
-        except StopIteration:
-            pass
+        except StopIteration as stop:
+            fetch_result = stop.value
+
+        if fetch_result is not None and fetch_result.jobs_found == 0:
+            yield _notice_line(
+                "sources/_fetch_nothing_found_notice.html", level="warning",
+                request=request, name=name, url=url, error=fetch_result.error, source_id=source_id,
+            )
+        else:
+            yield _notice_line(
+                "jobs/_source_added_notice.html", request=request, name=name, source_id=source_id,
+            )
 
         html_chunk = templates.get_template("jobs/_content.html").render(
             request=request, **_content_context(conn, status, content_type)
