@@ -8,7 +8,10 @@ _SYSTEM = (
     '{"title": "<Role - Location (remote/hybrid/onsite) @ Organization>", '
     '"headline": "<one punchy sentence on the most compelling or notable detail>", '
     '"summary": "<concise markdown covering role, company, location/remote status, '
-    'key requirements, compensation if mentioned, notable perks or red flags>"}. '
+    'key requirements, compensation if mentioned, notable perks or red flags>", '
+    '"source_link": "<a URL copied verbatim from the text below that points to the '
+    'original job description, application form, or the hiring organization/job page, '
+    'or empty string if none is present>"}. '
     "For title: use the role as given in the posting, or a concise generated one if "
     "unclear; include location with remote/hybrid/onsite status; include the "
     "organization name. Be factual and brief. No invented details. "
@@ -17,7 +20,10 @@ _SYSTEM = (
     "advertised-sounding phrasing (e.g. 'competitive salary', 'fast-paced environment', "
     "'collaborative team') — call out what's actually distinctive about this posting, "
     "such as unusual scope or impact, concrete technical/domain details, or notable team "
-    "or organization context."
+    "or organization context. "
+    "For source_link: only return a URL that appears verbatim in the text below — never "
+    "construct, guess, or modify one. If several links are present, prefer the most direct "
+    "application link or the original detailed posting over generic organization/social links."
 )
 
 _LEAD_SYSTEM = (
@@ -32,6 +38,16 @@ _LEAD_SYSTEM = (
     "that isn't actually present in the message. Be factual and brief. If no "
     "organization is identifiable, return an empty organizations list."
 )
+
+
+def _valid_source_link(link: str, simplified_content: str) -> str:
+    if not isinstance(link, str):
+        return ""
+    if not link.startswith(("http://", "https://")):
+        return ""
+    if link not in simplified_content:
+        return ""
+    return link
 
 
 def summarize(
@@ -63,6 +79,10 @@ def summarize(
             title = ", ".join(data.get("organizations", []))
             return title, data.get("headline", ""), simplified_content
         title = data.get("title", "")
-        return title, data.get("headline", ""), data.get("summary", "")
+        summary = data.get("summary", "")
+        source_link = _valid_source_link(data.get("source_link", ""), simplified_content)
+        if source_link:
+            summary = f"{summary}\n\n**Original posting:** [{source_link}]({source_link})"
+        return title, data.get("headline", ""), summary
     except Exception:
         return "", "", simplified_content if is_lead else ""

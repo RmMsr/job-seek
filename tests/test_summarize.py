@@ -63,6 +63,73 @@ def test_summarize_defaults_to_job_posting_prompt():
     assert "job posting" in system.lower()
 
 
+def test_summarize_appends_valid_source_link_to_summary():
+    response = (
+        '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer", '
+        '"source_link": "https://example.com/apply"}'
+    )
+    client = _mock_client(response)
+    content = "Some job posting text.\nApply here: https://example.com/apply\nMore text."
+    _, _, summary = summarize(client, "llama3.2", content)
+    assert summary == "**Role:** ML Engineer\n\n**Original posting:** [https://example.com/apply](https://example.com/apply)"
+
+
+def test_summarize_rejects_source_link_not_present_in_content():
+    response = (
+        '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer", '
+        '"source_link": "https://hallucinated.example.com/made-up"}'
+    )
+    client = _mock_client(response)
+    content = "Some job posting text with no links at all."
+    _, _, summary = summarize(client, "llama3.2", content)
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_rejects_non_http_source_link():
+    response = (
+        '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer", '
+        '"source_link": "javascript:alert(1)"}'
+    )
+    client = _mock_client(response)
+    content = "Some text.\njavascript:alert(1)\nMore text."
+    _, _, summary = summarize(client, "llama3.2", content)
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_leaves_summary_unchanged_when_no_source_link():
+    response = '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer", "source_link": ""}'
+    client = _mock_client(response)
+    _, _, summary = summarize(client, "llama3.2", "content with no links")
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_leaves_summary_unchanged_when_source_link_field_missing():
+    # Model may omit the field entirely (e.g. older prompt caching, non-compliant model).
+    response = '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer"}'
+    client = _mock_client(response)
+    _, _, summary = summarize(client, "llama3.2", "content with no links")
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_handles_null_source_link_without_crashing():
+    # Model may emit null for optional fields (plausible, common LLM behavior).
+    # This should not raise AttributeError or silently lose the summary.
+    response = '{"title": "T", "headline": "H", "summary": "**Role:** ML Engineer", "source_link": null}'
+    client = _mock_client(response)
+    title, headline, summary = summarize(client, "llama3.2", "content with no links")
+    assert title == "T"
+    assert headline == "H"
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_lead_path_unaffected_by_source_link():
+    response = '{"organizations": ["Acme"], "headline": "H", "source_link": "https://example.com/apply"}'
+    client = _mock_client(response)
+    original = "Posted by U123:\n\nAcme is hiring, apply at https://example.com/apply"
+    _, _, summary = summarize(client, "llama3.2", original, content_type="lead")
+    assert summary == original
+
+
 def test_summarize_uses_lead_prompt_for_lead_content_type():
     client = _mock_client('{"organizations": ["Acme"], "headline": "H", "summary": "S"}')
     summarize(client, "llama3.2", "content", content_type="lead")
