@@ -16,6 +16,8 @@ If a change benefits from being exercised by hand rather than just the test suit
 
 Stop the dev server once manual testing is done; the throwaway DB copy is gitignored and gets discarded with the worktree at cleanup.
 
+When a change is UI-facing, after implementation leave the dev server running and hand the URL to the user so *they* can try it, rather than only exercising it yourself and moving straight to "finishing a development branch" options. Wait for their go-ahead before offering to merge/clean up.
+
 ## Finishing a change
 
 Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR:
