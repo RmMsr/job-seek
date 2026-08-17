@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
 from app.pipeline import run_fetch, run_reprocess_job, FetchResult, _make_fetcher
-from app.pipeline import run_add_job
+from app.pipeline import run_add_job, run_reevaluate_job
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
 from app.fetchers.base import RawJob
@@ -459,6 +459,133 @@ def test_run_reprocess_job_irrelevant_deletes_job(conn, source):
     assert any("Removed as not job-related" in m for m in messages)
 
 
+def test_run_reevaluate_job_rescopes_and_reassesses_without_moving_status(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="Old Title", company="Acme", raw_text="raw text",
+    )
+    q.update_job_pipeline(
+        conn, jid, simplified_content="clean text", content_type="job_posting",
+        title="Old Title", headline="old hook", summary="old summary",
+    )
+    scenario_id = q.get_scenarios(conn)[0]["id"]
+    q.upsert_job_score(conn, jid, scenario_id, 0.3, "old reasoning", "old-hash")
+    q.update_job_fit(conn, jid, 0.2, "old interest", 0.2, "old attainability", "old-phash")
+    q.update_job_feedback(conn, jid, "accepted", "great fit")
+    q.mark_job_gate_override(conn, jid)
+    q.upsert_scenario_feedback(conn, jid, scenario_id, "great candidate", "higher")
+
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize", return_value=("New Title", "new hook", "new summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.9, "now a great match")), \
+         patch("app.pipeline.assess_fit", return_value={
+             "interest": 0.8, "interest_reasoning": "strong interest",
+             "attainability": 0.7, "attainability_reasoning": "reachable",
+         }):
+        messages, _ = _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", job, scenarios, profile))
+
+    updated = q.get_job(conn, jid)
+    assert updated["status"] == "accepted"
+    assert updated["title"] == "New Title"
+    assert updated["headline"] == "new hook"
+    assert updated["summary"] == "new summary"
+    assert updated["interest_score"] == pytest.approx(0.8)
+    assert updated["attainability_score"] == pytest.approx(0.7)
+    assert updated["gate_override"] == 1
+    score = q.get_job_score(conn, jid, scenario_id)
+    assert score["relevance_score"] == pytest.approx(0.9)
+    scores = q.get_job_scores(conn, jid)
+    scenario_feedback_row = next(s for s in scores if s["scenario_id"] == scenario_id)
+    assert scenario_feedback_row["feedback_note"] == "great candidate"
+    assert scenario_feedback_row["feedback_direction"] == "higher"
+    assert any("Scored 0.9" in m for m in messages)
+    assert any("Fit 0.80/0.70" in m for m in messages)
+
+
+def test_run_reevaluate_job_always_recomputes_even_when_unchanged(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize", return_value=("T", "h", "s")), \
+         patch("app.pipeline.evaluate", return_value=(0.5, "reason")) as mock_evaluate, \
+         patch("app.pipeline.assess_fit", return_value={
+             "interest": 0.5, "interest_reasoning": "r",
+             "attainability": 0.5, "attainability_reasoning": "r",
+         }) as mock_assess:
+        _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", q.get_job(conn, jid), scenarios, profile))
+        _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", q.get_job(conn, jid), scenarios, profile))
+
+    assert mock_evaluate.call_count == 2
+    assert mock_assess.call_count == 2
+
+
+def test_run_reevaluate_job_skips_rejected_job(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, jid, "rejected", "no")
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize") as mock_summarize, \
+         patch("app.pipeline.evaluate") as mock_evaluate, \
+         patch("app.pipeline.assess_fit") as mock_assess_fit:
+        messages, _ = _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", job, scenarios, profile))
+
+    mock_summarize.assert_not_called()
+    mock_evaluate.assert_not_called()
+    mock_assess_fit.assert_not_called()
+    assert any("Skipped" in m for m in messages)
+    assert q.get_job(conn, jid)["status"] == "rejected"
+
+
+def test_run_reevaluate_job_skips_trash_job(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, jid, "trash", "no")
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize") as mock_summarize:
+        messages, _ = _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", job, scenarios, profile))
+
+    mock_summarize.assert_not_called()
+    assert any("Skipped" in m for m in messages)
+    assert q.get_job(conn, jid)["status"] == "trash"
+
+
+def test_run_reevaluate_job_skips_non_scoreable_content_type(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="error")
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize") as mock_summarize:
+        messages, _ = _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", job, scenarios, profile))
+
+    mock_summarize.assert_not_called()
+    assert any("Skipped" in m for m in messages)
+
+
 def test_run_fetch_keeps_scraped_title_when_ai_title_empty(conn, source):
     raw_jobs = [RawJob(url="http://example.com/job/1", title="scraped title", company="Acme", raw_text="<p>hi</p>")]
     client = _mock_client(
@@ -527,17 +654,27 @@ def test_run_reassess_fit_updates_gate_passed_jobs(conn, source):
     assert any("Recomputing fit scores for 1 job" in m for m in messages)
 
 
-def test_run_reassess_fit_skips_jobs_below_gate(conn, source):
+def test_run_reassess_fit_includes_accepted_and_gate_failed_jobs(conn, source):
     scenario_id = q.get_scenarios(conn)[0]["id"]
-    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
-    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Good role")
-    q.upsert_job_score(conn, jid, scenario_id, 0.3, "weak", "hash1")  # below default 0.7 gate
+    accepted_id = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, accepted_id, simplified_content="clean", content_type="job_posting", summary="Good role")
+    q.upsert_job_score(conn, accepted_id, scenario_id, 0.9, "great", "hash1")
+    q.update_job_feedback(conn, accepted_id, "accepted", "")
+
+    gate_failed_id = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/2", title="U", company="C", raw_text="r")
+    q.update_job_pipeline(conn, gate_failed_id, simplified_content="clean", content_type="job_posting", summary="Weak role")
+    q.upsert_job_score(conn, gate_failed_id, scenario_id, 0.3, "weak", "hash1")  # below default 0.7 gate
 
     client = MagicMock()
-    _drain(run_reassess_fit(conn, client, "llama3.2"))
+    choice = MagicMock()
+    choice.message.content = '{"interest": 0.8, "interest_reasoning": "a", "attainability": 0.6, "attainability_reasoning": "b"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
 
-    assert client.chat.completions.create.call_count == 0
-    assert q.get_job(conn, jid)["fit_score"] is None
+    messages, updated_count = _drain(run_reassess_fit(conn, client, "llama3.2"))
+
+    assert updated_count == 2
+    assert q.get_job(conn, accepted_id)["interest_score"] == pytest.approx(0.8)
+    assert q.get_job(conn, gate_failed_id)["interest_score"] == pytest.approx(0.8)
 
 
 def test_run_reassess_fit_skips_already_current_profile_hash(conn, source):

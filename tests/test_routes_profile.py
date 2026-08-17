@@ -20,24 +20,8 @@ def test_profile_save_shows_fading_confirmation(client, conn):
     assert '<div class="save-confirmation" aria-live="polite">Saved.</div>' in resp.text
 
 
-from unittest.mock import patch
-
-
-def test_reassess_fit_streams_progress(client, conn):
-    def _fake_run_reassess_fit(conn, client, model):
-        yield "Recomputing fit scores for 0 job(s)"
-        yield "Fit recompute complete: 0 job(s) updated"
-        return 0
-
-    with patch("app.routes.profile.run_reassess_fit", side_effect=_fake_run_reassess_fit):
-        resp = client.post("/profile/reassess-fit")
-
-    assert resp.status_code == 200
-    assert "Recomputing fit scores" in resp.text
-    assert "Fit recompute complete" in resp.text
-
-
-def test_profile_page_has_reassess_fit_button(client):
+def test_profile_page_has_reevaluate_everything_button(client):
     resp = client.get("/profile")
     assert resp.status_code == 200
-    assert 'data-progress-url="/profile/reassess-fit"' in resp.text
+    assert 'data-progress-url="/scenarios/reevaluate"' in resp.text
+    assert "Re-evaluate everything" in resp.text

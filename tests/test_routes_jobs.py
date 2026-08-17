@@ -298,6 +298,37 @@ def test_job_expand_omits_pass_as_new_button_when_already_overridden(client, con
     assert "Pass as new" not in resp.text
 
 
+def test_job_expand_shows_reevaluate_button_when_new(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/reevaluate"' in resp.text
+
+
+def test_job_expand_shows_reevaluate_button_when_accepted(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/reevaluate"' in resp.text
+
+
+def test_job_expand_omits_reevaluate_button_when_rejected(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "rejected", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/reevaluate"' not in resp.text
+
+
+def test_job_expand_omits_reevaluate_button_when_trash(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "trash", "")
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert f'data-progress-url="/jobs/{jid}/reevaluate"' not in resp.text
+
+
 def test_job_feedback_without_note_succeeds(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted"})
@@ -311,7 +342,7 @@ def test_job_expand_note_field_is_optional(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert "Note (optional)" in resp.text
+    assert "Job note (optional)" in resp.text
     assert '<textarea name="note" required' not in resp.text
 
 
@@ -659,6 +690,52 @@ def test_job_bulk_reset_button_has_progress_oob_and_filter_query(client, conn):
     assert 'data-progress-oob="1"' in resp.text
 
 
+def test_job_bulk_reevaluate_button_has_progress_oob_and_filter_query(client, conn):
+    resp = client.get("/jobs?status=accepted")
+    assert resp.status_code == 200
+    assert 'data-progress-url="/jobs/bulk-reevaluate?status=accepted&content_type="' in resp.text
+    assert 'data-progress-jobs' in resp.text
+
+def test_job_bulk_reevaluate_streams_progress_for_each_job(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="role")
+    q.upsert_job_score(conn, j2, scenario_id, 0.4, "reason", "hash1")
+
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
+
+    assert resp.status_code == 200
+    assert resp.text.count("Scored 0.85") == 2
+    assert "Re-evaluation complete: 2 job(s)" in resp.text
+
+
+def test_job_bulk_reevaluate_stream_includes_per_job_html_and_counts_chunks(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="role")
+    q.upsert_job_score(conn, j2, scenario_id, 0.4, "reason", "hash1")
+
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
+
+    assert resp.status_code == 200
+    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j2}">') == 1
+    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+
+
+def test_job_bulk_reevaluate_preserves_status(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, j1, "accepted", "good fit")
+
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1]})
+
+    assert resp.status_code == 200
+    assert q.get_job(conn, j1)["status"] == "accepted"
+
+
 def _fake_run_pass_as_new(conn, client, model, job, profile):
     yield f"Bypassing gate threshold: {job['url']}"
     q.mark_job_gate_override(conn, job["id"])
@@ -683,6 +760,47 @@ def test_job_pass_as_new_streams_progress_and_marks_override(client, conn):
 def test_job_pass_as_new_unknown_job_returns_404(client, conn):
     resp = client.post("/jobs/999/pass-as-new")
     assert resp.status_code == 404
+
+
+def _fake_run_reevaluate_job(conn, client, model, job, scenarios, profile, progress_prefix=""):
+    yield f"{progress_prefix}Scored 0.85 for 'Remote ML': {job['url']}"
+    q.upsert_job_score(conn, job["id"], scenarios[0]["id"], 0.85, "now a match", "hash-new")
+    yield f"{progress_prefix}Fit 0.75/0.65: {job['url']}"
+    q.update_job_fit(conn, job["id"], 0.75, "strong interest", 0.65, "reachable", "phash-new")
+
+
+def test_job_reevaluate_streams_progress_and_updates_scores(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "good fit")
+
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post(f"/jobs/{jid}/reevaluate")
+
+    assert resp.status_code == 200
+    assert "Scored 0.85" in resp.text
+    assert "Fit 0.75/0.65" in resp.text
+    assert q.get_job(conn, jid)["status"] == "accepted"
+
+
+def test_job_reevaluate_unknown_job_returns_404(client, conn):
+    resp = client.post("/jobs/999/reevaluate")
+    assert resp.status_code == 404
+
+
+def test_job_reevaluate_stream_ends_with_html_chunk_for_updated_row(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post(f"/jobs/{jid}/reevaluate")
+    assert resp.status_code == 200
+    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+
+
+def test_job_reevaluate_stream_includes_counts_html_chunk(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
+        resp = client.post(f"/jobs/{jid}/reevaluate")
+    assert resp.status_code == 200
+    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):

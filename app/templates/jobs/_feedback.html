@@ -83,6 +83,15 @@
         Pass as new
       </button>
     {% endif %}
+    {% if job.status in ("new", "accepted") %}
+      <button type="button" class="btn"
+        data-progress-url="/jobs/{{ job.id }}/reevaluate{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
+        data-progress-oob="1"
+        data-progress-display="#reset-progress-{{ job.id }}"
+        title="Re-score this job against every scenario and refresh its profile fit, without moving it out of its current status.">
+        Re-evaluate
+      </button>
+    {% endif %}
     <button type="button" class="btn btn-reset"
       data-progress-url="/jobs/{{ job.id }}/reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
       data-progress-oob="1"

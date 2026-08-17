@@ -5,11 +5,13 @@
       <span>Scenario alignment</span>
       <span class="score-compare-summary-scores">
         {% for js in job_scores %}
-          <span class="tag">{{ js.scenario_name }}</span>
-          {% if js.relevance_score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-          {% elif js.relevance_score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-          {% else %}<span class="score-badge score-low">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-          {% endif %}
+          <span class="score-compare-pair">
+            <span class="tag">{{ js.scenario_name }}</span>
+            {% if js.relevance_score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
+            {% elif js.relevance_score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
+            {% else %}<span class="score-badge score-low">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
+            {% endif %}
+          </span>
         {% endfor %}
       </span>
     </summary>

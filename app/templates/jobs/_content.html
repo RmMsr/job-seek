@@ -35,6 +35,14 @@
   <div class="decision-panel-left">
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
+      <button type="button" class="btn"
+        data-progress-url="/jobs/bulk-reevaluate{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
+        data-progress-jobs
+        data-progress-oob="1"
+        data-progress-display="#bulk-reevaluate-progress"
+        title="Re-score each selected job against every scenario and refresh its profile fit, without moving any of them out of their current status.">
+        Re-evaluate
+      </button>
       <button type="button" class="btn btn-reset"
         data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
         data-progress-jobs
@@ -46,6 +54,7 @@
     </details>
     {% include "jobs/_bulk_actions.html" %}
   </div>
+  <div class="reset-progress" id="bulk-reevaluate-progress" aria-live="polite"></div>
   <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>
 </div>
 {% if jobs %}

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model, get_config
 from app.db import queries as q
-from app.pipeline import run_reprocess_job, run_pass_as_new, run_add_job, run_fetch
+from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
 from app.fetchers.links import extract_links
 from app.fetchers.content import (
     has_enough_content, FetchError, NoContentError, fetch_url_html, extract_text_or_raise, extract_page_title,
@@ -328,6 +328,38 @@ def job_pass_as_new(
     return StreamingResponse(stream(), media_type="text/plain")
 
 
+@router.post("/jobs/{job_id}/reevaluate")
+def job_reevaluate(
+    job_id: int,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    job = q.get_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    filter_ctx = _filter_context(request)
+
+    def stream():
+        gen = run_reevaluate_job(conn, client, model, job, scenarios, profile)
+        try:
+            while True:
+                yield next(gen) + "\n"
+        except StopIteration:
+            pass
+        html = _render_updated_job_html(conn, request, job_id, filter_ctx)
+        yield "HTML:" + html.replace("\n", "") + "\n"
+        counts_html = templates.get_template("jobs/_counts_oob.html").render(
+            request=request, counts=q.get_job_counts(conn)
+        )
+        yield "HTML:" + counts_html.replace("\n", "")
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
 @router.post("/jobs/bulk-reset")
 def job_bulk_reset(
     request: Request,
@@ -360,6 +392,42 @@ def job_bulk_reset(
         )
         yield "HTML:" + counts_html.replace("\n", "") + "\n"
         yield f"Reset complete: {len(job_ids)} job(s) reprocessed\n"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
+@router.post("/jobs/bulk-reevaluate")
+def job_bulk_reevaluate(
+    request: Request,
+    job_ids: list[int] = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+    client: openai.OpenAI = Depends(get_ai_client),
+    model: str = Depends(get_model),
+):
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    filter_ctx = _filter_context(request)
+
+    def stream():
+        yield f"Re-evaluating {len(job_ids)} job(s)\n"
+        for idx, job_id in enumerate(job_ids, start=1):
+            job = q.get_job(conn, job_id)
+            if not job:
+                continue
+            prefix = f"[{idx}/{len(job_ids)}] "
+            gen = run_reevaluate_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
+            try:
+                while True:
+                    yield next(gen) + "\n"
+            except StopIteration:
+                pass
+            html = _render_updated_job_html(conn, request, job_id, filter_ctx)
+            yield "HTML:" + html.replace("\n", "") + "\n"
+        counts_html = templates.get_template("jobs/_counts_oob.html").render(
+            request=request, counts=q.get_job_counts(conn)
+        )
+        yield "HTML:" + counts_html.replace("\n", "") + "\n"
+        yield f"Re-evaluation complete: {len(job_ids)} job(s) updated\n"
 
     return StreamingResponse(stream(), media_type="text/plain")
 

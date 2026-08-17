@@ -38,8 +38,11 @@
     .score-compare-details summary::-webkit-details-marker { display:none; }
     .score-compare-details summary::before { content:"▸"; color:#888; }
     .score-compare-details[open] summary::before { content:"▾"; }
-    .score-compare-details summary span:first-child { font-weight:bold; margin-right:0.2rem; }
+    .score-compare-details summary > span:first-child { font-weight:bold; margin-right:0.2rem; }
     .score-compare-details summary .score-compare-summary-scores { display:contents; }
+    .score-compare-pair { display:inline-flex; align-items:center; gap:0; border-radius:999px; overflow:hidden; }
+    .score-compare-pair .tag { border-radius:0; margin:0; font-size:0.85em; }
+    .score-compare-pair .score-badge { border-radius:0; margin:0; }
     .score-compare-details[open] summary .score-compare-summary-scores { display:none; }
     .score-compare-details > form { margin-top:0.75rem; }
     .score-tabs { display:flex; flex-wrap:wrap; }

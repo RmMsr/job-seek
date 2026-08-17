@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from app.deps import get_db, get_ai_client, get_model
 from app.db import queries as q
 from app.ai.refine import propose_criteria, match_removal_target
-from app.pipeline import run_reevaluate, count_jobs_needing_reevaluation
+from app.pipeline import run_reevaluate, run_reassess_fit
 from app.template_env import templates
 import openai
 
@@ -92,28 +92,29 @@ def reevaluate_all_scenarios(
     scenarios = q.get_scenarios(conn)
 
     def stream():
-        # Cheap DB-only reads, no LLM calls: precompute per-scenario counts so
-        # per-job progress lines can report position against the grand total,
-        # not just each scenario's own count.
-        counts = [count_jobs_needing_reevaluation(conn, s) for s in scenarios]
-        job_total = sum(counts)
-
-        yield f"Re-evaluating {len(scenarios)} scenario(s), {job_total} job(s) total\n"
+        yield f"Re-evaluating {len(scenarios)} scenario(s)\n"
         total_updated = 0
-        job_offset = 0
         for idx, scenario in enumerate(scenarios, start=1):
             label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
-            gen = run_reevaluate(
-                conn, client, model, scenario,
-                job_offset=job_offset, job_total=job_total, scenario_label=label,
-            )
+            gen = run_reevaluate(conn, client, model, scenario, scenario_label=label)
             try:
                 while True:
                     yield next(gen) + "\n"
             except StopIteration as stop:
                 total_updated += stop.value
-                job_offset += counts[idx - 1]
-        yield f"All scenarios re-evaluated: {total_updated} job(s) updated across {len(scenarios)} scenario(s)\n"
+
+        fit_gen = run_reassess_fit(conn, client, model)
+        fit_updated = 0
+        try:
+            while True:
+                yield next(fit_gen) + "\n"
+        except StopIteration as stop:
+            fit_updated = stop.value
+
+        yield (
+            f"All scenarios re-evaluated: {total_updated} job(s) updated across "
+            f"{len(scenarios)} scenario(s); fit recomputed for {fit_updated} job(s)\n"
+        )
 
     return StreamingResponse(stream(), media_type="text/plain")
 
@@ -304,23 +305,3 @@ async def accept_proposals(
     )
     html += f'<div id="proposals-area-{scenario_id}" hx-swap-oob="true" style="margin-top:0.75rem; width:100%;"></div>'
     return HTMLResponse(content=html)
-
-
-@router.post("/scenarios/{scenario_id}/reevaluate")
-def reevaluate_jobs(
-    scenario_id: int,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    scenario = _get_scenario_or_404(conn, scenario_id)
-
-    def stream():
-        gen = run_reevaluate(conn, client, model, scenario)
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration:
-            pass
-
-    return StreamingResponse(stream(), media_type="text/plain")

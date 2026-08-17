@@ -500,8 +500,9 @@ def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
-        resp = client.post(f"/scenarios/{sid}/reevaluate")
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        resp = client.post("/scenarios/reevaluate")
 
     assert resp.status_code == 200
     assert "Re-evaluating 1 job(s)" in resp.text
@@ -510,6 +511,44 @@ def test_reevaluate_streams_progress_and_updates_jobs(client, conn):
     assert score["relevance_score"] == pytest.approx(0.75)
     job = q.get_job(conn, job_id)
     assert job["summary"] == "Updated summary"
+
+
+def test_reevaluate_includes_accepted_jobs(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_feedback(conn, job_id, "accepted", "")
+
+    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        resp = client.post("/scenarios/reevaluate")
+
+    assert resp.status_code == 200
+    assert "Re-evaluating 1 job(s)" in resp.text
+    score = q.get_job_score(conn, job_id, sid)
+    assert score["relevance_score"] == pytest.approx(0.75)
+
+
+def test_reevaluate_excludes_rejected_and_trash_jobs(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    rejected_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="A", company="C", raw_text="r")
+    q.update_job_pipeline(conn, rejected_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_feedback(conn, rejected_id, "rejected", "")
+    trash_id = q.insert_job(conn, source_id=source_id, url="http://job/2", title="B", company="C", raw_text="r")
+    q.update_job_pipeline(conn, trash_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_feedback(conn, trash_id, "trash", "")
+
+    with patch("app.pipeline.summarize", return_value=("Title", "Hook", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        resp = client.post("/scenarios/reevaluate")
+
+    assert "Re-evaluating 0 job(s)" in resp.text
 
 
 def test_reevaluate_skips_jobs_already_current(client, conn):
@@ -521,9 +560,10 @@ def test_reevaluate_skips_jobs_already_current(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate:
-        client.post(f"/scenarios/{sid}/reevaluate")
-        resp = client.post(f"/scenarios/{sid}/reevaluate")
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate, \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        client.post("/scenarios/reevaluate")
+        resp = client.post("/scenarios/reevaluate")
 
     assert mock_evaluate.call_count == 1
     assert "skipping 1 already current" in resp.text
@@ -540,17 +580,18 @@ def test_reevaluate_all_scenarios_streams_combined_progress(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         resp = client.post("/scenarios/reevaluate")
 
     assert resp.status_code == 200
     assert "Re-evaluating 2 scenario(s)" in resp.text
-    assert "All scenarios re-evaluated: 2 job(s) updated across 2 scenario(s)" in resp.text
+    assert "All scenarios re-evaluated: 2 job(s) updated across 2 scenario(s); fit recomputed for 1 job(s)" in resp.text
     assert q.get_job_score(conn, job_id, sid_a) is not None
     assert q.get_job_score(conn, job_id, sid_b) is not None
 
 
-def test_reevaluate_all_scenarios_shows_global_job_position(client, conn):
+def test_reevaluate_all_scenarios_counts_scenarios_and_jobs_independently(client, conn):
     sid_a = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid_a, "Must be remote", "must")
     sid_b = q.insert_scenario(conn, "Robotics", "")
@@ -560,26 +601,42 @@ def test_reevaluate_all_scenarios_shows_global_job_position(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         resp = client.post("/scenarios/reevaluate")
 
-    assert "[Scenario 1/2: Remote ML] [1/2] Re-scored" in resp.text
-    assert "[Scenario 2/2: Robotics] [2/2] Re-scored" in resp.text
+    # One job re-scored per scenario: the scenario counter climbs 1/2 -> 2/2,
+    # but the job counter resets per scenario rather than accumulating across
+    # scenarios (there is only ever 1 job to score in each one).
+    assert "[Scenario 1/2: Remote ML] [1/1] Re-scored" in resp.text
+    assert "[Scenario 2/2: Robotics] [1/1] Re-scored" in resp.text
 
 
-def test_reevaluate_single_scenario_route_unaffected_by_global_labeling(client, conn):
+def test_reevaluate_all_scenarios_recomputes_fit_for_accepted_and_gate_failed_jobs(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
-    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
-        resp = client.post(f"/scenarios/{sid}/reevaluate")
+    accepted_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="A", company="C", raw_text="r")
+    q.update_job_pipeline(conn, accepted_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_feedback(conn, accepted_id, "accepted", "")
 
-    assert "[1/1] Re-scored" in resp.text
-    assert "Scenario 1/1" not in resp.text
+    gate_failed_id = q.insert_job(conn, source_id=source_id, url="http://job/2", title="B", company="C", raw_text="r")
+    q.update_job_pipeline(conn, gate_failed_id, simplified_content="clean", content_type="job_posting")
+
+    fit_result = {
+        "interest": 0.8, "interest_reasoning": "a",
+        "attainability": 0.6, "attainability_reasoning": "b",
+    }
+    with patch("app.pipeline.summarize", return_value=("Title", "Hook", "Updated summary")), \
+         patch("app.pipeline.evaluate", return_value=(0.2, "weak")), \
+         patch("app.pipeline.assess_fit", return_value=fit_result):
+        resp = client.post("/scenarios/reevaluate")
+
+    assert resp.status_code == 200
+    assert "fit recomputed for 2 job(s)" in resp.text
+    assert q.get_job(conn, accepted_id)["interest_score"] == pytest.approx(0.8)
+    assert q.get_job(conn, gate_failed_id)["interest_score"] == pytest.approx(0.8)
 
 
 def test_reevaluate_keeps_existing_title_when_ai_title_empty(client, conn):
@@ -590,8 +647,9 @@ def test_reevaluate_keeps_existing_title_when_ai_title_empty(client, conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     with patch("app.pipeline.summarize", return_value=("", "", "Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
-        client.post(f"/scenarios/{sid}/reevaluate")
+         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        client.post("/scenarios/reevaluate")
 
     job = q.get_job(conn, job_id)
     assert job["title"] == "ML Eng"
@@ -684,4 +742,3 @@ def test_scenarios_page_shows_feedback_refinement_section(client, conn):
     resp = client.get("/scenarios")
 
     assert "Feedback" in resp.text and "Refinement" in resp.text
-    assert "Re-evaluate jobs" in resp.text

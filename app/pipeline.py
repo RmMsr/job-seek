@@ -219,19 +219,60 @@ def run_pass_as_new(
     )
 
 
+def run_reevaluate_job(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job: dict,
+    scenarios: list[dict],
+    profile: str,
+    *,
+    progress_prefix: str = "",
+) -> Generator[str, None, None]:
+    if job["status"] in ("rejected", "trash") or job["content_type"] not in ("job_posting", "lead"):
+        yield _progress(f"{progress_prefix}Skipped (not eligible for re-evaluation): {job['url']}")
+        return
+
+    ai_title, headline, new_summary = summarize(
+        client, model, job["simplified_content"], content_type=job["content_type"]
+    )
+    q.update_job_pipeline(
+        conn, job["id"],
+        simplified_content=job["simplified_content"],
+        content_type=job["content_type"],
+        title=ai_title or job["title"],
+        headline=headline,
+        summary=new_summary,
+    )
+
+    for scenario in scenarios:
+        criteria = q.get_criteria(conn, scenario["id"])
+        version_hash = compute_version_hash(scenario, criteria)
+        score, reasoning = evaluate(client, model, scenario, criteria, new_summary)
+        q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, version_hash)
+        yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {job['url']}")
+
+    result = assess_fit(client, model, profile, new_summary)
+    q.update_job_fit(
+        conn, job["id"],
+        result["interest"], result["interest_reasoning"],
+        result["attainability"], result["attainability_reasoning"],
+        compute_profile_hash(profile),
+    )
+    yield _progress(
+        f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {job['url']}"
+    )
+
+
 def _eligible_for_reevaluation(conn: sqlite3.Connection, scenario: dict) -> tuple[list[dict], int, list[dict], str]:
     criteria = q.get_criteria(conn, scenario["id"])
     current_hash = compute_version_hash(scenario, criteria)
-    eligible = [j for j in q.get_jobs(conn, status="new") if j["content_type"] in ("job_posting", "lead")]
+    candidates = q.get_jobs(conn, status="new") + q.get_jobs(conn, status="accepted")
+    eligible = [j for j in candidates if j["content_type"] in ("job_posting", "lead")]
     existing_hashes = q.get_job_score_hashes(conn, scenario["id"])
     to_evaluate = [j for j in eligible if existing_hashes.get(j["id"]) != current_hash]
     skipped = len(eligible) - len(to_evaluate)
     return to_evaluate, skipped, criteria, current_hash
-
-
-def count_jobs_needing_reevaluation(conn: sqlite3.Connection, scenario: dict) -> int:
-    to_evaluate, _, _, _ = _eligible_for_reevaluation(conn, scenario)
-    return len(to_evaluate)
 
 
 def run_reevaluate(
@@ -240,12 +281,10 @@ def run_reevaluate(
     model: str,
     scenario: dict,
     *,
-    job_offset: int = 0,
-    job_total: int | None = None,
     scenario_label: str = "",
 ) -> Generator[str, None, int]:
     to_evaluate, skipped, criteria, current_hash = _eligible_for_reevaluation(conn, scenario)
-    total = job_total if job_total is not None else len(to_evaluate)
+    total = len(to_evaluate)
 
     msg = f"Re-evaluating {len(to_evaluate)} job(s) for scenario '{scenario['name']}'"
     if skipped:
@@ -269,7 +308,7 @@ def run_reevaluate(
             summary=new_summary,
         )
         q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, current_hash)
-        yield _progress(f"{scenario_label}[{job_offset + i}/{total}] Re-scored {score}: {job['title'] or job['url']}")
+        yield _progress(f"{scenario_label}[{i}/{total}] Re-scored {score}: {job['title'] or job['url']}")
 
     yield _progress(f"{scenario_label}Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
     return len(to_evaluate)
@@ -282,10 +321,8 @@ def run_reassess_fit(
 ) -> Generator[str, None, int]:
     profile = q.get_profile(conn)
     current_hash = compute_profile_hash(profile)
-    eligible = [
-        j for j in q.get_jobs(conn, status="new", gate_status="passed")
-        if j["content_type"] in ("job_posting", "lead")
-    ]
+    candidates = q.get_jobs(conn, status="new") + q.get_jobs(conn, status="accepted")
+    eligible = [j for j in candidates if j["content_type"] in ("job_posting", "lead")]
     to_assess = [j for j in eligible if j["profile_version_hash"] != current_hash]
     skipped = len(eligible) - len(to_assess)
 

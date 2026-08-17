@@ -11,11 +11,9 @@
   <button type="submit" class="btn">Save</button>
 </form>
 <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid #dee2e6;">
-  <button type="button" class="btn" data-progress-url="/profile/reassess-fit"
-    data-progress-display="#reassess-progress"
-    title="Recompute the interest/attainability scorecard for every job that already passed a scenario gate but has a stale or missing fit score.">
-    Recompute fit scores
+  <button class="btn" data-progress-url="/scenarios/reevaluate"
+    title="Re-score every new/accepted job against every scenario and refresh its profile fit.">
+    Re-evaluate everything
   </button>
-  <div class="reset-progress" id="reassess-progress" aria-live="polite"></div>
 </div>
 {% endblock %}
