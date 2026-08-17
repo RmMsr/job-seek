@@ -34,6 +34,14 @@
     .permalink-icon { text-decoration:none; font-size:0.95em; padding: 0.35rem; line-height: 1; }
     .score-box { margin-top:0.75rem; padding:0.75rem; border:1px solid #dee2e6; border-radius:6px; background:#f8f9fa; }
     .score-box dl.job-tags { margin-bottom:0.5rem; }
+    .score-compare-details summary { cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; list-style:none; }
+    .score-compare-details summary::-webkit-details-marker { display:none; }
+    .score-compare-details summary::before { content:"▸"; color:#888; }
+    .score-compare-details[open] summary::before { content:"▾"; }
+    .score-compare-details summary span:first-child { font-weight:bold; margin-right:0.2rem; }
+    .score-compare-details summary .score-compare-summary-scores { display:contents; }
+    .score-compare-details[open] summary .score-compare-summary-scores { display:none; }
+    .score-compare-details > form { margin-top:0.75rem; }
     .score-tabs { display:flex; flex-wrap:wrap; }
     .score-tab-input { position:absolute; opacity:0; width:0; height:0; }
     .score-tab-card { display:flex; align-items:center; gap:0.3rem; padding:0.3rem 0.6rem; margin:0 0.3rem 0.5rem 0; border:1px solid #dee2e6; border-radius:6px; cursor:pointer; background:#fff; }

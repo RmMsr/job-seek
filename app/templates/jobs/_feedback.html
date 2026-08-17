@@ -56,7 +56,7 @@
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
     {% if is_detail_page %}<input type="hidden" name="redirect" value="/jobs">{% endif %}
-    <label>Note (optional):
+    <label>Job note (optional):
       <textarea name="note" placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
     </label>
     <div class="actions" role="group" aria-label="Decision">
