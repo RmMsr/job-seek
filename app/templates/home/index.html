@@ -39,12 +39,13 @@
       <ol>
         <li><strong>Classify</strong> — An LLM tags each posting as a job posting, a lead, irrelevant, or an error. Irrelevant postings are discarded rather than stored.</li>
         <li><strong>Summarize</strong> — Job postings and leads get an AI-written title, headline, and summary.</li>
-        <li><strong>Score</strong> — For each active scenario, the summary is evaluated against your <strong>Profile</strong> (who you are — skills, interests, constraints, set once) and that scenario's <strong>Criteria</strong> (what you're looking for right now — must/prefer/avoid, refined over time) to produce a relevance score and reasoning.</li>
+        <li><strong>Scenario alignment</strong> — For each active scenario, the summary is evaluated against that scenario's <strong>Criteria</strong> (what you're looking for right now — must/prefer/avoid, refined over time) to produce a relevance score. Clearing at least one scenario's gate threshold is what makes a posting count as relevant.</li>
+        <li><strong>Profile fit</strong> — Postings that clear a scenario's gate are also evaluated against your <strong>Profile</strong> (who you are — skills, interests, constraints, set once) to score interest and attainability. This fit score is used to rank the Jobs list, not to filter it.</li>
       </ol>
     </li>
-    <li><strong>Jobs</strong> — The Jobs list surfaces everything sorted by score. You accept, reject, or trash, each with a short note.
+    <li><strong>Jobs</strong> — The Jobs list surfaces everything sorted by fit score. You accept, reject, or trash, each with a short note.
       <ol>
-        <li><strong>Refine</strong> — Your notes accumulate as feedback. The Scenarios page can propose criteria updates based on what you've been accepting and rejecting — closing the loop back into Score.</li>
+        <li><strong>Refine</strong> — Your notes accumulate as feedback. The Scenarios page can propose criteria updates based on what you've been accepting and rejecting — closing the loop back into Scenario alignment.</li>
       </ol>
     </li>
   </ol>

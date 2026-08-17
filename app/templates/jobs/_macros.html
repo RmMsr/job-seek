@@ -1,10 +1,11 @@
 {% macro fit_badge_fields(job) %}
 {% if job.fit_score is not none %}
+{% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format(job.interest_score * 100, job.attainability_score * 100) %}
 <dt class="sr-only">Fit score</dt>
 <dd>
-  {% if job.fit_score >= 0.7 %}<span class="score-badge score-high">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
-  {% elif job.fit_score >= 0.4 %}<span class="score-badge score-mid">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
-  {% else %}<span class="score-badge score-low">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+  {% if job.fit_score >= 0.7 %}<span class="score-badge score-high" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+  {% elif job.fit_score >= 0.4 %}<span class="score-badge score-mid" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+  {% else %}<span class="score-badge score-low" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
   {% endif %}
 </dd>
 {% endif %}
