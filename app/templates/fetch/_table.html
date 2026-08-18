@@ -1,0 +1,63 @@
+{% if sources %}
+  <table style="width:100%; border-collapse:collapse;">
+    <colgroup>
+      <col>
+      <col>
+      <col style="width:1%">
+      <col style="width:1%">
+      <col style="width:1%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Source</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6;">Last run</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6; white-space:nowrap;">New / Found</th>
+        <th style="text-align:left; padding:0.5rem; border-bottom:2px solid #dee2e6; white-space:nowrap;">Lifetime</th>
+        <th style="padding:0.5rem; border-bottom:2px solid #dee2e6;"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for source in sources %}
+      {% set run = runs_by_source.get(source.id) %}
+      {% set stats = stats_by_source.get(source.id) %}
+      <tr id="fetch-row-{{ source.id }}" class="source-row">
+        <td style="padding:0.5rem;">
+          <strong>{{ source.name }}</strong>
+        </td>
+        <td style="padding:0.5rem;">
+          <span style="white-space:nowrap;">{% if stats and stats.last_success_at %}{{ stats.last_success_at }}{% else %}—{% endif %}</span>
+          {% if run and run.error %}<br><span style="color:#dc3545;">⚠ {{ run.error }}</span>{% endif %}
+        </td>
+        <td style="padding:0.5rem; white-space:nowrap;">
+          {% if run %}{{ run.jobs_new }} / {{ run.jobs_found }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:0.5rem; white-space:nowrap;">
+          {% if stats %}
+            {{ stats.run_count }} run{{ 's' if stats.run_count != 1 else '' }}, {{ stats.total_new }} added
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td style="padding:0.5rem; white-space:nowrap;">
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            {% if source.enabled %}
+              <button class="btn" data-progress-url="/fetch/{{ source.id }}"
+                data-progress-display="#fetch-progress-{{ source.id }}">Fetch</button>
+            {% else %}
+              <span style="color:#999;">disabled</span>
+            {% endif %}
+            <a href="/jobs?source_id={{ source.id }}" class="btn">View all jobs</a>
+          </div>
+        </td>
+      </tr>
+      <tr class="fetch-progress-row" style="border-bottom:1px solid #eee;">
+        <td colspan="5" style="padding:0 0.5rem;">
+          <div id="fetch-progress-{{ source.id }}" class="reset-progress"></div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>No sources configured.</p>
+{% endif %}

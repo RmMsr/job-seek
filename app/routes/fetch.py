@@ -11,8 +11,13 @@ import openai
 router = APIRouter()
 
 
-@router.get("/fetch", response_class=HTMLResponse)
-def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
+    rendered = templates.get_template(template_name).render(**context)
+    prefix = "NOTICE:warning:" if level == "warning" else "NOTICE:"
+    return prefix + rendered.replace("\n", "") + "\n"
+
+
+def _fetch_panel_context(conn: sqlite3.Connection) -> dict:
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"]
     runs = q.get_recent_fetch_runs(conn)
     runs_by_source = {}
@@ -21,11 +26,12 @@ def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         if sid not in runs_by_source:
             runs_by_source[sid] = run
     stats_by_source = q.get_fetch_stats_by_source(conn)
-    return templates.TemplateResponse(
-        request,
-        "fetch/panel.html",
-        {"sources": sources, "runs_by_source": runs_by_source, "stats_by_source": stats_by_source},
-    )
+    return {"sources": sources, "runs_by_source": runs_by_source, "stats_by_source": stats_by_source}
+
+
+@router.get("/fetch", response_class=HTMLResponse)
+def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    return templates.TemplateResponse(request, "fetch/panel.html", _fetch_panel_context(conn))
 
 
 @router.post("/fetch/all")
@@ -51,7 +57,13 @@ def trigger_fetch_all(
                 result = stop.value
                 total_found += result.jobs_found
                 total_new += result.jobs_new
-        yield f"All sources fetched: {total_new} new / {total_found} found across {len(sources)} source(s)\n"
+        yield _notice_line(
+            "fetch/_fetch_all_summary_notice.html",
+            total_new=total_new, total_found=total_found, source_count=len(sources),
+        )
+        if sources:
+            table_html = templates.get_template("fetch/_table.html").render(**_fetch_panel_context(conn))
+            yield "HTML:" + table_html.replace("\n", "") + "\n"
 
     return StreamingResponse(stream(), media_type="text/plain")
 
