@@ -535,6 +535,68 @@ def test_get_job_counts_new_excludes_irrelevant_and_error(conn):
     assert counts["new"] == 1
 
 
+def test_get_unhandled_profile_notes_returns_notes(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "No AI focus")
+    notes = q.get_unhandled_profile_notes(conn)
+    assert notes == [{"id": j1, "status": "rejected", "feedback_note": "No AI focus"}]
+
+
+def test_get_unhandled_profile_notes_excludes_empty_notes(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "accepted", "")
+    assert q.get_unhandled_profile_notes(conn) == []
+
+
+def test_get_unhandled_profile_notes_excludes_handled(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "No AI focus")
+    q.mark_profile_feedback_handled(conn, [j1])
+    assert q.get_unhandled_profile_notes(conn) == []
+
+
+def test_get_unhandled_profile_notes_orders_most_recent_first(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "first")
+    q.update_job_feedback(conn, j2, "accepted", "second")
+    notes = q.get_unhandled_profile_notes(conn)
+    assert [n["id"] for n in notes] == [j2, j1]
+
+
+def test_get_unhandled_profile_notes_respects_limit(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    for i in range(3):
+        jid = q.insert_job(conn, source_id=source_id, url=f"http://job/{i}", title="T", company="C", raw_text="r")
+        q.update_job_feedback(conn, jid, "rejected", f"note {i}")
+    assert len(q.get_unhandled_profile_notes(conn, limit=2)) == 2
+
+
+def test_mark_profile_feedback_handled_only_marks_given_jobs(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T1", company="C", raw_text="r")
+    j2 = q.insert_job(conn, source_id=source_id, url="http://job/2", title="T2", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "one")
+    q.update_job_feedback(conn, j2, "rejected", "two")
+
+    q.mark_profile_feedback_handled(conn, [j1])
+
+    remaining = q.get_unhandled_profile_notes(conn)
+    assert [n["id"] for n in remaining] == [j2]
+
+
+def test_mark_profile_feedback_handled_empty_list_is_noop(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    j1 = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, j1, "rejected", "note")
+    q.mark_profile_feedback_handled(conn, [])
+    assert len(q.get_unhandled_profile_notes(conn)) == 1
+
+
 def test_get_recent_feedback_notes(conn):
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")

@@ -2,14 +2,7 @@
 {% block title %}Profile — Job Seek{% endblock %}
 {% block content %}
 <h1>Profile</h1>
-{% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
-<form method="post" action="/profile">
-  <label>Your skills, interests, and constraints (markdown supported):<br>
-    <textarea name="content" style="width:100%; min-height:300px; font-family:monospace;">{{ content }}</textarea>
-  </label>
-  <br>
-  <button type="submit" class="btn">Save</button>
-</form>
+{% include "profile/_editor.html" %}
 <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid #dee2e6;">
   <button class="btn" data-progress-url="/scenarios/reevaluate"
     title="Re-score every new/accepted job against every scenario and refresh its profile fit.">

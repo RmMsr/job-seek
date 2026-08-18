@@ -1,0 +1,122 @@
+<div id="profile-editor">
+  {% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
+  <form method="post" action="/profile" id="profile-save-form">
+    <label>Your skills, interests, and constraints (markdown supported):<br>
+      <textarea name="content" style="width:100%; min-height:300px; font-family:monospace;">{{ content }}</textarea>
+    </label>
+    <details style="margin:0.3rem 0 0.75rem; font-size:0.85em; color:#666;">
+      <summary style="cursor:pointer; color:#888;">Formatting tips</summary>
+      <div style="margin-top:0.4rem;">
+        <p style="margin:0 0 0.4rem;">
+          Use markdown headings and lists like this to allow automated improvements.
+        </p>
+        <pre style="margin:0; padding:0.75rem; border:1px solid #dee2e6; border-radius:6px; background:#f8f9fa; font-family:monospace;"># Heading 1
+
+## Heading 2
+
+### Heading 3
+
+- Bullet item</pre>
+      </div>
+    </details>
+    <button type="submit" class="btn">Save</button>
+  </form>
+  <div style="margin-top:1rem;">
+    <button class="btn" data-progress-url="/profile/refine" data-progress-target="#profile-proposals-area"
+      title="Ask the LLM to propose profile edits based on unhandled job accept/reject/trash notes.">
+      Suggest profile improvements
+    </button>
+    {% if unhandled_notes_count %}
+    <span style="margin-left:0.5rem; font-size:0.85em; color:#666;">
+      {{ unhandled_notes_count }} note{{ 's' if unhandled_notes_count != 1 else '' }} not yet reviewed
+    </span>
+    {% endif %}
+    <span id="profile-unsaved-warning" style="display:none; margin-left:0.5rem; font-size:0.85em; color:#666;">
+      You have unsaved changes.
+      <button type="button" class="btn" id="profile-save-now-btn" style="font-size:0.9em; padding:0.1rem 0.5rem;">Save now</button>
+    </span>
+  </div>
+  <div id="profile-proposals-area" style="margin-top:0.75rem;"></div>
+  {% if unapplied %}
+  <div style="margin-top:0.75rem; padding:0.75rem; border:1px solid #dee2e6; border-radius:6px; background:#fff8e6;">
+    <p style="margin:0 0 0.4rem; font-size:0.85em;">
+      <strong>Not applied</strong> — left unchecked, add these yourself if still relevant:
+    </p>
+    <ul style="margin:0; padding-left:1.2rem; font-size:0.85em;">
+      {% for u in unapplied %}
+      <li style="margin-bottom:0.2rem;">
+        <span class="tag">{{ u.action }}</span>
+        {% if u.action == "remove" %}
+        {{ u.target | markdown_inline }}
+        {% elif u.action == "replace" %}
+        {{ u.target | markdown_inline }} &rarr; {{ u.text | markdown_inline }}
+        {% else %}
+        {{ u.text | markdown_inline }} <span style="color:#888;">(in {{ u.section }}{% if u.anchor %} / {{ u.anchor }}{% endif %})</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var container = document.getElementById("profile-editor");
+  var textarea = container.querySelector('textarea[name="content"]');
+  var suggestBtn = container.querySelector('[data-progress-url="/profile/refine"]');
+  var proposalsArea = container.querySelector('#profile-proposals-area');
+  var warningEl = container.querySelector('#profile-unsaved-warning');
+  var saveForm = container.querySelector('#profile-save-form');
+  var saveNowBtn = container.querySelector('#profile-save-now-btn');
+  var originalValue = textarea.value;
+
+  function isDirty() {
+    return textarea.value !== originalValue;
+  }
+
+  function setLocked(locked) {
+    textarea.readOnly = locked;
+    textarea.style.background = locked ? "#e9ecef" : "";
+    suggestBtn.disabled = locked;
+  }
+
+  function hasProposalsShown() {
+    return proposalsArea.children.length > 0;
+  }
+
+  textarea.addEventListener("input", function () {
+    if (!isDirty()) warningEl.style.display = "none";
+  });
+
+  suggestBtn.addEventListener("click", function (evt) {
+    if (isDirty()) {
+      evt.preventDefault();
+      evt.stopImmediatePropagation();
+      warningEl.style.display = "inline";
+    } else {
+      warningEl.style.display = "none";
+      setLocked(true);
+    }
+  }, true);
+
+  saveNowBtn.addEventListener("click", function () {
+    saveForm.requestSubmit();
+  });
+
+  // Cancel (in the proposals partial) just empties this area client-side —
+  // unlock as soon as that happens.
+  new MutationObserver(function () {
+    if (!hasProposalsShown()) setLocked(false);
+  }).observe(proposalsArea, {childList: true});
+
+  // Safety net: if the refine request itself fails (network/LLM error), the
+  // proposals area never gets populated and there's no Cancel button to
+  // unlock via — fall back to unlocking once the request cycle ends with
+  // nothing shown, so the textarea never gets stuck locked.
+  new MutationObserver(function () {
+    if (!suggestBtn.hasAttribute("data-progress-running") && !hasProposalsShown()) {
+      setLocked(false);
+    }
+  }).observe(suggestBtn, {attributes: true, attributeFilter: ["data-progress-running"]});
+})();
+</script>

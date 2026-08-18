@@ -1,0 +1,49 @@
+{% if grouped %}
+<form hx-post="/profile/refine/accept" hx-target="#profile-editor" hx-swap="outerHTML">
+  {% for jid in job_ids %}
+  <input type="hidden" name="job_ids" value="{{ jid }}">
+  {% endfor %}
+  <p><strong>Proposed profile changes.</strong> Uncheck any you don't want, edit the text if needed, then apply.</p>
+  {% for group in grouped %}
+  <div style="margin-bottom:1rem;">
+    <h4 style="margin:0 0 0.4rem;">{{ group.section }}</h4>
+    {% for item in group.rows %}
+    <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem; padding:0.4rem; background:#f8f9fa; border-radius:4px;">
+      <input type="checkbox" name="apply_{{ item.index }}" checked>
+      <input type="hidden" name="kind_{{ item.index }}" value="{{ item.action }}">
+      <input type="hidden" name="section_{{ item.index }}" value="{{ group.section }}">
+      <span class="tag">{{ item.action }}</span>
+      {% if item.action == "remove" %}
+      <input type="hidden" name="target_{{ item.index }}" value="{{ item.target }}">
+      <span style="flex:1; text-decoration:line-through; color:#888;">{{ item.target | markdown_inline }}</span>
+      {% elif item.action == "replace" %}
+      <input type="hidden" name="target_{{ item.index }}" value="{{ item.target }}">
+      <span style="text-decoration:line-through; color:#888;">{{ item.target | markdown_inline }}</span>
+      <span>&rarr;</span>
+      <input type="text" name="text_{{ item.index }}" value="{{ item.text }}" style="flex:1; min-width:150px;">
+      {% else %}
+      {% if item.anchor %}
+      <input type="hidden" name="anchor_{{ item.index }}" value="{{ item.anchor }}">
+      <span style="font-size:0.85em; color:#666;">into &ldquo;{{ item.anchor }}&rdquo;:</span>
+      {% endif %}
+      <input type="text" name="text_{{ item.index }}" value="{{ item.text }}" style="flex:1; min-width:150px;">
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <button type="submit" class="btn btn-accept">Apply changes</button>
+  <button type="button" class="btn" onclick="document.getElementById('profile-proposals-area').innerHTML='';">Cancel</button>
+</form>
+{% else %}
+<p>No changes proposed based on current feedback.</p>
+{% if job_ids %}
+<form hx-post="/profile/refine/accept" hx-target="#profile-editor" hx-swap="outerHTML">
+  {% for jid in job_ids %}
+  <input type="hidden" name="job_ids" value="{{ jid }}">
+  {% endfor %}
+  <button type="submit" class="btn">Mark reviewed</button>
+  <button type="button" class="btn" onclick="document.getElementById('profile-proposals-area').innerHTML='';">Cancel</button>
+</form>
+{% endif %}
+{% endif %}

@@ -366,6 +366,31 @@ def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note
     conn.commit()
 
 
+def get_unhandled_profile_notes(conn: sqlite3.Connection, limit: int = 30) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT id, status, feedback_note FROM jobs
+            WHERE feedback_note IS NOT NULL AND feedback_note != ''
+              AND feedback_handled_at IS NULL
+            ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    )
+
+
+def mark_profile_feedback_handled(conn: sqlite3.Connection, job_ids: list[int]) -> None:
+    if not job_ids:
+        return
+    placeholders = ",".join("?" for _ in job_ids)
+    conn.execute(
+        f"UPDATE jobs SET feedback_handled_at = datetime('now') WHERE id IN ({placeholders})",
+        job_ids,
+    )
+    conn.commit()
+
+
 _GATE_SELECT = """
     jobs.*,
     gate.passed_count AS passed_gate_count,
