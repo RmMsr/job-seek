@@ -148,6 +148,18 @@ def _migrate_sources_fetcher_type_manual(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_sources_add_d_cookie(conn: sqlite3.Connection) -> None:
+    # Purely additive column (stores the Slack `d` session cookie per source),
+    # so a plain ALTER TABLE suffices — no table rebuild.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='sources'"
+    ).fetchone()
+    if row is None or "d_cookie" in row[0]:
+        return
+    conn.execute("ALTER TABLE sources ADD COLUMN d_cookie TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
 def _migrate_sources_fetcher_type_generic_listing(conn: sqlite3.Connection) -> None:
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='sources'"
@@ -162,7 +174,8 @@ def _migrate_sources_fetcher_type_generic_listing(conn: sqlite3.Connection) -> N
             name TEXT NOT NULL,
             url TEXT NOT NULL,
             fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing', 'manual', 'generic_listing')),
-            enabled INTEGER NOT NULL DEFAULT 1
+            enabled INTEGER NOT NULL DEFAULT 1,
+            d_cookie TEXT NOT NULL DEFAULT ''
         );
         INSERT INTO sources_new SELECT * FROM sources;
         DROP TABLE sources;
@@ -461,6 +474,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
     _migrate_sources_fetcher_type_manual(conn)
+    _migrate_sources_add_d_cookie(conn)
     _migrate_sources_fetcher_type_generic_listing(conn)
     _migrate_sources_drop_http_playwright_types(conn)
     _migrate_sources_url_unique(conn)
