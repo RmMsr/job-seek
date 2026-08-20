@@ -1,0 +1,26 @@
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.12-trixie-slim
+  before_script:
+    - cp config-template.toml config.toml
+  script:
+    - uv sync --frozen
+    - uv run pytest
+
+build:
+  stage: build
+  variables:
+    BUILDAH_ISOLATION: chroot
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  image: quay.io/buildah/stable
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | buildah login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - buildah build --layers --file Containerfile --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" --tag "$CI_REGISTRY_IMAGE:latest" .
+    - buildah push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - buildah push "$CI_REGISTRY_IMAGE:latest"

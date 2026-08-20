@@ -5,7 +5,7 @@ You need:
 1. **Job sources**: URLs where job offers are published. Like job boards or Slack channels.
 2. **Your portfolio**: A text describing your skills, experience expectations and dislikes.
 3. **Work scenarios**: A set of definitions and rules what you are looking for.
-4. **GenAI LLM API key**: Credentials for an Open AI compatible chat completions API. Either a local LLM (ollama, llama.cpp, LM-Studio, ...) or one of the public providers.
+4. **GenAI LLM API key**: Credentials (API_KEY) for an Open AI compatible chat completions API. Either a local LLM (ollama, llama.cpp, LM-Studio, ...) or one of the public providers.
 
 You get:
 
@@ -29,33 +29,68 @@ To run the job-seek webserver you can start it as a container or directly from P
 
 You still might want to get the code and setup dependencies if you want to use the slack authentication feature. See below.
 
-%% Section updates once first image is live %%
+Once the container started, edit `data/config.toml` to change the endpoint, model, or anything else.
 
-### As local server
-
-Clone the code.
+#### Podman
 
 ```shell
-git clone https://gitlab.com/RmMsr/job-seek.git
+mkdir --parents data
+podman run --detach --publish 8000:8000 \
+  --userns=keep-id:uid=1000,gid=1000 \
+  --volume "$(pwd)/data:/app/data" \
+  registry.gitlab.com/rmmsr/job-seek:latest
 ```
+
+> **Note**: `--userns=keep-id` maps the container's uid 1000 back to your own host uid, so files Podman writes into `data/` (the config, db, browser profile) stay owned by you rather than an arbitrary container uid.
+
+#### Docker
+
+```shell
+mkdir --parents data
+docker run --detach --publish 8000:8000 \
+  --add-host=host.containers.internal:host-gateway \
+  --volume "$(pwd)/data:/app/data" \
+  registry.gitlab.com/rmmsr/job-seek:latest
+```
+
+> **Note**: We explicitly set `host.containers.internal` to match Podman's convention to reference the host serving the container.
+
+> **Note**: If your user does not have id 1000 (check with `id`), you need to change ownership of `data`:
+> ```shell
+> chown --recursive 1000:1000 data
+> ```
+
+Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+### As local server
 
 Requirements
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- OpenAI chat-completion compatible GenAI endpoint with API\_KEY
 
-
+Clone the code.
 
 ```shell
+git clone https://gitlab.com/RmMsr/job-seek.git
+cd job-seek
+
 # Install dependencies
 uv sync
 
 # Install the Playwright browser (needed for auth-gated sources like Slack)
 uv run playwright install chromium
+
+cp config-template.toml config.toml
+
+uv run uvicorn app.main:app --port 8000
 ```
 
-Edit `config.toml` to point at your LLM endpoint and model:
+Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+### Configuration
+
+Edit `config.toml` (or data/config.toml for containers) to point at your LLM endpoint and model:
 
 ```toml
 [llm]
@@ -69,52 +104,7 @@ path = "job-seek.db"
 profile_dir = "browser-profile"
 ```
 
-## Usage
-
-```shell
-uv run uvicorn app.main:app --reload --port 8000
-```
-
-Open [http://localhost:8000](http://localhost:8000) in your browser.
-
-### Running in a container
-
-Once the container started, edit `data/config.toml` to change the endpoint, model, or anything else.
-
-#### Podman
-
-```shell
-podman build --tag job-seek .
-mkdir --parents data
-podman run --detach --publish 8000:8000 \
-  --userns=keep-id:uid=1000,gid=1000 \
-  --volume "$(pwd)/data:/app/data" \
-  job-seek
-```
-
-> **Note**: `--userns=keep-id` maps the container's uid 1000 back to your own host uid, so files Podman writes into `data/` (the config, db, browser profile) stay owned by you rather than an arbitrary container uid.
-
-#### Docker
-
-```shell
-docker build --file Containerfile --tag job-seek .
-mkdir --parents data
-docker run --detach --publish 8000:8000 \
-  --add-host=host.containers.internal:host-gateway \
-  --volume "$(pwd)/data:/app/data" \
-  job-seek
-```
-
-> **Note**: We explicitly set `host.containers.internal` to match Podman's convention to reference the host serving the container.
-
-> **Note**: If your user does not have id 1000 (check with `id`), you need to change ownership of `data`:
-> ```shell
-> chown --recursive 1000:1000 data
-> ```
-
-Open [http://localhost:8000](http://localhost:8000) in your browser.
-
-### Authentication (Slack)
+## Source Authentication (Slack)
 
 Any Slack job source needs credentials to your slack account. That works not by asking for username and password, but by extracting a user cookie (`xoxo-*`) that allows the app to gain the same access you have.
 
@@ -125,3 +115,5 @@ Inside the code folder run:
 ```shell
 uv run python -m app.cli.slack_login
 ```
+
+Or follow the instructions in the webapp to get the cookie by hand.
