@@ -10,3 +10,4 @@ temp/
 *.egg-info/
 dist/
 .pytest_cache/
+.idea
