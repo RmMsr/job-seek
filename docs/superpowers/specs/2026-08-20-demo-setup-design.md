@@ -131,7 +131,7 @@ Mid-level leadership role (tech lead IC or engineering manager) at a larger orga
 ## Jumpstart Script
 
 ### Purpose
-Bootstrap a fresh `job-seek.db` with infrastructure (profile, scenarios, sources) and then **run the full fetch + evaluation pipeline** against real Norwegian job sources. This produces authentic, real-world demo data and serves as QA validation that all configured sources actually work.
+Bootstrap a fresh `job-seek.db` with infrastructure only: profile, scenarios + criteria, and job sources. Does **not** fetch jobs—user manually triggers fetch after jumpstart via the UI. This keeps the setup lightweight and lets the user see the full pipeline in action.
 
 ### Input
 A YAML or JSON manifest defining:
@@ -164,25 +164,16 @@ sources:
 1. Insert profile (markdown text)
 2. Insert 4 scenarios + criteria for each
 3. Insert sources (Finn, Kode24, career pages)
-4. **Run fetch against all enabled sources** → retrieves real jobs, stores raw HTML/text
-5. **Run classify pipeline** → determines content_type (job_posting, lead, irrelevant, error)
-6. **Run summarize pipeline** → generates LLM summaries and headlines
-7. **Run evaluate pipeline** → scores jobs against active scenario + criteria, stores interest/attainability scores
+4. Done — no fetch or evaluation
 
 ### Output
-A fully-populated SQLite database with real, scored jobs ready for demo/screenshot. All data is authentic (not fabricated). All sources have been validated as working.
+An empty (job-free) SQLite database with full infrastructure: profile, scenarios, sources. Ready for user to start app and manually fetch.
 
 ### Benefits
-- **Authentic demo:** Real jobs, real LLM evaluation, real pipeline behavior
-- **Source validation:** If a fetch fails, jumpstart catches it immediately (QA)
-- **Full pipeline visibility:** Database shows complete end-to-end state (useful for screenshots, demo videos)
-- **Reusable snapshot:** Once complete, database can be captured/frozen for reuse
-
-### Implementation Details
-- Requires valid `config.toml` with LLM endpoint + model
-- Fetch may take 5–15 min depending on source count and LLM latency
-- Graceful error handling: failed sources log errors but don't crash the whole script
-- Script is idempotent for scenarios/sources (won't duplicate), but fetch is append-only (re-running adds more jobs)
+- **Lightweight:** Quick to run, no network/LLM latency
+- **Transparent pipeline:** User sees jobs arrive and get scored in real-time
+- **Source validation:** Fetch step validates all sources work (QA happens during fetch, not bootstrap)
+- **Flexible:** User controls when to fetch, can test individual sources
 
 ---
 
@@ -191,29 +182,32 @@ A fully-populated SQLite database with real, scored jobs ready for demo/screensh
 | Table | State |
 |-------|-------|
 | `profile` | 1 row, complete profile text |
-| `scenarios` | 4 rows, all created, first one marked active |
+| `scenarios` | 4 rows, all created (none marked active yet—user activates from UI) |
 | `criteria` | ~20 rows (5 per scenario), all `source='manual'` |
 | `sources` | 3–5 rows (Finn, Kode24, career pages), all enabled |
-| `jobs` | 30–80 rows, all `status='new'`, `content_type` filled (job_posting/lead/irrelevant), summaries + headlines computed |
-| `job_scores` | Populated: all jobs scored against all 4 scenarios, `relevance_score` + `score_reasoning` for each |
-| `fetch_runs` | Log of 3–5 fetch runs (one per source), success or error status |
-| `scenario_feedback` | Empty (no user feedback yet) |
+| `jobs` | Empty (user fetches after jumpstart) |
+| `job_scores` | Empty (will populate after fetch + evaluate) |
+| `fetch_runs` | Empty (will log after first fetch) |
+| `scenario_feedback` | Empty (will populate after user reviews jobs) |
 
 ---
 
 ## User Flow After Jumpstart
 
-1. Run jumpstart script → fetches real jobs, evaluates against all 4 scenarios
+1. Run jumpstart script → sets up infrastructure (1 min)
 2. Start dev server
-3. Visit app → sees jobs ranked by active scenario's gate + score
-4. Navigate to Profile → sees the generated profile
-5. Switch to Scenarios tab → sees all 4 scenarios + criteria with real evaluation context
-6. Click a scenario → job list re-ranks instantly per that scenario's gate_threshold
-7. Click a job → sees LLM-generated summary, score reasoning, and feedback panel
-8. Leave feedback (accept/reject + notes) → accumulate data for criteria refinement
-9. (Optional) Click "Refine criteria" → LLM suggests new criteria based on feedback
+3. Visit app → sees empty job list, all 4 scenarios available
+4. Navigate to Profile → sees the generated profile text
+5. Switch to Scenarios tab → sees all 4 scenarios + their criteria
+6. (Optional) Pick preferred scenario to activate
+7. Click "Fetch all" → starts fetching real jobs from Finn, Kode24, etc.
+8. Watch progress stream in → jobs arrive, get classified, summarized, scored
+9. Once fetch completes → job list populates with real, scored jobs
+10. Click a job → sees LLM summary, score reasoning per active scenario
+11. Leave feedback (accept/reject + notes) → starts training criteria refinement
+12. (Optional) Switch scenarios → see same jobs ranked differently per scenario's gate
 
-This showcases the complete product loop with real data and real LLM behavior.
+This showcases the complete product loop transparently: from empty DB → real fetch → real evaluation → user feedback.
 
 ---
 
@@ -222,37 +216,39 @@ This showcases the complete product loop with real data and real LLM behavior.
 ### Phase 1: Write Jumpstart Script
 - Python script: `scripts/jumpstart_demo.py`
 - Reads manifest (YAML), inserts profile/scenarios/sources
-- Calls existing fetch + pipeline methods to pull and evaluate real jobs
+- Does not fetch or evaluate (user does this manually via UI)
 - Includes built-in manifest with Norwegian sources + scenario definitions
-- Handles LLM errors gracefully (logs, retries, continues)
+- Idempotent for scenarios/sources (safe to re-run)
 
 ### Phase 2: Test & Validate
-- Run against live sources with valid `config.toml` (LLM endpoint required)
-- Verify fetch succeeds for Finn.no, Kode24 (smallest scope for first run)
-- Confirm all jobs classified + summarized + scored without crashes
-- Check database state matches success criteria
-- Capture baseline performance (how long does full pipeline take?)
+- Run script on fresh DB
+- Verify all 4 scenarios created with correct criteria
+- Verify all 3+ sources configured and enabled
+- Verify database is empty (no jobs)
+- Spot-check manifest has correct occupation codes for Finn.no and URLs for Kode24
 
 ### Phase 3: Document
 - README in `scripts/` with:
-  - Prerequisites (LLM endpoint, config.toml)
-  - How to run
-  - Expected duration (fetch time + scoring)
-  - Troubleshooting (what to do if a source fails)
-- Optional: store resulting DB as `demo-snapshot.db` for reuse
+  - How to run jumpstart
+  - What to do next (start dev server, click Fetch All)
+  - Expected fetch duration (~5–15 min depending on sources + LLM latency)
+  - Troubleshooting (what to do if fetch fails on a source)
+- Example manifest included in script
 
 ---
 
 ## Success Criteria
 
-- [ ] Jumpstart script runs without errors
+- [ ] Jumpstart script runs quickly (~30 sec, no network/LLM calls)
 - [ ] All 4 scenarios created with proper criteria
 - [ ] All 3+ sources configured and enabled
-- [ ] Fetch completes successfully (all sources return jobs, errors gracefully handled)
+- [ ] Database starts empty (no jobs pre-seeded)
+- [ ] User can start app and see empty job list + populated scenarios
+- [ ] User can click "Fetch all" to populate jobs from real sources
+- [ ] Fetch succeeds (all sources return jobs, errors gracefully handled)
 - [ ] All jobs classified (content_type filled: job_posting/lead/irrelevant)
 - [ ] All jobs have LLM-generated summaries + headlines
 - [ ] All jobs scored against all 4 scenarios (job_scores table populated)
 - [ ] Switching scenarios in UI shows different rankings per gate_threshold
-- [ ] Screenshots show realistic mix of high/medium/low-scoring jobs
-- [ ] No mock or fabricated data (all jobs from real sources, all scores from real LLM)
+- [ ] Screenshots show realistic mix of high/medium/low-scoring jobs across scenarios
 
