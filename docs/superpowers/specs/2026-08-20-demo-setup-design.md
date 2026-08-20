@@ -131,7 +131,7 @@ Mid-level leadership role (tech lead IC or engineering manager) at a larger orga
 ## Jumpstart Script
 
 ### Purpose
-Seed a fresh `job-seek.db` with realistic Norwegian job data at "day 1" state: profile, scenarios, sources, and real job URLs with minimal extracted metadata. No pre-computed scores, summaries, or feedback.
+Bootstrap a fresh `job-seek.db` with infrastructure (profile, scenarios, sources) and then **run the full fetch + evaluation pipeline** against real Norwegian job sources. This produces authentic, real-world demo data and serves as QA validation that all configured sources actually work.
 
 ### Input
 A YAML or JSON manifest defining:
@@ -152,38 +152,37 @@ scenarios:
 
 sources:
   - name: "Finn.no"
-    url: "..."
+    url: "https://www.finn.no/job/search?occupation=..."
     fetcher_type: generic_listing
-  - ...
-
-jobs:
-  - url: "https://..."
-    title: "..."
-    company: "..."
-    source_name: "Finn.no"
+  - name: "Kode24"
+    url: "https://www.kode24.no/"
+    fetcher_type: generic_listing
   - ...
 ```
 
 ### Processing
-1. Insert profile
-2. Insert scenarios + criteria for each
-3. Insert sources
-4. For each job:
-   - Check if URL already exists (skip if so)
-   - Insert minimal row: `url`, `title`, `company`, `source_id`, `content_type=NULL`, all LLM fields empty
-   - Leave `raw_text`, `summary`, scores for pipeline to fill
+1. Insert profile (markdown text)
+2. Insert 4 scenarios + criteria for each
+3. Insert sources (Finn, Kode24, career pages)
+4. **Run fetch against all enabled sources** → retrieves real jobs, stores raw HTML/text
+5. **Run classify pipeline** → determines content_type (job_posting, lead, irrelevant, error)
+6. **Run summarize pipeline** → generates LLM summaries and headlines
+7. **Run evaluate pipeline** → scores jobs against active scenario + criteria, stores interest/attainability scores
 
 ### Output
-A populated SQLite database ready to use. User can:
-- View the raw job list (all marked as `new`, no scores)
-- Run a fetch pass to pull down content and compute scores
-- See the full pipeline in action
+A fully-populated SQLite database with real, scored jobs ready for demo/screenshot. All data is authentic (not fabricated). All sources have been validated as working.
 
-### Non-Goals
-- Pre-evaluate jobs with mock scores
-- Generate fake LLM summaries or reasoning
-- Provide "expected" feedback or notes
-- Hide the pipeline from the user
+### Benefits
+- **Authentic demo:** Real jobs, real LLM evaluation, real pipeline behavior
+- **Source validation:** If a fetch fails, jumpstart catches it immediately (QA)
+- **Full pipeline visibility:** Database shows complete end-to-end state (useful for screenshots, demo videos)
+- **Reusable snapshot:** Once complete, database can be captured/frozen for reuse
+
+### Implementation Details
+- Requires valid `config.toml` with LLM endpoint + model
+- Fetch may take 5–15 min depending on source count and LLM latency
+- Graceful error handling: failed sources log errors but don't crash the whole script
+- Script is idempotent for scenarios/sources (won't duplicate), but fetch is append-only (re-running adds more jobs)
 
 ---
 
@@ -192,58 +191,68 @@ A populated SQLite database ready to use. User can:
 | Table | State |
 |-------|-------|
 | `profile` | 1 row, complete profile text |
-| `scenarios` | 4 rows, all created, none marked active yet |
+| `scenarios` | 4 rows, all created, first one marked active |
 | `criteria` | ~20 rows (5 per scenario), all `source='manual'` |
-| `sources` | 3–5 rows (Finn, Kode24, manual career pages) |
-| `jobs` | 8–15 rows, all `status='new'`, `content_type=NULL`, minimal metadata |
-| `job_scores` | Empty (no evaluation yet) |
-| `fetch_runs` | Empty (no fetch runs yet) |
-| `scenario_feedback` | Empty (no feedback yet) |
+| `sources` | 3–5 rows (Finn, Kode24, career pages), all enabled |
+| `jobs` | 30–80 rows, all `status='new'`, `content_type` filled (job_posting/lead/irrelevant), summaries + headlines computed |
+| `job_scores` | Populated: all jobs scored against all 4 scenarios, `relevance_score` + `score_reasoning` for each |
+| `fetch_runs` | Log of 3–5 fetch runs (one per source), success or error status |
+| `scenario_feedback` | Empty (no user feedback yet) |
 
 ---
 
 ## User Flow After Jumpstart
 
-1. Run jumpstart script → fresh DB seeded
-2. Start dev server (or container)
-3. Visit app → sees 8–15 "new" jobs, no scores yet
-4. Navigate to Profile/Scenarios → sees all 4 scenarios + criteria
-5. Click "Fetch all" or manually fetch → pulls job content, classifies, scores
-6. Watch scores populate in real-time
-7. Use feedback panel to accept/reject → see criteria refinement suggestions
-8. Switch between scenarios → see different jobs ranked differently per gate threshold
+1. Run jumpstart script → fetches real jobs, evaluates against all 4 scenarios
+2. Start dev server
+3. Visit app → sees jobs ranked by active scenario's gate + score
+4. Navigate to Profile → sees the generated profile
+5. Switch to Scenarios tab → sees all 4 scenarios + criteria with real evaluation context
+6. Click a scenario → job list re-ranks instantly per that scenario's gate_threshold
+7. Click a job → sees LLM-generated summary, score reasoning, and feedback panel
+8. Leave feedback (accept/reject + notes) → accumulate data for criteria refinement
+9. (Optional) Click "Refine criteria" → LLM suggests new criteria based on feedback
 
-This showcases the full product loop and feels real (not pre-baked).
+This showcases the complete product loop with real data and real LLM behavior.
 
 ---
 
 ## Implementation
 
-### Phase 1: Collect Real Job URLs
-- Manually browse Finn.no (using scenario filters), Kode24, and major career pages
-- Collect 2–4 URLs per scenario (total 8–16 jobs)
-- Verify URLs are accessible and not behind login walls (generic_listing assumes public)
-
-### Phase 2: Write Jumpstart Script
+### Phase 1: Write Jumpstart Script
 - Python script: `scripts/jumpstart_demo.py`
-- Reads manifest (YAML), inserts profile/scenarios/sources/jobs into DB
-- Idempotent (safe to re-run)
-- Includes built-in manifest with Norwegian data
+- Reads manifest (YAML), inserts profile/scenarios/sources
+- Calls existing fetch + pipeline methods to pull and evaluate real jobs
+- Includes built-in manifest with Norwegian sources + scenario definitions
+- Handles LLM errors gracefully (logs, retries, continues)
 
-### Phase 3: Test & Document
-- Test script with fresh DB (`:memory:` or temp file)
-- Write README in `scripts/` explaining how to use
-- Confirm all jobs actually load and score without errors
+### Phase 2: Test & Validate
+- Run against live sources with valid `config.toml` (LLM endpoint required)
+- Verify fetch succeeds for Finn.no, Kode24 (smallest scope for first run)
+- Confirm all jobs classified + summarized + scored without crashes
+- Check database state matches success criteria
+- Capture baseline performance (how long does full pipeline take?)
+
+### Phase 3: Document
+- README in `scripts/` with:
+  - Prerequisites (LLM endpoint, config.toml)
+  - How to run
+  - Expected duration (fetch time + scoring)
+  - Troubleshooting (what to do if a source fails)
+- Optional: store resulting DB as `demo-snapshot.db` for reuse
 
 ---
 
 ## Success Criteria
 
 - [ ] Jumpstart script runs without errors
-- [ ] All 4 scenarios are created with proper criteria
-- [ ] All jobs insert as `new` with no content_type
-- [ ] User can manually select a scenario and see filtered job list
-- [ ] Running a fetch pass populates scores without crashing
-- [ ] Screenshot shows a realistic mix of high/medium/low-scoring jobs
-- [ ] No fake/pre-baked data is visible to the user (all processing is transparent)
+- [ ] All 4 scenarios created with proper criteria
+- [ ] All 3+ sources configured and enabled
+- [ ] Fetch completes successfully (all sources return jobs, errors gracefully handled)
+- [ ] All jobs classified (content_type filled: job_posting/lead/irrelevant)
+- [ ] All jobs have LLM-generated summaries + headlines
+- [ ] All jobs scored against all 4 scenarios (job_scores table populated)
+- [ ] Switching scenarios in UI shows different rankings per gate_threshold
+- [ ] Screenshots show realistic mix of high/medium/low-scoring jobs
+- [ ] No mock or fabricated data (all jobs from real sources, all scores from real LLM)
 
