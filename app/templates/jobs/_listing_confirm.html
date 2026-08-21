@@ -1,4 +1,4 @@
-<div class="listing-confirm">
+<form class="listing-confirm">
   <p>Detected {{ link_count }} job posting link{{ 's' if link_count != 1 else '' }} at <strong>{{ domain }}</strong>.</p>
   <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
     <input type="hidden" id="listing-url" value="{{ url }}">
@@ -15,4 +15,4 @@
     <a href="/jobs" class="btn">Cancel</a>
   </div>
   <span id="listing-confirm-progress" class="reset-progress" aria-live="polite"></span>
-</div>
+</form>

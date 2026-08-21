@@ -545,7 +545,7 @@ def test_confirm_source_response_has_both_oob_chunks(client, conn):
         )
     assert resp.status_code == 200
     assert 'HTML:<div id="sources-table">' in resp.text
-    assert 'HTML:<div id="add-source-panel"' in resp.text
+    assert 'HTML:<form id="add-source-panel"' in resp.text
 
 
 def test_confirm_source_no_notice_when_jobs_found(client, conn):
