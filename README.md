@@ -35,7 +35,8 @@ Once the container started, visit **/setup** in the running container's web UI t
 
 ```shell
 mkdir --parents data
-podman run --detach --publish 8000:8000 \
+podman run --name job-seek --replace --detach \
+  --publish 8000:8000 \
   --userns=keep-id:uid=1000,gid=1000 \
   --volume "$(pwd)/data:/app/data" \
   registry.gitlab.com/rmmsr/job-seek:latest
@@ -47,7 +48,8 @@ podman run --detach --publish 8000:8000 \
 
 ```shell
 mkdir --parents data
-docker run --detach --publish 8000:8000 \
+docker run --name job-seek --replace --detach \
+  --publish 8000:8000 \
   --add-host=host.containers.internal:host-gateway \
   --volume "$(pwd)/data:/app/data" \
   registry.gitlab.com/rmmsr/job-seek:latest
