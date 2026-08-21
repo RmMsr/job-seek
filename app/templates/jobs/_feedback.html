@@ -1,32 +1,34 @@
 {% import "jobs/_macros.html" as macros %}
-<article class="job-row" id="job-{{ job.id }}">
-  <div class="job-row-actions">
-    <a href="/jobs/{{ job.id }}" class="permalink-icon" title="Direct link to this job" aria-label="Direct link to this job">&#128279;</a>
-    {% if not is_detail_page %}
-    <label class="job-select-wrap">
-      <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
-        id="job-select-{{ job.id }}" hx-preserve="true"
-        aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
-    </label>
-    {% endif %}
-  </div>
-  <div role="button" tabindex="0" style="cursor:pointer"
+<article class="job-row job-row-expanded" id="job-{{ job.id }}">
+  {% if not is_detail_page %}
+  <label class="job-select-wrap">
+    <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+      id="job-select-{{ job.id }}" hx-preserve="true"
+      aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
+  </label>
+  {% endif %}
+  <div class="job-detail-header" role="button" tabindex="0" style="cursor:pointer"
     hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML"
     hx-trigger="click, keyup[key=='Enter']">
-    {{ macros.meta_tags(job) }}
-    <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
+    <div class="job-detail-title-row">
+      <h2 class="job-detail-title">{{ job.title or "(no title)" }}</h2>
+      {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      <a href="/jobs/{{ job.id }}" class="job-link-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
+    </div>
+    <div class="job-detail-meta">
+      {% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
+      {% if job.company %}<span>{{ job.company }}</span>{% endif %}
+      <a href="{{ job.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">&#8599; original</a>
+    </div>
     {% if job.headline %}
       <p class="job-hook">{{ job.headline }}</p>
     {% endif %}
+    {{ macros.meta_tags(job) }}
   </div>
-  <p>
-    {% if job.company %}<span>· {{ job.company }}</span>{% endif %}
-    <a href="{{ job.url }}" target="_blank" rel="noopener">↗ original</a>
-  </p>
   {% if job.summary %}
-    <section aria-label="Summary">{{ job.summary | markdown }}</section>
+    <section aria-label="Summary" class="markdown-content">{{ job.summary | markdown }}</section>
   {% endif %}
   {% if job_scores %}
     {% include "jobs/_score_tabs.html" %}
@@ -37,12 +39,12 @@
         <dl class="fit-scorecard-grid">
           <dt>Interest</dt>
           <dd>
-            <span class="score-badge {% if job.interest_score >= 0.7 %}score-high{% elif job.interest_score >= 0.4 %}score-mid{% else %}score-low{% endif %}">{{ "%.0f"|format(job.interest_score * 100) }}%</span>
+            <span class="score-badge {{ job.interest_score | score_class }}">{{ "%.0f"|format(job.interest_score * 100) }}%</span>
             {{ job.interest_reasoning | markdown }}
           </dd>
           <dt>Attainability</dt>
           <dd>
-            <span class="score-badge {% if job.attainability_score >= 0.7 %}score-high{% elif job.attainability_score >= 0.4 %}score-mid{% else %}score-low{% endif %}">{{ "%.0f"|format(job.attainability_score * 100) }}%</span>
+            <span class="score-badge {{ job.attainability_score | score_class }}">{{ "%.0f"|format(job.attainability_score * 100) }}%</span>
             {{ job.attainability_reasoning | markdown }}
           </dd>
         </dl>

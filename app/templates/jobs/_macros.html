@@ -1,42 +1,35 @@
-{% macro fit_badge_fields(job) %}
+{% macro fit_score_badge(job, size="") %}
 {% if job.fit_score is not none %}
 {% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format(job.interest_score * 100, job.attainability_score * 100) %}
-<dt class="sr-only">Fit score</dt>
-<dd>
-  {% if job.fit_score >= 0.7 %}<span class="score-badge score-high" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
-  {% elif job.fit_score >= 0.4 %}<span class="score-badge score-mid" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
-  {% else %}<span class="score-badge score-low" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
-  {% endif %}
-</dd>
+<span class="score-badge {{ job.fit_score | score_class }}{% if size %} {{ size }}{% endif %}" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
 {% endif %}
-{% if job.passed_scenario_names %}
-<dt class="sr-only">Matched scenarios</dt>
-{% for name in job.passed_scenario_names.split(', ') %}
-<dd><span class="tag">{{ name }}</span></dd>
-{% endfor %}
+{% endmacro %}
+
+{% macro status_badge(job) %}
+{% if job.status == "accepted" %}
+<span class="score-badge score-high">Accepted</span>
+{% elif job.status == "rejected" %}
+<span class="score-badge score-low">Rejected</span>
+{% elif job.status == "trash" %}
+<span class="score-badge score-neutral">Trash</span>
 {% endif %}
 {% endmacro %}
 
 {% macro meta_tags(job) %}
 <dl class="job-tags">
-  {{ fit_badge_fields(job) }}
-  {% if job.status == "accepted" %}
+  {% if job.passed_scenario_names %}
+  <dt class="sr-only">Matched scenarios</dt>
+  {% for name in job.passed_scenario_names.split(', ') %}
+  <dd><span class="tag tag-accent">{{ name }}</span></dd>
+  {% endfor %}
+  {% endif %}
+  {% if job.status == "accepted" or job.status == "rejected" or job.status == "trash" %}
   <dt class="sr-only">Status</dt>
-  <dd><span class="score-badge score-high">Accepted</span></dd>
-  {% elif job.status == "rejected" %}
-  <dt class="sr-only">Status</dt>
-  <dd><span class="score-badge score-low">Rejected</span></dd>
-  {% elif job.status == "trash" %}
-  <dt class="sr-only">Status</dt>
-  <dd><span class="score-badge score-neutral">Trash</span></dd>
+  <dd>{{ status_badge(job) }}</dd>
   {% endif %}
   <dt class="sr-only">Content type</dt>
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   <dt class="sr-only">Source</dt>
   <dd><span class="tag">{{ job.source_name or "" }}</span></dd>
-  {% if job.published_at %}
-  <dt class="sr-only">Published</dt>
-  <dd><span class="tag">{{ job.published_at | time_ago }}</span></dd>
-  {% endif %}
 </dl>
 {% endmacro %}

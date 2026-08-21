@@ -146,12 +146,12 @@ def test_job_list_falls_back_to_summary_when_no_headline(client, conn):
     assert "Great role" in resp.text
 
 
-def test_job_list_row_omits_company_but_expand_keeps_it(client, conn):
+def test_job_list_row_and_expand_both_show_company(client, conn):
     sid, jid, scenario_id = _seed(conn)  # _seed sets company="Acme"
     resp = client.get("/jobs")
-    assert "· Acme" not in resp.text
+    assert '<span class="job-company">Acme</span>' in resp.text
     resp2 = client.get(f"/jobs/{jid}/expand")
-    assert "· Acme" in resp2.text
+    assert "Acme" in resp2.text
 
 
 def test_job_list_title_is_heading_in_its_own_block(client, conn):
@@ -173,7 +173,7 @@ def test_job_list_tags_are_semantic_definition_list(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<dl class="job-tags">' in resp.text
-    assert '<dt class="sr-only">Fit score</dt>' in resp.text
+    assert '<span class="sr-only">Fit score</span>' in resp.text
     assert '<dt class="sr-only">Matched scenarios</dt>' in resp.text
     assert '<dt class="sr-only">Content type</dt>' in resp.text
     assert '<dt class="sr-only">Source</dt>' in resp.text
@@ -188,7 +188,7 @@ def test_job_expand_has_full_meta_parity_with_card(client, conn):
     assert "Remote ML" in resp.text
     assert "job_posting" in resp.text
     assert "finn.no" in resp.text
-    assert '<h3 class="job-title">ML Eng</h3>' in resp.text
+    assert '<h2 class="job-detail-title">ML Eng</h2>' in resp.text
 
 
 def test_job_expand_shows_tab_per_scored_scenario(client, conn):
@@ -495,7 +495,7 @@ def test_job_reset_stream_ends_with_html_chunk_for_updated_row(client, conn):
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         resp = client.post(f"/jobs/{jid}/reset")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
 
 
 def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, conn):
@@ -507,7 +507,7 @@ def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, con
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
         resp = client.post(f"/jobs/{jid}/pass-as-new")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
 
 
 def test_job_reset_stream_includes_counts_html_chunk(client, conn):
@@ -664,8 +664,8 @@ def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, c
         resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
 
     assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j2}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}">') == 1
     assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
 
 
@@ -720,8 +720,8 @@ def test_job_bulk_reevaluate_stream_includes_per_job_html_and_counts_chunks(clie
         resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
 
     assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row" id="job-{j2}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}">') == 1
     assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
 
 
@@ -792,7 +792,7 @@ def test_job_reevaluate_stream_ends_with_html_chunk_for_updated_row(client, conn
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
         resp = client.post(f"/jobs/{jid}/reevaluate")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
 
 
 def test_job_reevaluate_stream_includes_counts_html_chunk(client, conn):
@@ -1246,14 +1246,14 @@ def test_job_list_row_has_permalink_icon(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert f'href="/jobs/{jid}" class="permalink-icon"' in resp.text
+    assert f'href="/jobs/{jid}" class="job-link-icon"' in resp.text
 
 
 def test_job_expand_has_permalink_icon(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'href="/jobs/{jid}" class="permalink-icon"' in resp.text
+    assert f'href="/jobs/{jid}" class="job-link-icon"' in resp.text
 
 
 def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, conn):

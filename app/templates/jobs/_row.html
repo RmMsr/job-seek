@@ -4,29 +4,34 @@
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML"
   hx-trigger="click, keyup[key=='Enter']">
-  <div class="job-row-actions">
-    <a href="/jobs/{{ job.id }}" class="permalink-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
-    {% if not is_detail_page %}
-    <label class="job-select-wrap">
-      <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
-        id="job-select-{{ job.id }}" hx-preserve="true"
-        aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
-    </label>
-    {% endif %}
-  </div>
-  {{ macros.meta_tags(job) }}
-  <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
-  {% if job.stale_badge %}
-    <p class="stale-note">
-      {% if job.stale_badge.href %}
-        <a href="{{ job.stale_badge.href }}">{{ job.stale_badge.label }} &rarr;</a>
-      {% else %}
-        <span>{{ job.stale_badge.label }}</span>
-      {% endif %}
-    </p>
-  {% elif job.headline %}
-    <p class="job-hook">{{ job.headline }}</p>
-  {% elif job.summary %}
-    <p class="job-hook">{{ job.summary | markdown_text | truncate(200) }}</p>
+  {% if job.fit_score is not none %}<div class="job-row-score"><span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}</div>{% endif %}
+  {% if not is_detail_page %}
+  <label class="job-select-wrap">
+    <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+      id="job-select-{{ job.id }}" hx-preserve="true"
+      aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
+  </label>
   {% endif %}
+  <div class="job-row-content">
+    <div class="job-row-header">
+      <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
+      {% if job.company %}<span class="job-company">{{ job.company }}</span>{% endif %}
+      {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      <a href="/jobs/{{ job.id }}" class="job-link-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
+    </div>
+    {% if job.stale_badge %}
+      <p class="stale-note">
+        {% if job.stale_badge.href %}
+          <a href="{{ job.stale_badge.href }}">{{ job.stale_badge.label }} &rarr;</a>
+        {% else %}
+          <span>{{ job.stale_badge.label }}</span>
+        {% endif %}
+      </p>
+    {% elif job.headline %}
+      <p class="job-hook">{{ job.headline }}</p>
+    {% elif job.summary %}
+      <p class="job-hook">{{ job.summary | markdown_text | truncate(200) }}</p>
+    {% endif %}
+    {{ macros.meta_tags(job) }}
+  </div>
 </article>
