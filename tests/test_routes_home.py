@@ -11,8 +11,8 @@ def _use_test_db(conn):
 def _point_config_check_at(monkeypatch, path):
     # check_config_status() is called with no args (default path="config.toml",
     # resolved relative to cwd) from both home.py and deps.py. Patching the
-    # default directly (rather than monkeypatch.chdir) avoids also breaking
-    # Jinja2's FileSystemLoader, which resolves "app/templates" relative to cwd.
+    # default directly is more targeted than monkeypatch.chdir, which would
+    # affect every relative path in the process, not just this one.
     monkeypatch.setattr(check_config_status, "__defaults__", (str(path),))
 
 
