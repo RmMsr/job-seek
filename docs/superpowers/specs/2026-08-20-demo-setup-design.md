@@ -112,19 +112,45 @@ Mid-level leadership role (tech lead IC or engineering manager) at a larger orga
 
 ## Real Norwegian Job Sources
 
-### Source 1: Finn.no
-**URL:** https://www.finn.no/job/search?occupation=1.22.380&occupation=1.23.246&occupation=1.23.2047&occupation=1.23.2049&occupation=1.23.244&occupation=1.23.384&occupation=1.23.385&occupation=1.23.2052&occupation=1.23.86
-**Fetcher type:** generic_listing
-**Description:** Norway's largest classified job board. Occupation codes filter for software development, IT, and related roles.
+### General Job Boards
+1. **Finn.no** (Klassifiserte annonser)
+   - URL: https://www.finn.no/job/search?occupation=1.22.380&occupation=1.23.246&occupation=1.23.2047&occupation=1.23.2049&occupation=1.23.244&occupation=1.23.384&occupation=1.23.385&occupation=1.23.2052&occupation=1.23.86
+   - Fetcher: generic_listing
+   - Notes: Norway's largest classified job board. Occupation codes filter for tech/software roles.
 
-### Source 2: Kode24
-**URL:** https://www.kode24.no/
-**Fetcher type:** generic_listing
-**Description:** Norwegian tech-focused job board. Higher signal-to-noise for developer roles.
+2. **Kode24**
+   - URL: https://kodejobb.no/stillinger
+   - Fetcher: generic_listing
+   - Notes: Tech-focused Norwegian job board. Higher signal-to-noise for developer roles.
 
-### Source 3: Career Pages (DNB, Visma, Equinor, Bekk, Kantega)
-**Fetcher type:** manual (user adds specific URLs as needed)
-**Description:** Direct career pages of major Norwegian employers. Provided as examples; user can add more.
+### Enterprise / Consultancy Career Pages
+3. **DNB Teknologi**
+   - URL: https://jobb.dnb.no/go/Teknologi/4224301/
+   - Fetcher: generic_listing
+
+4. **Telenor**
+   - URL: https://www.telenor.com/career/open-positions/
+   - Fetcher: generic_listing
+
+5. **Accenture**
+   - URL: https://www.accenture.com/no-en/careers/jobsearch?jt=Mid-Level
+   - Fetcher: generic_listing
+
+6. **Sopra Steria**
+   - URL: https://careers.soprasteria.no/jobs
+   - Fetcher: generic_listing
+
+7. **Tieto**
+   - URL: https://careers.tieto.com/jobs?options=320%2C193%2C197%2C213&page=1
+   - Fetcher: generic_listing
+
+8. **Bouvet**
+   - URL: https://web106.reachmee.com/ext/I002/1338/main?site=6&validator=09af816191d8e8a901a9828c0130f41b&lang=NO
+   - Fetcher: generic_listing
+
+9. **Itera**
+   - URL: https://careers-no.itera.com/#jobs
+   - Fetcher: generic_listing
 
 ---
 
