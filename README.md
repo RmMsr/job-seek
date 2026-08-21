@@ -29,7 +29,7 @@ To run the job-seek webserver you can start it as a container or directly from P
 
 You still might want to get the code and setup dependencies if you want to use the slack authentication feature. See below.
 
-Once the container started, edit `data/config.toml` to change the endpoint, model, or anything else.
+Once the container started, visit **/setup** in the running container's web UI to pick your LLM provider, enter an API key if needed, load or type a model, and save — the app writes directly to the mounted `data/config.toml`. (You can also hand-edit `data/config.toml` directly if you prefer.)
 
 #### Podman
 
@@ -86,23 +86,7 @@ cp config-template.toml config.toml
 uv run uvicorn app.main:app --port 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000) in your browser.
-
-### Configuration
-
-Edit `config.toml` (or data/config.toml for containers) to point at your LLM endpoint and model:
-
-```toml
-[llm]
-endpoint = "http://localhost:11434/v1"
-model = "llama3.2"
-
-[database]
-path = "job-seek.db"
-
-[browser]
-profile_dir = "browser-profile"
-```
+Open [http://localhost:8000](http://localhost:8000) in your browser. If the LLM provider isn't configured yet, a banner on the home page will link you to **/setup** — pick a hosted provider (OpenAI, Groq, OpenRouter, etc.) or Custom for a local/self-hosted endpoint (Ollama, llama.cpp, vLLM, ...), enter your API key if needed, and save. The app writes `config.toml` for you.
 
 ## Source Authentication (Slack)
 

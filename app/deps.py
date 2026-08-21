@@ -43,7 +43,7 @@ def get_db_optional() -> Generator[sqlite3.Connection | None, None, None]:
 
 def get_ai_client() -> openai.OpenAI:
     config = load_config()
-    return openai.OpenAI(base_url=config.llm_endpoint, api_key="not-needed")
+    return openai.OpenAI(base_url=config.llm_endpoint, api_key=config.llm_api_key)
 
 
 def get_model() -> str:

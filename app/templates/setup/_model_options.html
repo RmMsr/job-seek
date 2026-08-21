@@ -1,0 +1,15 @@
+{% if error %}
+<div class="notice" style="background: #f8d7da; border-color: #dc3545; color: #721c24;">
+  <p>{{ error }}</p>
+  <button class="notice-dismiss" onclick="this.parentElement.remove()">×</button>
+</div>
+<script>window.autoDismissNotice && window.autoDismissNotice(document.currentScript.previousElementSibling, 6000);</script>
+<datalist id="model-options"></datalist>
+{% else %}
+<datalist id="model-options">
+  {% for m in models %}
+  <option value="{{ m }}"></option>
+  {% endfor %}
+</datalist>
+<p>{{ models|length }} model(s) loaded — start typing in the Model field to pick one.</p>
+{% endif %}

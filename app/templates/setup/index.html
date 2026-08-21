@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Setup — Job Seek{% endblock %}
+{% block content %}
+
+<h1>LLM Provider Setup</h1>
+
+{% if saved %}
+<div class="notice">
+  <p>Configuration saved. You can now close this page and use the app.</p>
+  <button class="notice-dismiss" onclick="this.parentElement.remove()">×</button>
+</div>
+<script>window.autoDismissNotice && window.autoDismissNotice(document.currentScript.previousElementSibling, 6000);</script>
+{% endif %}
+
+{% if error %}
+<div class="notice" style="background: #f8d7da; border-color: #dc3545; color: #721c24;">
+  <p>{{ error }}</p>
+  <button class="notice-dismiss" onclick="this.parentElement.remove()">×</button>
+</div>
+<script>window.autoDismissNotice && window.autoDismissNotice(document.currentScript.previousElementSibling, 6000);</script>
+{% endif %}
+
+<form method="post" action="/setup" class="setup-form">
+  <div class="form-row">
+    <label for="provider">Provider</label>
+    <select name="provider" id="provider" required>
+      {% for group_name, items in provider_groups %}
+      <optgroup label="{{ group_name }}">
+        {% for key, label in items %}
+        <option value="{{ key }}" {% if raw_llm and raw_llm.provider == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="form-row" id="endpoint-row" style="display: none;">
+    <label for="endpoint">Endpoint URL</label>
+    <input type="url" name="endpoint" id="endpoint" class="text-input" placeholder="https://your-llm.example/v1" {% if raw_llm and raw_llm.provider == "custom" and raw_llm.endpoint %}value="{{ raw_llm.endpoint }}"{% endif %}>
+  </div>
+
+  <div class="form-row">
+    <label for="api_key">API Key (required for hosted providers)</label>
+    <input type="password" name="api_key" id="api_key" class="text-input" placeholder="{% if raw_llm and raw_llm.api_key %}(unchanged — leave blank to keep){% endif %}" autocomplete="off">
+  </div>
+
+  <div class="form-row">
+    <label for="model">Model (required for hosted providers; optional for local/custom)</label>
+    <input type="text" name="model" id="model" list="model-options" class="text-input" style="width: 100%; max-width: 480px;" placeholder="e.g. gpt-4o-mini" {% if raw_llm and raw_llm.model %}value="{{ raw_llm.model }}"{% endif %}>
+    <button type="button" class="btn" hx-post="/setup/models" hx-target="#model-options-container" hx-swap="innerHTML" hx-include="[name='provider'], [name='api_key'], [name='endpoint']">
+      Get available models
+    </button>
+    <div id="model-options-container"><datalist id="model-options"></datalist></div>
+  </div>
+
+  <div class="form-row" style="display: flex; gap: 0.5rem; align-items: center;">
+    <button type="submit" class="btn">Save</button>
+    <button type="button" class="btn" hx-post="/setup/test" hx-target="#test-result" hx-swap="innerHTML" hx-include="[name='provider'], [name='api_key'], [name='model'], [name='endpoint']">
+      Test Connection
+    </button>
+  </div>
+
+  <div id="test-result"></div>
+</form>
+
+<script>
+(function () {
+  var providerSelect = document.getElementById("provider");
+  var endpointRow = document.getElementById("endpoint-row");
+
+  function updateUI() {
+    endpointRow.style.display = (providerSelect.value === "custom") ? "block" : "none";
+  }
+
+  providerSelect.addEventListener("change", updateUI);
+  updateUI();
+})();
+</script>
+{% endblock %}

@@ -88,6 +88,8 @@
     .feedback-form + .job-advanced { margin-top: 0.5rem; }
     .job-advanced summary { cursor: pointer; color: #888; font-size: 0.85em; user-select: none; }
     .feedback-form label { display: block; margin-top: 0.5rem; }
+    .setup-form .form-row { margin-bottom: 1.1rem; }
+    .setup-form .form-row label { display: block; margin-bottom: 0.35rem; font-weight: 500; }
     .feedback-form textarea { width: 100%; min-height: 60px; }
     .feedback-form .actions { margin-top: 0.75rem; }
     .reset-progress { grid-column: 1 / -1; display: block; width: 100%; color: #666; font-size: 0.85em; }
@@ -128,6 +130,15 @@
   </style>
 </head>
 <body>
+  <script>
+    window.autoDismissNotice = function (el, delayMs) {
+      if (!el) return;
+      setTimeout(function () {
+        el.classList.add("notice-fade-out");
+        setTimeout(function () { if (el.parentNode) el.remove(); }, 600);
+      }, delayMs || 30000);
+    };
+  </script>
   <nav>
     <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Start</a>
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
@@ -135,6 +146,7 @@
     <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
+    <a href="/setup" {% if request.url.path == "/setup" %}class="active"{% endif %}>Setup</a>
   </nav>
   <main>{% block content %}{% endblock %}</main>
   <script>

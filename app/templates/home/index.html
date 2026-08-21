@@ -6,10 +6,10 @@
 <div class="config-banner">
   {% if not config_status.exists %}
     <strong>No config.toml found.</strong>
-    Copy <code>config-template.toml</code> to <code>config.toml</code> and edit it before using Job Seek.
+    <a href="/setup">Configure your LLM provider</a> to get started.
   {% else %}
     <strong>config.toml has no inference provider configured.</strong>
-    Set <code>llm.endpoint</code> and <code>llm.model</code> in <code>config.toml</code>.
+    <a href="/setup">Set up your LLM provider</a>.
   {% endif %}
 </div>
 {% endif %}

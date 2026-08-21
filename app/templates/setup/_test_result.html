@@ -1,0 +1,12 @@
+{% if ok %}
+<div class="notice" style="background: #d4edda; border-color: #28a745; color: #155724;">
+  <p>{{ message }}</p>
+  <button class="notice-dismiss" onclick="this.parentElement.remove()">×</button>
+</div>
+{% else %}
+<div class="notice" style="background: #f8d7da; border-color: #dc3545; color: #721c24;">
+  <p>{{ message }}</p>
+  <button class="notice-dismiss" onclick="this.parentElement.remove()">×</button>
+</div>
+{% endif %}
+<script>window.autoDismissNotice && window.autoDismissNotice(document.currentScript.previousElementSibling, 6000);</script>

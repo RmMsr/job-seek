@@ -1,6 +1,6 @@
 [llm]
-endpoint = "http://localhost:11434/v1"
-model = "gemma4"
+provider = "custom"
+endpoint = "http://localhost:8080/v1"
 
 [database]
 path = "job-seek.db"
