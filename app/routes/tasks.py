@@ -22,11 +22,19 @@ def _progress_from_line(line: str) -> dict | None:
     return {"current": current, "total": total, "percent": round(current / total * 100)}
 
 
-def _task_summary(task: dict, *, include_result: bool = False) -> dict:
+def _task_label(conn: sqlite3.Connection, task: dict) -> str:
+    if task["kind"] == "fetch_source":
+        source = q.get_source(conn, task["params"].get("source_id"))
+        if source:
+            return f"Fetch: {source['name']}"
+    return task["kind"].replace("_", " ")
+
+
+def _task_summary(conn: sqlite3.Connection, task: dict, *, include_result: bool = False) -> dict:
     log = task["log"].strip()
     last_line = log.split("\n")[-1] if log else ""
     summary = {
-        "id": task["id"], "kind": task["kind"], "status": task["status"],
+        "id": task["id"], "kind": task["kind"], "label": _task_label(conn, task), "status": task["status"],
         "last_line": last_line, "error": task["error"],
         "progress": _progress_from_line(last_line),
     }
@@ -39,7 +47,7 @@ def _task_summary(task: dict, *, include_result: bool = False) -> dict:
 @router.get("/tasks/active")
 def tasks_active(conn: sqlite3.Connection = Depends(get_db)):
     return {
-        "tasks": [_task_summary(t) for t in q.get_active_tasks(conn)],
+        "tasks": [_task_summary(conn, t) for t in q.get_active_tasks(conn)],
         "inbox_count": q.count_unresolved_inbox_items(conn),
     }
 
@@ -49,7 +57,7 @@ def task_detail(task_id: int, conn: sqlite3.Connection = Depends(get_db)):
     task = q.get_task(conn, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return _task_summary(task, include_result=True)
+    return _task_summary(conn, task, include_result=True)
 
 
 @router.get("/tasks/{task_id}/log", response_class=HTMLResponse)

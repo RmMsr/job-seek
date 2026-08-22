@@ -21,6 +21,6 @@ build:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | buildah login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
-    - buildah build --layers --file Containerfile --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" --tag "$CI_REGISTRY_IMAGE:latest" .
+    - buildah build --layers --build-arg "VERSION=$CI_COMMIT_SHORT_SHA" --build-arg "BUILD_DATE=$(date -u +%Y-%m-%d)" --file Containerfile --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" --tag "$CI_REGISTRY_IMAGE:latest" .
     - buildah push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
     - buildah push "$CI_REGISTRY_IMAGE:latest"

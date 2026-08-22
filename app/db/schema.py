@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     attainability_reasoning TEXT,
     fit_score REAL,
     profile_version_hash TEXT,
-    gate_override INTEGER NOT NULL DEFAULT 0
+    gate_override INTEGER NOT NULL DEFAULT 0,
+    evaluation_completed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_scores (
@@ -493,6 +494,24 @@ def _migrate_fetch_runs_add_auth_error(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_add_evaluation_completed_at(conn: sqlite3.Connection) -> None:
+    # Purely additive column, same shape as the other jobs-table migrations
+    # above. Backfilled to "now" for every already-classified job so existing
+    # jobs don't vanish from the list on upgrade — only newly ingested jobs
+    # go through the real "not visible until the pipeline finishes" gate.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "evaluation_completed_at" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN evaluation_completed_at TEXT")
+    conn.execute(
+        "UPDATE jobs SET evaluation_completed_at = datetime('now') "
+        "WHERE content_type IN ('job_posting', 'lead')"
+    )
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -512,3 +531,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_scenarios_gate_threshold(conn)
     _migrate_jobs_status_invalid_to_trash(conn)
     _migrate_fetch_runs_add_auth_error(conn)
+    _migrate_jobs_add_evaluation_completed_at(conn)

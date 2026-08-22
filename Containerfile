@@ -18,10 +18,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 
+ARG VERSION=dev
+ARG BUILD_DATE=
 WORKDIR /app
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
-    PLAYWRIGHT_BROWSERS_PATH=0
+    PLAYWRIGHT_BROWSERS_PATH=0 \
+    APP_VERSION=${VERSION} \
+    APP_BUILD_DATE=${BUILD_DATE}
 
 COPY --from=builder /app/.venv /app/.venv
 

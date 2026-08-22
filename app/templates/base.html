@@ -142,6 +142,15 @@
     nav a:hover { color: var(--accent); }
     nav a.active { font-weight: 600; color: var(--text-primary); }
 
+    .setup-subnav {
+      position: static; top: auto; z-index: auto; background: none;
+      margin-bottom: 1.5rem; padding-top: 0; padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+    }
+    .setup-subnav-tabs { display: flex; gap: 1.25rem; }
+    .setup-subnav-version { color: var(--text-muted); font-size: 0.85em; }
+
     .score-badge { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 0.82em; font-weight: 600; font-family: var(--font-sans); }
     .score-exceptional { background: var(--score-exceptional-tint); color: var(--score-exceptional); }
     .score-high { background: var(--score-high-tint); color: var(--score-high); }
@@ -222,18 +231,28 @@
     .score-compare-details[open] summary::before { content:"▾"; }
     .score-compare-details summary > span:first-child { font-weight:600; margin-right:0.2rem; color: var(--text-secondary); }
     .score-compare-details summary .score-compare-summary-scores { display:contents; }
-    .score-compare-pair, .score-tab-card {
+    .score-compare-pair {
       display: inline-flex; align-items: center; gap: 0; border-radius: 999px; overflow: hidden;
       border: 1px solid var(--border);
     }
-    .score-compare-pair .tag, .score-tab-card .tag { border-radius:0; margin:0; font-size:0.85em; background: transparent; }
-    .score-compare-pair .score-badge, .score-tab-card .score-badge { border-radius:0; margin:0; }
+    .score-compare-pair .tag { border-radius:0; margin:0; font-size:0.85em; background: transparent; }
+    .score-compare-pair .score-badge { border-radius:0; margin:0; }
     .score-pill-failed { text-decoration: line-through; text-decoration-color: var(--text-muted); opacity: 0.7; }
     .score-compare-details > form { margin-top:0.75rem; }
     .score-tabs { display:flex; flex-wrap:wrap; gap: 0.4rem; }
     .score-tab-input { position:absolute; opacity:0; width:0; height:0; }
-    .score-tab-card { margin: 0 0 0.5rem; cursor:pointer; background:var(--surface); }
-    .score-tab-input:checked + .score-tab-card { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    /* Deliberately not pill-shaped like .score-compare-pair above — this is
+       a tab selector, not a second copy of the summary's scenario chips. */
+    .score-tab-card {
+      margin: 0 0 0.5rem; cursor:pointer; background:var(--surface); display:inline-flex; align-items:center;
+      padding:0.25rem 0.7rem; border-radius:6px; border:1px solid var(--border);
+      font-size:0.85em; color:var(--text-secondary);
+    }
+    .score-tab-card .tag { background:transparent; padding:0; border-radius:0; font-size:1em; color:inherit; }
+    .score-tab-input:checked + .score-tab-card {
+      border-color: var(--accent); color:var(--text-primary); background:var(--accent-tint);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
     .score-tab-panel { display:none; width:100%; order:1; }
     .score-tab-input:checked + .score-tab-card + .score-tab-panel { display:block; }
     .fit-scorecard-grid { display:grid; grid-template-columns:auto 1fr; gap:0.4rem 0.75rem; align-items:start; margin:0; }
@@ -357,10 +376,9 @@
     <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Start</a>
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
-    <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
-    <a href="/setup" {% if request.url.path == "/setup" %}class="active"{% endif %}>Setup</a>
+    <a href="/setup" {% if request.url.path in ("/setup", "/sources") %}class="active"{% endif %}>Setup</a>
   </nav>
   <div id="notice-stack" aria-live="polite"></div>
   <main>{% block content %}{% endblock %}</main>
@@ -464,6 +482,26 @@
         });
       }
 
+      function pollBatch(taskIds, el) {
+        Promise.all(taskIds.map(function (id) {
+          return fetch("/tasks/" + id).then(function (r) { return r.json(); });
+        })).then(function (tasks) {
+          var pending = tasks.some(function (t) { return t.status !== "done" && t.status !== "failed"; });
+          if (pending) {
+            setTimeout(function () { pollBatch(taskIds, el); }, 2000);
+            return;
+          }
+          delete el.dataset.progressRunning;
+          var failedCount = tasks.filter(function (t) { return t.status === "failed"; }).length;
+          if (failedCount) {
+            showNotice("<p>" + failedCount + " of " + tasks.length + " fetch(es) failed.</p>", "warning");
+          }
+          location.reload();
+        }).catch(function () {
+          setTimeout(function () { pollBatch(taskIds, el); }, 2000);
+        });
+      }
+
       function progressLabel(el) {
         return el.getAttribute("data-progress-label") || el.textContent.trim();
       }
@@ -515,6 +553,14 @@
             showNotice("<p>" + escapeHtml(data.message || "Nothing to do.") + "</p>", "info");
             return;
           }
+          if (data.task_ids) {
+            showNotice(
+              "<p>" + escapeHtml(startLabel) + ": started (" + data.task_ids.length + " source" +
+              (data.task_ids.length === 1 ? "" : "s") + ")</p>", "info"
+            );
+            pollBatch(data.task_ids, el);
+            return;
+          }
           var statusText = data.already_active ? ": already in progress" : ": started";
           showNotice("<p>" + escapeHtml(startLabel) + statusText + "</p>", "info");
           watched[data.task_id] = {
@@ -548,7 +594,7 @@
         var parts = [];
         if (current) {
           var queuedCount = tasks.length - 1;
-          var label = current.kind.replace(/_/g, " ");
+          var label = current.label || current.kind.replace(/_/g, " ");
           parts.push('<span><strong>' + escapeHtml(label) + ':</strong></span>');
           if (current.progress) {
             parts.push(

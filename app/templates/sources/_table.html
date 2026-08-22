@@ -1,6 +1,7 @@
 <div id="sources-table">
 {% if sources %}
-  <table style="width:100%; table-layout:fixed; border-collapse:collapse;">
+  <div style="overflow-x:auto;">
+  <table style="width:100%; min-width:640px; border-collapse:collapse;">
     <colgroup>
       <col style="width:48%">
       <col style="width:14%">
@@ -21,6 +22,7 @@
       {% include "sources/_row.html" %}
     {% endfor %}
   </table>
+  </div>
 {% else %}
   <p>No sources yet. Add one below.</p>
 {% endif %}

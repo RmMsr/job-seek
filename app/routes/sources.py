@@ -16,6 +16,7 @@ from app.ai.generate_source_name import generate_source_name
 from app.pipeline import run_fetch
 from app.task_engine import register_task_kind
 from app.template_env import templates
+from app.version import get_app_version, get_build_date
 
 router = APIRouter()
 
@@ -93,7 +94,8 @@ def _sources_context(conn: sqlite3.Connection) -> dict:
 
 @router.get("/sources", response_class=HTMLResponse)
 def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    return templates.TemplateResponse(request, "sources/index.html", _sources_context(conn))
+    context = {**_sources_context(conn), "app_version": get_app_version(), "build_date": get_build_date()}
+    return templates.TemplateResponse(request, "sources/index.html", context)
 
 
 @register_task_kind("source_detect")

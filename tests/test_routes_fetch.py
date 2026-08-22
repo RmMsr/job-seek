@@ -66,7 +66,6 @@ def test_fetch_panel_has_fetch_all_button(client, conn):
     assert resp.status_code == 200
     assert '/fetch/all' in resp.text
     assert '>Fetch all<' in resp.text
-    assert 'data-progress-target="#fetch-content"' in resp.text
 
 
 def test_fetch_panel_has_notice_stack_and_content_wrapper(client, conn):
@@ -142,28 +141,37 @@ def test_fetch_source_task_flags_auth_error_as_needing_action(conn):
     assert len(items) == 1
 
 
-def test_fetch_all_task_execution_aggregates_and_renders_table(conn):
+def test_post_fetch_all_enqueues_one_task_per_source(client, conn):
     sid1 = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     sid2 = q.insert_source(conn, "other.no", "https://other.no", "generic_listing")
-
-    def fake_fetch_all(source, conn, *args, **kwargs):
-        run_id = q.start_fetch_run(conn, source["id"])
-        yield f"Starting fetch for '{source['name']}'"
-        q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1)
-        return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=1, jobs_new=1, error=None)
-
-    task = q.enqueue_task(conn, kind="fetch_all", params={"source_ids": [sid1, sid2]})
-    with patch("app.routes.fetch.run_fetch", side_effect=fake_fetch_all):
-        execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
-    fetched = q.get_task(conn, task["id"])
-    assert fetched["status"] == "done"
-    assert fetched["result"]["notices"][0]["html"]
-    assert "2" in fetched["result"]["notices"][0]["html"]
-    assert f'id="fetch-row-{sid1}"' in fetched["result"]["html_chunks"][0]
+    resp = client.post("/fetch/all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["task_ids"]) == 2
+    tasks = [q.get_task(conn, tid) for tid in data["task_ids"]]
+    assert {t["kind"] for t in tasks} == {"fetch_source"}
+    assert {t["params"]["source_id"] for t in tasks} == {sid1, sid2}
 
 
-def test_fetch_all_with_no_sources_has_no_html_chunk(conn):
-    task = q.enqueue_task(conn, kind="fetch_all", params={"source_ids": []})
-    execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
-    fetched = q.get_task(conn, task["id"])
-    assert fetched["result"]["html_chunks"] == []
+def test_post_fetch_all_excludes_manual_and_disabled_sources(client, conn):
+    q.get_or_create_manual_source(conn)
+    disabled = q.insert_source(conn, "off.no", "https://off.no", "generic_listing")
+    q.update_source(conn, disabled, name="off.no", url="https://off.no", fetcher_type="generic_listing", enabled=False)
+    q.insert_source(conn, "on.no", "https://on.no", "generic_listing")
+    resp = client.post("/fetch/all")
+    data = resp.json()
+    assert len(data["task_ids"]) == 1
+
+
+def test_post_fetch_all_reuses_already_active_source_task(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    existing = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    resp = client.post("/fetch/all")
+    data = resp.json()
+    assert data["task_ids"] == [existing["id"]]
+
+
+def test_post_fetch_all_with_no_sources_is_skipped(client, conn):
+    resp = client.post("/fetch/all")
+    assert resp.status_code == 200
+    assert resp.json()["skipped"] is True

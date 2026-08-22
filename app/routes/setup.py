@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.config import load_config, load_raw_llm, validate_llm, validate_llm_for_save, write_config
 from app.providers import LLM_PROVIDERS, provider_groups
 from app.template_env import templates
+from app.version import get_app_version, get_build_date
 
 router = APIRouter()
 
@@ -67,6 +68,8 @@ def setup_form(request: Request):
             "raw_llm": raw_llm,
             "provider_groups": provider_groups(LLM_PROVIDERS),
             "saved": request.query_params.get("saved") == "1",
+            "app_version": get_app_version(),
+            "build_date": get_build_date(),
         },
     )
 
@@ -167,6 +170,8 @@ def setup_save(
                 "provider_groups": provider_groups(LLM_PROVIDERS),
                 "saved": False,
                 "error": err,
+                "app_version": get_app_version(),
+                "build_date": get_build_date(),
             },
             status_code=400,
         )

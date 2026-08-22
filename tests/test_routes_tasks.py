@@ -65,6 +65,25 @@ def test_tasks_active_progress_takes_innermost_bracket_pair(client, conn):
     assert progress == {"current": 3, "total": 5, "percent": 60}
 
 
+def test_tasks_active_labels_fetch_source_with_source_name(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "Fetch: finn.no"
+
+
+def test_tasks_active_falls_back_to_kind_when_source_missing(client, conn):
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 999})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "fetch source"
+
+
+def test_tasks_active_labels_other_kinds_by_name(client, conn):
+    q.enqueue_task(conn, kind="job_reset", params={})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "job reset"
+
+
 def test_task_log_page_renders_lines_and_status(client, conn):
     task = q.enqueue_task(conn, kind="fetch_source", params={})
     q.append_task_log(conn, task["id"], "first line")

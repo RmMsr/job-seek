@@ -44,6 +44,14 @@ def test_hash_handles_missing_name_key():
     assert compute_version_hash({}, []) == compute_version_hash({"name": ""}, [])
 
 
+def test_hash_changes_with_gate_threshold():
+    scenario = {"description": "Remote ML roles"}
+    criteria = [{"text": "Must be remote", "weight": "must"}]
+    h1 = compute_version_hash({**scenario, "gate_threshold": 0.7}, criteria)
+    h2 = compute_version_hash({**scenario, "gate_threshold": 0.9}, criteria)
+    assert h1 != h2
+
+
 def test_profile_hash_is_deterministic():
     assert compute_profile_hash("Senior ML engineer") == compute_profile_hash("Senior ML engineer")
 

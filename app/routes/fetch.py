@@ -52,42 +52,6 @@ def _task_fetch_source(conn, client, model, config, params):
     return result
 
 
-@register_task_kind("fetch_all")
-def _task_fetch_all(conn, client, model, config, params):
-    source_ids = params["source_ids"]
-    total_found = 0
-    total_new = 0
-    needs_action_extras = {}
-    for idx, source_id in enumerate(source_ids, start=1):
-        source = q.get_source(conn, source_id)
-        if source is None:
-            continue
-        label = f"[Source {idx}/{len(source_ids)}: {source['name']}] "
-        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
-        try:
-            while True:
-                yield label + next(gen)
-        except StopIteration as stop:
-            fetch_result = stop.value
-            total_found += fetch_result.jobs_found
-            total_new += fetch_result.jobs_new
-            extra = _auth_error_result(conn, source, fetch_result.run_id)
-            if extra:
-                needs_action_extras = extra  # last auth error wins if several sources need reconnecting
-
-    notice_html = templates.get_template("fetch/_fetch_all_summary_notice.html").render(
-        total_new=total_new, total_found=total_found, source_count=len(source_ids),
-    )
-    html_chunks = []
-    if source_ids:
-        html_chunks.append(
-            templates.get_template("fetch/_table.html").render(request=None, **_fetch_panel_context(conn))
-        )
-    result = {"notices": [{"level": "info", "html": notice_html}], "html_chunks": html_chunks}
-    result.update(needs_action_extras)
-    return result
-
-
 @router.get("/fetch", response_class=HTMLResponse)
 def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "fetch/panel.html", _fetch_panel_context(conn))
@@ -96,8 +60,10 @@ def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
 @router.post("/fetch/all")
 def trigger_fetch_all(conn: sqlite3.Connection = Depends(get_db)):
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
-    task = q.enqueue_task(conn, kind="fetch_all", params={"source_ids": [s["id"] for s in sources]})
-    return {"task_id": task["id"], "already_active": task["already_active"]}
+    if not sources:
+        return {"skipped": True, "message": "No sources to fetch."}
+    tasks = [q.enqueue_task(conn, kind="fetch_source", params={"source_id": s["id"]}) for s in sources]
+    return {"task_ids": [t["id"] for t in tasks]}
 
 
 @router.post("/fetch/{source_id}")

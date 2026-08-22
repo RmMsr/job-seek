@@ -9,6 +9,17 @@ from app.task_engine import run_worker_forever
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+class _ExcludeTasksActiveFilter(logging.Filter):
+    """The status bar polls /tasks/active every 2s from every open tab —
+    without this it drowns out everything else in the access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/tasks/active" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_ExcludeTasksActiveFilter())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     stop_event = threading.Event()

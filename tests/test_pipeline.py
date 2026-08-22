@@ -73,6 +73,19 @@ def test_run_add_job_stores_job_against_given_source(conn, source):
     assert any("Classified as job_posting" in m for m in messages)
 
 
+def test_run_add_job_marks_evaluation_complete(conn, source):
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer", "headline": "Great role", "summary": "Good ML role"}',
+        '{"score": 0.9, "reasoning": "Great match"}',
+    )
+    _drain(
+        run_add_job(conn, client, "llama3.2", source["id"], "http://example.com/job/1", "<p>We are hiring</p>")
+    )
+    job = q.get_jobs(conn)[0]
+    assert job["evaluation_completed_at"] is not None
+
+
 def test_run_add_job_irrelevant_content_not_persisted(conn, source):
     client = _mock_client(
         '{"type": "irrelevant", "reason": "not a job"}', "{}", "{}",
@@ -495,6 +508,7 @@ def test_run_reevaluate_job_rescopes_and_reassesses_without_moving_status(conn, 
     assert updated["interest_score"] == pytest.approx(0.8)
     assert updated["attainability_score"] == pytest.approx(0.7)
     assert updated["gate_override"] == 1
+    assert updated["evaluation_completed_at"] is not None
     score = q.get_job_score(conn, jid, scenario_id)
     assert score["relevance_score"] == pytest.approx(0.9)
     scores = q.get_job_scores(conn, jid)

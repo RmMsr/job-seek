@@ -399,6 +399,7 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     q.update_job_fit(conn, jid, 0.7, "good interest", 0.6, "some gaps", "phash1")
     q.upsert_scenario_feedback(conn, jid, scenario_id, "shouldn't count", "lower")
     q.update_job_feedback(conn, jid, "accepted", "note")
+    q.mark_job_evaluation_complete(conn, jid)
 
     q.reset_job(conn, jid)
 
@@ -413,8 +414,19 @@ def test_reset_job_clears_pipeline_output_and_scores(conn):
     assert job["interest_score"] is None
     assert job["fit_score"] is None
     assert job["profile_version_hash"] is None
+    assert job["evaluation_completed_at"] is None
     assert q.get_job_scores(conn, jid) == []
     assert q.get_recent_feedback_notes(conn, scenario_id) == []
+
+
+def test_mark_job_evaluation_complete_sets_timestamp(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    assert q.get_job(conn, jid)["evaluation_completed_at"] is None
+
+    q.mark_job_evaluation_complete(conn, jid)
+
+    assert q.get_job(conn, jid)["evaluation_completed_at"] is not None
 
 
 def test_reset_job_clears_gate_override(conn):
@@ -489,6 +501,7 @@ def test_get_job_counts(conn):
     q.update_job_feedback(conn, j1, "accepted", "note")
     q.update_job_feedback(conn, j2, "rejected", "note")
     q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
+    q.mark_job_evaluation_complete(conn, j3)
     counts = q.get_job_counts(conn)
     assert counts == {"new": 1, "accepted": 1, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
 
@@ -502,6 +515,8 @@ def test_get_job_counts_splits_new_from_not_relevant(conn):
     q.update_job_pipeline(conn, failed, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, passed, scenario_id, 0.9, "", "hash1")
     q.upsert_job_score(conn, failed, scenario_id, 0.3, "", "hash2")
+    q.mark_job_evaluation_complete(conn, passed)
+    q.mark_job_evaluation_complete(conn, failed)
 
     counts = q.get_job_counts(conn)
 
@@ -531,6 +546,7 @@ def test_get_job_counts_new_excludes_irrelevant_and_error(conn):
     q.update_job_pipeline(conn, posting, simplified_content="", content_type="job_posting")
     q.update_job_pipeline(conn, irrelevant, simplified_content="", content_type="irrelevant")
     q.update_job_pipeline(conn, error, simplified_content="", content_type="error")
+    q.mark_job_evaluation_complete(conn, posting)
 
     counts = q.get_job_counts(conn)
 
@@ -845,6 +861,8 @@ def test_get_jobs_gate_status_passed_excludes_below_threshold(conn):
     q.update_job_pipeline(conn, above, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, below, scenario_id, 0.5, "", "hash1")
     q.upsert_job_score(conn, above, scenario_id, 0.9, "", "hash2")
+    q.mark_job_evaluation_complete(conn, below)
+    q.mark_job_evaluation_complete(conn, above)
 
     all_jobs = q.get_jobs(conn)
     assert {j["title"] for j in all_jobs} == {"Below", "Above"}
@@ -853,20 +871,50 @@ def test_get_jobs_gate_status_passed_excludes_below_threshold(conn):
     assert [j["title"] for j in passed_only] == ["Above"]
 
 
-def test_get_jobs_gate_status_passed_keeps_never_scored_jobs(conn):
-    # A job with zero job_scores rows (e.g. no scenarios existed at fetch
-    # time) hasn't failed a gate — it was never gated at all — so it must
-    # stay visible, unlike a job that was scored and failed every scenario.
+def test_get_jobs_gate_status_passed_excludes_unclassified_jobs_still_in_evaluation(conn):
+    # A freshly inserted job has content_type = NULL until classify() runs
+    # in the background — it's still mid-pipeline, not yet gated one way or
+    # the other, so it must not appear as if it had passed.
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     scenario_id = q.insert_scenario(conn, "A", "")
     scored_and_failed = q.insert_job(conn, source_id=source_id, url="http://job/failed", title="Failed", company="C", raw_text="r")
-    never_scored = q.insert_job(conn, source_id=source_id, url="http://job/unscored", title="Unscored", company="C", raw_text="r")
+    still_evaluating = q.insert_job(conn, source_id=source_id, url="http://job/pending", title="Pending", company="C", raw_text="r")
     q.update_job_pipeline(conn, scored_and_failed, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, scored_and_failed, scenario_id, 0.5, "", "hash1")  # below default 0.7
 
     passed_only = q.get_jobs(conn, gate_status="passed")
 
-    assert [j["title"] for j in passed_only] == ["Unscored"]
+    assert passed_only == []
+
+
+def test_get_jobs_gate_status_passed_excludes_job_mid_scoring_loop(conn):
+    # Classified, and its one recorded score already clears the gate, but
+    # the pipeline hasn't reached mark_job_evaluation_complete yet (still
+    # scoring against other scenarios) — must not appear as passed.
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Mid-scoring", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "", "hash1")  # clears the gate...
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+    failed_only = q.get_jobs(conn, gate_status="failed")
+
+    assert passed_only == []  # ...but shouldn't show yet, evaluation isn't marked complete
+    assert failed_only == []
+
+
+def test_get_jobs_gate_status_passed_includes_job_once_evaluation_marked_complete(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="Done", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "", "hash1")
+    q.mark_job_evaluation_complete(conn, jid)
+
+    passed_only = q.get_jobs(conn, gate_status="passed")
+
+    assert [j["title"] for j in passed_only] == ["Done"]
 
 
 def test_get_jobs_gate_status_passed_excludes_irrelevant_and_error(conn):
@@ -880,6 +928,7 @@ def test_get_jobs_gate_status_passed_excludes_irrelevant_and_error(conn):
     q.update_job_pipeline(conn, irrelevant, simplified_content="", content_type="irrelevant")
     q.update_job_pipeline(conn, error, simplified_content="", content_type="error")
     q.update_job_pipeline(conn, posting, simplified_content="", content_type="job_posting")
+    q.mark_job_evaluation_complete(conn, posting)
 
     passed_only = q.get_jobs(conn, gate_status="passed")
 
@@ -906,6 +955,8 @@ def test_get_jobs_gate_status_passed_keeps_unscored_and_gate_passed_leads(conn):
     q.update_job_pipeline(conn, unscored_lead, simplified_content="", content_type="lead")
     q.update_job_pipeline(conn, passed_lead, simplified_content="", content_type="lead")
     q.upsert_job_score(conn, passed_lead, scenario_id, 0.9, "", "hash1")
+    q.mark_job_evaluation_complete(conn, unscored_lead)
+    q.mark_job_evaluation_complete(conn, passed_lead)
 
     passed_only = q.get_jobs(conn, gate_status="passed")
 
@@ -922,6 +973,8 @@ def test_get_jobs_gate_status_failed_returns_only_failed_postings(conn):
     q.update_job_pipeline(conn, passed, simplified_content="", content_type="job_posting")
     q.upsert_job_score(conn, failed, scenario_id, 0.3, "", "hash1")
     q.upsert_job_score(conn, passed, scenario_id, 0.9, "", "hash2")
+    q.mark_job_evaluation_complete(conn, failed)
+    q.mark_job_evaluation_complete(conn, passed)
 
     failed_only = q.get_jobs(conn, gate_status="failed")
 

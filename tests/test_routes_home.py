@@ -76,6 +76,7 @@ def test_home_full_setup_shows_actionable_block(client, conn):
     other_job_id = q.insert_job(conn, source_id=source_id, url="http://finn.no/2", title="Other", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, other_job_id, simplified_content="c", content_type="job_posting", summary="s")
     q.upsert_job_score(conn, other_job_id, scenario_id, 0.9, "ok", "hash1")  # above default gate_threshold 0.7 — stays "new"
+    q.mark_job_evaluation_complete(conn, other_job_id)
 
     resp = client.get("/")
     assert resp.status_code == 200

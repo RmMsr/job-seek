@@ -594,6 +594,68 @@ def test_init_db_migrates_jobs_adds_gate_override_column(conn):
     assert cols.count("gate_override") == 1
 
 
+def test_init_db_migrates_jobs_adds_evaluation_completed_at_backfilled(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('slack', 'finn_listing', 'manual', 'generic_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT,
+            gate_override INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, content_type) VALUES (1, 'http://job/posting', 'job_posting')"
+    )
+    conn.execute("INSERT INTO jobs (source_id, url, content_type) VALUES (1, 'http://job/lead', 'lead')")
+    conn.execute("INSERT INTO jobs (source_id, url, content_type) VALUES (1, 'http://job/error', 'error')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/unclassified')")
+    conn.commit()
+
+    init_db(conn)
+
+    rows = {
+        r["url"]: r["evaluation_completed_at"]
+        for r in conn.execute("SELECT url, evaluation_completed_at FROM jobs").fetchall()
+    }
+    assert rows["http://job/posting"] is not None
+    assert rows["http://job/lead"] is not None
+    assert rows["http://job/error"] is None
+    assert rows["http://job/unclassified"] is None
+
+    # Idempotent: running init_db again doesn't error, duplicate the column, or re-touch existing values.
+    init_db(conn)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("evaluation_completed_at") == 1
+
+
 def test_scenarios_table_has_gate_threshold_column_not_boosted(conn):
     init_db(conn)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(scenarios)").fetchall()}

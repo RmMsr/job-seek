@@ -15,6 +15,7 @@ def _seed(conn):
     scenario_id = q.insert_scenario(conn, "Remote ML", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.9, "Good match", "hash1")
     q.update_job_fit(conn, jid, 0.8, "Strong domain fit", 0.7, "Close match", "phash1")
+    q.mark_job_evaluation_complete(conn, jid)
     return sid, jid, scenario_id
 
 
@@ -34,10 +35,12 @@ def test_job_list_empty(client, conn):
 def test_job_list_shows_published_date(client, conn):
     published = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "finn_listing")
-    q.insert_job(
+    jid = q.insert_job(
         conn, source_id=sid, url="http://finn.no/job/1", title="ML Eng", company="Acme", raw_text="r",
         published_at=published,
     )
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="Great role")
+    q.mark_job_evaluation_complete(conn, jid)
     resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "5 days ago" in resp.text
@@ -1184,6 +1187,7 @@ def test_job_list_new_tab_excludes_gate_failed_postings(client, conn):
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+    q.mark_job_evaluation_complete(conn, jid)
 
     resp = client.get("/jobs")
     assert "Filtered Out" not in resp.text
@@ -1278,6 +1282,7 @@ def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
+    q.mark_job_evaluation_complete(conn, jid)
 
     resp = client.get("/jobs")
 

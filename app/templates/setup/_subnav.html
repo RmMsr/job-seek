@@ -1,0 +1,7 @@
+<nav class="setup-subnav">
+  <div class="setup-subnav-tabs">
+    <a href="/setup" {% if request.url.path == "/setup" %}class="active"{% endif %}>LLM</a>
+    <a href="/sources" {% if request.url.path == "/sources" %}class="active"{% endif %}>Sources</a>
+  </div>
+  <span class="setup-subnav-version">v{{ app_version }} &middot; {{ build_date }}</span>
+</nav>

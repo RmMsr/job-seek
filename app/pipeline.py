@@ -98,6 +98,7 @@ def _ingest_posting(
             yield _progress(
                 f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {url}"
             )
+        q.mark_job_evaluation_complete(conn, job_id)
     elif content_type == "irrelevant":
         q.delete_job(conn, job_id)
     else:
@@ -262,6 +263,7 @@ def run_reevaluate_job(
     yield _progress(
         f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {job['url']}"
     )
+    q.mark_job_evaluation_complete(conn, job["id"])
 
 
 def _eligible_for_reevaluation(conn: sqlite3.Connection, scenario: dict) -> tuple[list[dict], int, list[dict], str]:
