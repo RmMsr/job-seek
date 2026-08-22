@@ -2,18 +2,20 @@
   <form hx-post="/scenarios/{{ scenario.id }}"
         hx-target="#scenario-header-{{ scenario.id }}"
         hx-swap="outerHTML"
-        style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-    <input type="text" name="name" value="{{ scenario.name }}" required style="flex:1; min-width:220px;">
-    <input type="text" name="description" value="{{ scenario.description }}" style="flex:2; min-width:280px;">
-    <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.9em;"
-           title="Jobs need at least this raw gate score, from this scenario, to show up in your list">
-      Gate threshold:
-      <input type="number" name="gate_threshold" value="{{ scenario.gate_threshold }}" min="0" max="1" step="0.05" style="width:5em;">
-    </label>
-    <button type="submit" class="btn">Save</button>
-    <button type="button" class="btn"
-      hx-get="/scenarios/{{ scenario.id }}"
-      hx-target="#scenario-header-{{ scenario.id }}"
-      hx-swap="outerHTML">Cancel</button>
+        style="display:flex; flex-direction:column; gap:0.5rem;">
+    <input type="text" name="name" value="{{ scenario.name }}" required class="text-input" style="width:100%; box-sizing:border-box;">
+    <textarea name="description" rows="4" style="width:100%; box-sizing:border-box; padding:0.5rem; font-family:inherit; resize:vertical;">{{ scenario.description }}</textarea>
+    <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+      <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.9em;"
+             title="Jobs need at least this raw gate score, from this scenario, to show up in your list">
+        Gate threshold:
+        <input type="number" name="gate_threshold" value="{{ scenario.gate_threshold }}" min="0" max="1" step="0.05" class="text-input" style="width:7em;">
+      </label>
+      <button type="submit" class="btn">Save</button>
+      <button type="button" class="btn"
+        hx-get="/scenarios/{{ scenario.id }}"
+        hx-target="#scenario-header-{{ scenario.id }}"
+        hx-swap="outerHTML">Cancel</button>
+    </div>
   </form>
 </div>
