@@ -3,8 +3,8 @@
         hx-target="#scenario-header-{{ scenario.id }}"
         hx-swap="outerHTML"
         style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-    <input type="text" name="name" value="{{ scenario.name }}" required>
-    <input type="text" name="description" value="{{ scenario.description }}" style="flex:1; min-width:200px;">
+    <input type="text" name="name" value="{{ scenario.name }}" required style="flex:1; min-width:220px;">
+    <input type="text" name="description" value="{{ scenario.description }}" style="flex:2; min-width:280px;">
     <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.9em;"
            title="Jobs need at least this raw gate score, from this scenario, to show up in your list">
       Gate threshold:

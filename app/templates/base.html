@@ -288,6 +288,7 @@
       padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); box-sizing: border-box;
       font: inherit; background: var(--surface); color: var(--text-primary);
     }
+    .text-input { width: 100%; max-width: 480px; }
     .btn { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
     .btn:hover { border-color: var(--accent); }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
@@ -357,9 +358,9 @@
       background: #212529; color: #f8f9fa; font-size: 0.85em;
       padding: 0.5rem 1rem; border-radius: 6px 6px 0 0; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); }
     #status-bar a { color: #9ec5fe; }
-    .status-bar-progress-track { flex: none; width: 80px; height: 6px; border-radius: 3px;
+    .status-bar-progress-track { display: inline-block; flex: none; width: 80px; height: 6px; border-radius: 3px;
       background: #495057; overflow: hidden; }
-    .status-bar-progress-fill { height: 100%; background: #0d6efd; }
+    .status-bar-progress-fill { display: block; height: 100%; background: #0d6efd; }
   </style>
 </head>
 <body>

@@ -48,7 +48,7 @@
 
   <div class="form-row">
     <label for="model">Model (required for hosted providers; optional for local/custom)</label>
-    <input type="text" name="model" id="model" list="model-options" class="text-input" style="width: 100%; max-width: 480px;" placeholder="e.g. gpt-4o-mini" {% if raw_llm and raw_llm.model %}value="{{ raw_llm.model }}"{% endif %}>
+    <input type="text" name="model" id="model" list="model-options" class="text-input" placeholder="e.g. gpt-4o-mini" {% if raw_llm and raw_llm.model %}value="{{ raw_llm.model }}"{% endif %}>
     <button type="button" class="btn" hx-post="/setup/models" hx-target="#model-options-container" hx-swap="innerHTML" hx-include="[name='provider'], [name='api_key'], [name='endpoint']">
       Get available models
     </button>
