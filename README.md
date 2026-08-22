@@ -48,7 +48,7 @@ podman run --name job-seek --replace --detach \
 
 ```shell
 mkdir --parents data
-docker run --name job-seek --replace --detach \
+docker run --name job-seek --rm --detach \
   --publish 8000:8000 \
   --add-host=host.containers.internal:host-gateway \
   --volume "$(pwd)/data:/app/data" \

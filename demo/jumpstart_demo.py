@@ -55,7 +55,7 @@ Based in Norway. Open to EU relocation for the right opportunity.
 
 SCENARIOS_AND_CRITERIA = [
     {
-        "name": "Senior Fullstack — Established Company",
+        "name": "Senior Fullstack",
         "description": "Seeking senior fullstack role at established Norwegian tech company (Oslo/Bergen). Emphasis on career growth, structured teams, strong technical culture. Both backend rigor and modern frontend.",
         "gate_threshold": 0.75,
         "criteria": [
@@ -70,7 +70,7 @@ SCENARIOS_AND_CRITERIA = [
         ],
     },
     {
-        "name": "Dev/Sec/Ops — Startup / Scale-up",
+        "name": "Dev/Sec/Ops @ Startup/Scale-up",
         "description": "Infrastructure or dev/sec/ops role at small, fast-moving company (10–100 people). Remote-friendly, equity/shares offered. Autonomy, learning new domains, direct business impact.",
         "gate_threshold": 0.55,
         "criteria": [
@@ -84,7 +84,7 @@ SCENARIOS_AND_CRITERIA = [
         ],
     },
     {
-        "name": "Founding Engineer — Digital Twin / Simulation",
+        "name": "Founding Engineer - Maritim",
         "description": "Dream role: founding engineer (CTO track) at early-stage digital twin, simulation, or hardware startup. Willing to relocate internationally. High equity, greenfield architecture, direct product impact.",
         "gate_threshold": 0.35,
         "criteria": [
@@ -98,7 +98,7 @@ SCENARIOS_AND_CRITERIA = [
         ],
     },
     {
-        "name": "Tech Lead / EM — AI-Forward Consultancy / Finance / Insurance / Health",
+        "name": "AI Lead",
         "description": "Mid-level leadership (tech lead IC or engineering manager) at larger org building AI/ML initiatives. Consultancy, finance, insurance, or health. Norway/EU-based. High compensation expected.",
         "gate_threshold": 0.65,
         "criteria": [
