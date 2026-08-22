@@ -318,15 +318,29 @@
     .how-it-works li ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
     .how-it-works li ol li { color: var(--text-secondary); }
     #notice-stack:empty { display: none; }
+    #notice-stack { position: fixed; bottom: 3rem; left: 50%; transform: translateX(-50%);
+      width: 100%; max-width: 960px; box-sizing: border-box; padding: 0 1rem; z-index: 25; }
     .notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
       padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; border-radius: 6px;
-      border: 1px solid var(--border); background: var(--surface); transition: opacity 0.6s ease; }
+      border: 1px solid var(--border); background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: opacity 0.4s ease; }
     .notice.notice-fade-out { opacity: 0; }
     .notice p { margin: 0; }
     .notice-warning { background: var(--warning-tint); border-color: var(--warning); color: var(--warning); }
     .notice-dismiss { flex: none; background: none; border: none; cursor: pointer; font-size: 1.1rem;
       line-height: 1; color: inherit; opacity: 0.6; padding: 0 0.15rem; }
     .notice-dismiss:hover { opacity: 1; }
+    .task-completed { text-decoration: line-through; color: #888; }
+    #status-bar:empty { display: none; }
+    #status-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      background: #212529; color: #f8f9fa; font-size: 0.85em;
+      padding: 0.5rem 1rem; border-radius: 6px 6px 0 0; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); }
+    #status-bar a { color: #9ec5fe; }
+    .status-bar-progress-track { flex: none; width: 80px; height: 6px; border-radius: 3px;
+      background: #495057; overflow: hidden; }
+    .status-bar-progress-fill { height: 100%; background: #0d6efd; }
   </style>
 </head>
 <body>
@@ -348,7 +362,9 @@
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
     <a href="/setup" {% if request.url.path == "/setup" %}class="active"{% endif %}>Setup</a>
   </nav>
+  <div id="notice-stack" aria-live="polite"></div>
   <main>{% block content %}{% endblock %}</main>
+  <div id="status-bar"></div>
   <script>
     (function () {
       function showNotice(html, level) {
@@ -371,15 +387,95 @@
           wrapper.classList.add("notice-fade-out");
           setTimeout(function () {
             if (wrapper.parentNode) wrapper.remove();
-          }, 600);
-        }, 30000);
+          }, 400);
+        }, 5000);
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function applyOob(chunk) {
+        var container = document.createElement("div");
+        container.innerHTML = chunk;
+        Array.prototype.forEach.call(container.children, function (node) {
+          if (!node.id) return;
+          var existing = document.getElementById(node.id);
+          if (!existing) return;
+          existing.outerHTML = node.outerHTML;
+          var replaced = document.getElementById(node.id);
+          if (replaced && window.htmx) window.htmx.process(replaced);
+        });
+      }
+
+      var resumePage = document.getElementById("resume-page");
+      var resumeInboxItemId = resumePage ? resumePage.getAttribute("data-inbox-item-id") : null;
+
+      var watched = {}; // task_id -> {el, targetSelector, oobMode, bodyFieldNames}
+
+      function finishWatched(taskId, task) {
+        var w = watched[taskId];
+        if (!w) return;
+        delete watched[taskId];
+        if (task.status === "failed") {
+          delete w.el.dataset.progressRunning;
+          showNotice("<p>" + escapeHtml(task.error || "Failed") + "</p>", "warning");
+          return;
+        }
+        var result = task.result || {};
+        (result.notices || []).forEach(function (n) { showNotice(n.html, n.level); });
+        var chunks = result.html_chunks || [];
+        for (var k = 0; k < w.bodyFieldNames.length; k++) {
+          var clearFieldEl = document.querySelector(w.el.getAttribute("data-progress-body-" + w.bodyFieldNames[k]));
+          if (clearFieldEl) clearFieldEl.value = "";
+        }
+        if (w.oobMode) {
+          chunks.forEach(applyOob);
+        } else if (w.targetSelector && chunks.length) {
+          var target = document.querySelector(w.targetSelector);
+          if (target) {
+            target.innerHTML = chunks[chunks.length - 1];
+            if (window.htmx) window.htmx.process(target);
+          }
+        } else if (!w.oobMode && !chunks.length) {
+          location.reload();
+        }
+        // Removed only after the swap above lands, so anything watching this
+        // attribute (e.g. profile/_editor.html's textarea-lock safety net)
+        // sees the real post-swap DOM state, not a still-empty target.
+        delete w.el.dataset.progressRunning;
+        if (resumeInboxItemId) {
+          fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" });
+        }
+      }
+
+      function pollWatched(taskId) {
+        var w = watched[taskId];
+        if (!w) return;
+        fetch("/tasks/" + taskId).then(function (r) { return r.json(); }).then(function (task) {
+          if (!watched[taskId]) return;
+          if (task.status === "done" || task.status === "failed") {
+            finishWatched(taskId, task);
+          } else {
+            setTimeout(function () { pollWatched(taskId); }, 2000);
+          }
+        }).catch(function () {
+          setTimeout(function () { pollWatched(taskId); }, 2000);
+        });
+      }
+
+      function progressLabel(el) {
+        return el.getAttribute("data-progress-label") || el.textContent.trim();
       }
 
       function onClick(evt) {
         var el = evt.target.closest("[data-progress-url]");
         if (!el) return;
         evt.preventDefault();
-        if (el.dataset.progressRunning === "1") return;
+        if (el.dataset.progressRunning === "1") {
+          showNotice("<p>" + escapeHtml(progressLabel(el)) + ": already in progress</p>", "info");
+          return;
+        }
         el.dataset.progressRunning = "1";
 
         var url = el.getAttribute("data-progress-url");
@@ -388,7 +484,7 @@
         var body = null;
         if (el.hasAttribute("data-progress-jobs")) {
           var checked = document.querySelectorAll('input[name="job_ids"]:checked');
-          if (!checked.length) return;
+          if (!checked.length) { delete el.dataset.progressRunning; return; }
           body = new URLSearchParams();
           checked.forEach(function (cb) { body.append("job_ids", cb.value); });
         }
@@ -404,135 +500,30 @@
           for (var j = 0; j < bodyFieldNames.length; j++) {
             var fieldName = bodyFieldNames[j];
             var fieldEl = document.querySelector(el.getAttribute("data-progress-body-" + fieldName));
-            if (!fieldEl || !fieldEl.value) return;
+            if (!fieldEl || !fieldEl.value) { delete el.dataset.progressRunning; return; }
             body.append(fieldName, fieldEl.value);
           }
         }
-        var displaySelector = el.getAttribute("data-progress-display");
-        var displayTarget = displaySelector ? document.querySelector(displaySelector) : null;
-        var progressEl = document.createElement("span");
-        if (displayTarget) {
-          displayTarget.appendChild(progressEl);
-        } else {
-          progressEl.style.marginLeft = "0.5rem";
-          progressEl.style.color = "#666";
-          el.insertAdjacentElement("afterend", progressEl);
-        }
+        var startLabel = progressLabel(el);
 
-        var start = Date.now();
-        var lastLine = "";
-        var htmlChunk = null;
-        var failed = false;
-
-        function tick() {
-          var elapsed = Math.round((Date.now() - start) / 1000);
-          progressEl.textContent = elapsed + "s" + (lastLine ? " — " + lastLine : "");
-        }
-
-        tick();
-        var tickTimer = setInterval(tick, 1000);
-
-        function finish() {
-          if (tickTimer) clearInterval(tickTimer);
-          delete el.dataset.progressRunning;
-          if (failed) {
-            progressEl.style.color = "#dc3545";
-            progressEl.textContent = lastLine || "Failed";
+        fetch(url, { method: "POST", body: body }).then(function (r) {
+          if (!r.ok) throw new Error("Request failed: " + r.status);
+          return r.json();
+        }).then(function (data) {
+          if (data.skipped) {
+            delete el.dataset.progressRunning;
+            showNotice("<p>" + escapeHtml(data.message || "Nothing to do.") + "</p>", "info");
             return;
           }
-          // The server may stream a final informational line (e.g. "Failed to
-          // fetch: ..." or "Already tracked: ...") without it counting as a
-          // transport-level failure — the request still completes normally.
-          // Leave that line on screen for a moment before wiping it and doing
-          // the swap below, so it's readable instead of flashing by instantly.
-          tick();
-          setTimeout(function () {
-            progressEl.remove();
-            for (var k = 0; k < bodyFieldNames.length; k++) {
-              var clearFieldEl = document.querySelector(el.getAttribute("data-progress-body-" + bodyFieldNames[k]));
-              if (clearFieldEl) clearFieldEl.value = "";
-            }
-            if (oobMode) {
-              // Each HTML: chunk was already applied as it streamed in via applyOob().
-            } else if (targetSelector) {
-              var target = document.querySelector(targetSelector);
-              if (target && htmlChunk != null) {
-                target.innerHTML = htmlChunk;
-                if (window.htmx) window.htmx.process(target);
-              }
-            } else {
-              location.reload();
-            }
-          }, 3500);
-        }
-
-        function applyOob(chunk) {
-          // htmx's OOB swap machinery only fires while htmx is settling a
-          // response it fetched itself (hx-get/hx-post/etc) — htmx.process()
-          // on manually-inserted content does NOT trigger it. So instead of
-          // relying on hx-swap-oob, parse the chunk and replace each id'd
-          // top-level element directly. A chunk may carry one element (a
-          // job row) or several siblings (e.g. the six nav-count spans).
-          var container = document.createElement("div");
-          container.innerHTML = chunk;
-          Array.prototype.forEach.call(container.children, function (node) {
-            if (!node.id) return;
-            var existing = document.getElementById(node.id);
-            if (!existing) return;
-            existing.outerHTML = node.outerHTML;
-            var replaced = document.getElementById(node.id);
-            if (replaced && window.htmx) window.htmx.process(replaced);
-          });
-        }
-
-        function handleLine(line) {
-          if (!line) return;
-          if (line.indexOf("NOTICE:") === 0) {
-            var noticeBody = line.slice(7);
-            var noticeLevel = "info";
-            if (noticeBody.indexOf("warning:") === 0) {
-              noticeLevel = "warning";
-              noticeBody = noticeBody.slice(8);
-            }
-            showNotice(noticeBody, noticeLevel);
-          } else if (line.indexOf("HTML:") === 0) {
-            var chunk = line.slice(5);
-            if (oobMode) {
-              applyOob(chunk);
-            } else {
-              htmlChunk = chunk;
-            }
-          } else {
-            lastLine = line;
-            tick();
-          }
-        }
-
-        fetch(url, { method: "POST", body: body }).then(function (response) {
-          var reader = response.body.getReader();
-          var decoder = new TextDecoder();
-          var buffer = "";
-
-          function pump() {
-            return reader.read().then(function (result) {
-              if (result.done) {
-                if (buffer) handleLine(buffer);
-                finish();
-                return;
-              }
-              buffer += decoder.decode(result.value, { stream: true });
-              var lines = buffer.split("\n");
-              buffer = lines.pop();
-              lines.forEach(handleLine);
-              return pump();
-            });
-          }
-
-          return pump();
+          var statusText = data.already_active ? ": already in progress" : ": started";
+          showNotice("<p>" + escapeHtml(startLabel) + statusText + "</p>", "info");
+          watched[data.task_id] = {
+            el: el, targetSelector: targetSelector, oobMode: oobMode, bodyFieldNames: bodyFieldNames,
+          };
+          pollWatched(data.task_id);
         }).catch(function (err) {
-          failed = true;
-          lastLine = "Error: " + (err && err.message ? err.message : err);
-          finish();
+          delete el.dataset.progressRunning;
+          showNotice("<p>Error: " + escapeHtml(err && err.message ? err.message : String(err)) + "</p>", "warning");
         });
       }
 
@@ -547,6 +538,47 @@
         if (!btn) return;
         evt.preventDefault();
         btn.click();
+      });
+
+      function renderStatusBar(data) {
+        var bar = document.getElementById("status-bar");
+        if (!bar) return;
+        var tasks = data.tasks || [];
+        var current = tasks.find(function (t) { return t.status === "running"; }) || tasks[0];
+        var parts = [];
+        if (current) {
+          var queuedCount = tasks.length - 1;
+          var label = current.kind.replace(/_/g, " ");
+          parts.push('<span><strong>' + escapeHtml(label) + ':</strong></span>');
+          if (current.progress) {
+            parts.push(
+              '<span class="status-bar-progress-track"><span class="status-bar-progress-fill" style="width:' +
+              current.progress.percent + '%"></span></span>' +
+              '<span>' + current.progress.current + '/' + current.progress.total +
+              ' (' + current.progress.percent + '%)</span>'
+            );
+          } else {
+            var statusWord = current.status === "running" ? "started" : current.status;
+            parts.push('<span>' + escapeHtml(statusWord) + '</span>');
+          }
+          parts.push('<a href="/tasks/' + current.id + '/log">details</a>');
+          if (queuedCount > 0) parts.push('<span>+' + queuedCount + ' queued</span>');
+        }
+        if (data.inbox_count) {
+          parts.push('<a href="/">' + data.inbox_count + ' need attention</a>');
+        }
+        bar.innerHTML = parts.join("");
+      }
+
+      function pollAmbient() {
+        fetch("/tasks/active").then(function (r) { return r.json(); }).then(function (data) {
+          renderStatusBar(data);
+        }).catch(function () {});
+      }
+      pollAmbient();
+      setInterval(pollAmbient, 2000);
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") pollAmbient();
       });
     })();
   </script>

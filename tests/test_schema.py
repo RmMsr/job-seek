@@ -20,6 +20,7 @@ def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
         "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "tasks", "inbox_items",
     }
 
 
@@ -28,6 +29,7 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)  # should not raise
     assert _tables(conn) == {
         "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "tasks", "inbox_items",
     }
 
 
@@ -850,3 +852,26 @@ def test_init_db_migrates_sources_table_dropping_http_playwright_types(conn):
     # Idempotent: running init_db again doesn't error or duplicate rows.
     init_db(conn)
     assert conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
+
+
+def test_tasks_table_exists():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO tasks (kind, params) VALUES ('fetch_source', '{}')"
+    )
+    row = conn.execute("SELECT * FROM tasks").fetchone()
+    assert row["status"] == "queued"
+    assert row["log"] == ""
+
+
+def test_inbox_items_table_exists():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO inbox_items (kind, message, link) VALUES ('task_followup', 'x', '/y')"
+    )
+    row = conn.execute("SELECT * FROM inbox_items").fetchone()
+    assert row["resolved_at"] is None

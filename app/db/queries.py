@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import sqlite3
 
 
@@ -636,3 +637,150 @@ def get_last_fetch_completed_at(conn: sqlite3.Connection) -> str | None:
         "SELECT MAX(completed_at) FROM fetch_runs WHERE completed_at IS NOT NULL"
     ).fetchone()
     return row[0] if row and row[0] else None
+
+
+# --- Tasks ---
+
+def _decode_task(row: dict) -> dict:
+    row["params"] = json.loads(row["params"]) if row["params"] else {}
+    row["result"] = json.loads(row["result"]) if row["result"] else None
+    return row
+
+
+def find_active_task(conn: sqlite3.Connection, kind: str, params: dict) -> dict | None:
+    params_json = json.dumps(params, sort_keys=True)
+    row = conn.execute(
+        "SELECT * FROM tasks WHERE kind = ? AND params = ? AND status IN ('queued', 'running') "
+        "ORDER BY created_at DESC LIMIT 1",
+        (kind, params_json),
+    ).fetchone()
+    return _decode_task(_row_to_dict(row)) if row is not None else None
+
+
+def enqueue_task(conn: sqlite3.Connection, kind: str, params: dict) -> dict:
+    """Returns the task dict, with an extra (non-persisted) "already_active"
+    key: True when an identical queued/running task was found and reused
+    instead of a new one being created."""
+    existing = find_active_task(conn, kind, params)
+    if existing is not None:
+        existing["already_active"] = True
+        return existing
+    params_json = json.dumps(params, sort_keys=True)
+    cur = conn.execute(
+        "INSERT INTO tasks (kind, params) VALUES (?, ?)", (kind, params_json)
+    )
+    conn.commit()
+    task = get_task(conn, cur.lastrowid)
+    task["already_active"] = False
+    return task
+
+
+def get_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
+    row = _row_to_dict(conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+    return _decode_task(row) if row is not None else None
+
+
+def get_active_tasks(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE status IN ('queued', 'running') ORDER BY created_at ASC"
+    ).fetchall()
+    return [_decode_task(d) for d in _rows_to_dicts(rows)]
+
+
+def claim_next_task(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute(
+        "SELECT id FROM tasks WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute(
+        "UPDATE tasks SET status = 'running', started_at = datetime('now') WHERE id = ?",
+        (row["id"],),
+    )
+    conn.commit()
+    return get_task(conn, row["id"])
+
+
+def append_task_log(conn: sqlite3.Connection, task_id: int, line: str) -> None:
+    conn.execute(
+        "UPDATE tasks SET log = log || ? || char(10) WHERE id = ?", (line, task_id)
+    )
+    conn.commit()
+
+
+def complete_task(conn: sqlite3.Connection, task_id: int, result: dict) -> None:
+    conn.execute(
+        "UPDATE tasks SET status = 'done', result = ?, finished_at = datetime('now') WHERE id = ?",
+        (json.dumps(result), task_id),
+    )
+    conn.commit()
+
+
+def fail_task(conn: sqlite3.Connection, task_id: int, error: str) -> None:
+    conn.execute(
+        "UPDATE tasks SET status = 'failed', error = ?, finished_at = datetime('now') WHERE id = ?",
+        (error, task_id),
+    )
+    conn.commit()
+
+
+def recover_interrupted_tasks(conn: sqlite3.Connection) -> int:
+    cur = conn.execute(
+        "UPDATE tasks SET status = 'failed', error = 'interrupted by restart', "
+        "finished_at = datetime('now') WHERE status = 'running'"
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+# --- Inbox ---
+
+def create_inbox_item(
+    conn: sqlite3.Connection, kind: str, message: str, link: str, task_id: int | None = None
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO inbox_items (kind, message, link, task_id) VALUES (?, ?, ?, ?)",
+        (kind, message, link, task_id),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_unresolved_inbox_items(conn: sqlite3.Connection) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM inbox_items WHERE resolved_at IS NULL ORDER BY created_at DESC"
+        ).fetchall()
+    )
+
+
+def get_recent_resolved_inbox_items(conn: sqlite3.Connection, limit: int = 5, hours: int = 24) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT * FROM inbox_items
+            WHERE resolved_at IS NOT NULL AND resolved_at >= datetime('now', ? || ' hours')
+            ORDER BY resolved_at DESC LIMIT ?
+            """,
+            (f"-{hours}", limit),
+        ).fetchall()
+    )
+
+
+def count_unresolved_inbox_items(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM inbox_items WHERE resolved_at IS NULL").fetchone()[0]
+
+
+def resolve_inbox_item(conn: sqlite3.Connection, item_id: int) -> None:
+    conn.execute("UPDATE inbox_items SET resolved_at = datetime('now') WHERE id = ?", (item_id,))
+    conn.commit()
+
+
+def get_inbox_item_by_task_id(conn: sqlite3.Connection, task_id: int) -> dict | None:
+    return _row_to_dict(
+        conn.execute("SELECT * FROM inbox_items WHERE task_id = ?", (task_id,)).fetchone()
+    )
+
+
+def get_fetch_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    return _row_to_dict(conn.execute("SELECT * FROM fetch_runs WHERE id = ?", (run_id,)).fetchone())

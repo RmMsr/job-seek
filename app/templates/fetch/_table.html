@@ -42,6 +42,7 @@
           <div style="display:flex; align-items:center; gap:0.5rem;">
             {% if source.enabled %}
               <button class="btn" data-progress-url="/fetch/{{ source.id }}"
+                data-progress-label="Fetch {{ source.name }}"
                 data-progress-display="#fetch-progress-{{ source.id }}">Fetch</button>
             {% else %}
               <span style="color:#999;">disabled</span>

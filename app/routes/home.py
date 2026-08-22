@@ -35,5 +35,7 @@ def home(
         context["onboarding_complete"] = all(item["done"] for item in checklist)
         context["jobs_new"] = counts["new"]
         context["last_fetch_at"] = q.get_last_fetch_completed_at(conn)
+        context["pending_tasks"] = q.get_unresolved_inbox_items(conn)
+        context["recent_completed_tasks"] = q.get_recent_resolved_inbox_items(conn)
 
     return templates.TemplateResponse(request, "home/index.html", context)

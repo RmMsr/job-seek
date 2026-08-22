@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Task log — Job Seek{% endblock %}
+{% block content %}
+<h1>{{ task.kind.replace('_', ' ') }}</h1>
+<p>Status: <strong id="task-log-status">{{ task.status }}</strong>{% if task.error %} — {{ task.error }}{% endif %}</p>
+<pre id="task-log-lines" style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:0.75rem 1rem; white-space:pre-wrap;">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+{% if task.status in ("queued", "running") %}
+<script>
+  (function () {
+    var pre = document.getElementById("task-log-lines");
+    var statusEl = document.getElementById("task-log-status");
+    function refresh() {
+      fetch("/tasks/{{ task.id }}").then(function (r) { return r.json(); }).then(function (t) {
+        pre.textContent = (t.log || "").trim();
+        statusEl.textContent = t.status;
+        if (t.status === "done" || t.status === "failed") location.reload();
+      });
+    }
+    setInterval(refresh, 2000);
+  })();
+</script>
+{% endif %}
+<p><a href="/">Back to Start</a></p>
+{% endblock %}

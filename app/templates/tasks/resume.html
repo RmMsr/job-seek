@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Resume — Job Seek{% endblock %}
+{% block content %}
+<h1>Resume</h1>
+<div id="resume-page" {% if inbox_item_id %}data-inbox-item-id="{{ inbox_item_id }}"{% endif %}>
+  {{ resume_html | safe }}
+</div>
+<p><a href="/">Back to Start</a></p>
+{% endblock %}

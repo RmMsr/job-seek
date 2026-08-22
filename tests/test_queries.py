@@ -1,5 +1,7 @@
+import sqlite3
 import pytest
 from app.db import queries as q
+from app.db.schema import init_db
 
 
 def test_profile_default_empty(conn):
@@ -1179,3 +1181,139 @@ def test_get_fetch_stats_by_source_omits_sources_with_no_runs(conn):
     sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     stats = q.get_fetch_stats_by_source(conn)
     assert sid not in stats
+
+
+def test_enqueue_task_creates_queued_row(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    assert task["status"] == "queued"
+    assert task["kind"] == "fetch_source"
+    assert task["params"] == {"source_id": 1}
+    assert task["result"] is None
+    assert task["already_active"] is False
+
+
+def test_enqueue_task_dedupes_identical_active_task():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    first = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    second = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    assert first["id"] == second["id"]
+    assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
+    assert first["already_active"] is False
+    assert second["already_active"] is True
+
+
+def test_enqueue_task_does_not_dedupe_after_completion():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    first = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.complete_task(conn, first["id"], {"html_chunks": []})
+    second = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    assert second["id"] != first["id"]
+
+
+def test_claim_next_task_returns_oldest_queued_and_marks_running(conn):
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    claimed = q.claim_next_task(conn)
+    assert claimed["params"] == {"source_id": 1}
+    assert claimed["status"] == "running"
+    assert claimed["started_at"] is not None
+    assert q.claim_next_task(conn)["params"] == {"source_id": 2}
+    assert q.claim_next_task(conn) is None
+
+
+def test_append_task_log_accumulates_lines(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.append_task_log(conn, task["id"], "line one")
+    q.append_task_log(conn, task["id"], "line two")
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["log"] == "line one\nline two\n"
+
+
+def test_complete_task_sets_status_and_result(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {"html_chunks": ["<p>ok</p>"]})
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert fetched["result"] == {"html_chunks": ["<p>ok</p>"]}
+    assert fetched["finished_at"] is not None
+
+
+def test_fail_task_sets_status_and_error(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.fail_task(conn, task["id"], "boom")
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "failed"
+    assert fetched["error"] == "boom"
+
+
+def test_recover_interrupted_tasks_fails_running_rows(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.claim_next_task(conn)
+    n = q.recover_interrupted_tasks(conn)
+    assert n == 1
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "failed"
+    assert fetched["error"] == "interrupted by restart"
+
+
+def test_get_active_tasks_excludes_done_and_failed(conn):
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    q.complete_task(conn, a["id"], {})
+    active = q.get_active_tasks(conn)
+    assert [t["id"] for t in active] == [b["id"]]
+
+
+def test_inbox_item_lifecycle(conn):
+    item_id = q.create_inbox_item(conn, kind="task_followup", message="hi", link="/x")
+    assert q.count_unresolved_inbox_items(conn) == 1
+    items = q.get_unresolved_inbox_items(conn)
+    assert items[0]["message"] == "hi"
+    q.resolve_inbox_item(conn, item_id)
+    assert q.count_unresolved_inbox_items(conn) == 0
+
+
+def test_create_inbox_item_stores_task_id(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    item_id = q.create_inbox_item(conn, kind="task_followup", message="hi", link="/x", task_id=task["id"])
+    item = q.get_inbox_item_by_task_id(conn, task["id"])
+    assert item["id"] == item_id
+    assert item["message"] == "hi"
+
+
+def test_get_inbox_item_by_task_id_returns_none_when_absent(conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    assert q.get_inbox_item_by_task_id(conn, task["id"]) is None
+
+
+def test_get_recent_resolved_inbox_items_only_includes_resolved_within_window(conn):
+    old_item = q.create_inbox_item(conn, kind="task_followup", message="old", link="/x")
+    conn.execute(
+        "UPDATE inbox_items SET resolved_at = datetime('now', '-25 hours') WHERE id = ?", (old_item,)
+    )
+    recent_item = q.create_inbox_item(conn, kind="task_followup", message="recent", link="/y")
+    q.resolve_inbox_item(conn, recent_item)
+    still_open = q.create_inbox_item(conn, kind="task_followup", message="open", link="/z")
+
+    resolved = q.get_recent_resolved_inbox_items(conn)
+    assert [r["message"] for r in resolved] == ["recent"]
+
+
+def test_get_recent_resolved_inbox_items_respects_limit(conn):
+    for i in range(7):
+        item_id = q.create_inbox_item(conn, kind="task_followup", message=f"item {i}", link="/x")
+        q.resolve_inbox_item(conn, item_id)
+    resolved = q.get_recent_resolved_inbox_items(conn, limit=5)
+    assert len(resolved) == 5
+
+
+def test_get_fetch_run_returns_row(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    run_id = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1, auth_error=True)
+    run = q.get_fetch_run(conn, run_id)
+    assert run["auth_error"] == 1

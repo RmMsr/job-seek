@@ -31,6 +31,24 @@
   {% endif %}
 {% endif %}
 
+{% if pending_tasks or recent_completed_tasks %}
+<section class="tasks-section">
+  <h2>Tasks</h2>
+  <ul class="checklist" id="tasks-list">
+    {% for item in pending_tasks %}
+    <li id="inbox-item-{{ item.id }}">
+      <a href="{{ item.link }}">{{ item.message }}</a>
+      <button type="button" class="btn" hx-post="/inbox/{{ item.id }}/resolve"
+        hx-target="#inbox-item-{{ item.id }}" hx-swap="outerHTML">Dismiss</button>
+    </li>
+    {% endfor %}
+    {% for item in recent_completed_tasks %}
+    <li class="task-completed">{{ item.message }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section class="how-it-works">
   <h2>How it works</h2>
   <ol>

@@ -1,16 +1,13 @@
 from __future__ import annotations
-import logging
 import sqlite3
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_ai_client, get_model
+from fastapi.responses import HTMLResponse
+from app.deps import get_db
 from app.db import queries as q
 from app.ai.refine import propose_criteria, match_removal_target
 from app.pipeline import run_reevaluate, run_reassess_fit
+from app.task_engine import register_task_kind
 from app.template_env import templates
-import openai
-
-logger = logging.getLogger("job_seek")
 
 router = APIRouter()
 
@@ -83,73 +80,89 @@ def create_scenario(
     return templates.TemplateResponse(request, "scenarios/index.html", ctx)
 
 
-@router.post("/scenarios/reevaluate")
-def reevaluate_all_scenarios(
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+@register_task_kind("scenarios_reevaluate_all")
+def _task_scenarios_reevaluate_all(conn, client, model, config, params):
     scenarios = q.get_scenarios(conn)
-
-    def stream():
-        yield f"Re-evaluating {len(scenarios)} scenario(s)\n"
-        total_updated = 0
-        for idx, scenario in enumerate(scenarios, start=1):
-            label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
-            gen = run_reevaluate(conn, client, model, scenario, scenario_label=label)
-            try:
-                while True:
-                    yield next(gen) + "\n"
-            except StopIteration as stop:
-                total_updated += stop.value
-
-        fit_gen = run_reassess_fit(conn, client, model)
-        fit_updated = 0
+    yield f"Re-evaluating {len(scenarios)} scenario(s)"
+    total_updated = 0
+    for idx, scenario in enumerate(scenarios, start=1):
+        label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
+        gen = run_reevaluate(conn, client, model, scenario, scenario_label=label)
         try:
             while True:
-                yield next(fit_gen) + "\n"
+                yield next(gen)
         except StopIteration as stop:
-            fit_updated = stop.value
+            total_updated += stop.value
 
-        yield (
-            f"All scenarios re-evaluated: {total_updated} job(s) updated across "
-            f"{len(scenarios)} scenario(s); fit recomputed for {fit_updated} job(s)\n"
+    fit_gen = run_reassess_fit(conn, client, model)
+    fit_updated = 0
+    try:
+        while True:
+            yield next(fit_gen)
+    except StopIteration as stop:
+        fit_updated = stop.value
+
+    yield (
+        f"All scenarios re-evaluated: {total_updated} job(s) updated across "
+        f"{len(scenarios)} scenario(s); fit recomputed for {fit_updated} job(s)"
+    )
+    return {"notices": [], "html_chunks": []}
+
+
+@register_task_kind("scenarios_refine_all")
+def _task_scenarios_refine_all(conn, client, model, config, params):
+    scenarios = q.get_scenarios(conn)
+    yield f"Refining criteria for {len(scenarios)} scenario(s)"
+    html_chunks = []
+    for idx, scenario in enumerate(scenarios, start=1):
+        label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
+        yield label + "Requesting criteria proposals from LLM"
+        existing = q.get_criteria(conn, scenario["id"])
+        anchor = q.get_recent_feedback_anchor(conn, scenario["id"])
+        notes = q.get_recent_feedback_notes(conn, scenario["id"])
+        proposals = propose_criteria(client, model, scenario, existing, notes)
+        resolved = _resolve_proposals(proposals, existing)
+        yield label + f"Received {len(resolved)} proposal(s)"
+        html = templates.get_template("scenarios/_proposals.html").render(
+            request=None, proposals=resolved, scenario_id=scenario["id"], feedback_anchor=anchor,
         )
+        html_chunks.append(f'<div id="proposals-area-{scenario["id"]}" style="margin-top:0.75rem; width:100%;">{html}</div>')
+    yield f"Refined criteria proposals for {len(scenarios)} scenario(s)"
+    return {"notices": [], "html_chunks": html_chunks}
 
-    return StreamingResponse(stream(), media_type="text/plain")
+
+@register_task_kind("scenario_refine_one")
+def _task_scenario_refine_one(conn, client, model, config, params):
+    scenario = q.get_scenario(conn, params["scenario_id"])
+    if scenario is None:
+        return {"notices": [], "html_chunks": []}
+    existing = q.get_criteria(conn, scenario["id"])
+    anchor = q.get_recent_feedback_anchor(conn, scenario["id"])
+    notes = q.get_recent_feedback_notes(conn, scenario["id"])
+    yield f"Requesting criteria proposals for '{scenario['name']}' from LLM"
+    proposals = propose_criteria(client, model, scenario, existing, notes)
+    yield f"Received {len(proposals)} proposal(s)"
+    resolved = _resolve_proposals(proposals, existing)
+    html = templates.get_template("scenarios/_proposals.html").render(
+        request=None, proposals=resolved, scenario_id=scenario["id"], feedback_anchor=anchor,
+    )
+    return {"notices": [], "html_chunks": [html]}
+
+
+@router.post("/scenarios/reevaluate")
+def reevaluate_all_scenarios(conn: sqlite3.Connection = Depends(get_db)):
+    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/scenarios/refine")
-def refine_all_scenarios(
-    request: Request,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+def refine_all_scenarios(conn: sqlite3.Connection = Depends(get_db)):
     scenarios = q.get_scenarios(conn)
-
-    def stream():
-        yield f"Refining criteria for {len(scenarios)} scenario(s)\n"
-        for idx, scenario in enumerate(scenarios, start=1):
-            label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
-            yield label + "Requesting criteria proposals from LLM\n"
-            existing = q.get_criteria(conn, scenario["id"])
-            anchor = q.get_recent_feedback_anchor(conn, scenario["id"])
-            notes = q.get_recent_feedback_notes(conn, scenario["id"])
-            proposals = propose_criteria(client, model, scenario, existing, notes)
-            resolved = _resolve_proposals(proposals, existing)
-            yield label + f"Received {len(resolved)} proposal(s)\n"
-            html = templates.get_template("scenarios/_proposals.html").render(
-                request=request,
-                proposals=resolved,
-                scenario_id=scenario["id"],
-                feedback_anchor=anchor,
-            )
-            chunk = f'<div id="proposals-area-{scenario["id"]}" style="margin-top:0.75rem; width:100%;">{html}</div>'
-            yield "HTML:" + chunk.replace("\n", "") + "\n"
-        yield f"Refined criteria proposals for {len(scenarios)} scenario(s)\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    has_feedback = any(q.get_recent_feedback_notes(conn, s["id"]) for s in scenarios)
+    if not has_feedback:
+        return {"skipped": True, "message": "No feedback to review yet."}
+    task = q.enqueue_task(conn, kind="scenarios_refine_all", params={})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 def _get_scenario_or_404(conn: sqlite3.Connection, scenario_id: int) -> dict:
@@ -243,36 +256,12 @@ def update_criterion(
 
 
 @router.post("/scenarios/{scenario_id}/refine")
-def refine_criteria(
-    scenario_id: int,
-    request: Request,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+def refine_criteria(scenario_id: int, conn: sqlite3.Connection = Depends(get_db)):
     scenario = _get_scenario_or_404(conn, scenario_id)
-    existing = q.get_criteria(conn, scenario_id)
-    anchor = q.get_recent_feedback_anchor(conn, scenario_id)
-    notes = q.get_recent_feedback_notes(conn, scenario_id)
-
-    def stream():
-        msg = f"Requesting criteria proposals for '{scenario['name']}' from LLM"
-        logger.info(msg)
-        yield msg + "\n"
-        proposals = propose_criteria(client, model, scenario, existing, notes)
-        msg = f"Received {len(proposals)} proposal(s)"
-        logger.info(msg)
-        yield msg + "\n"
-        resolved = _resolve_proposals(proposals, existing)
-        html = templates.get_template("scenarios/_proposals.html").render(
-            request=request,
-            proposals=resolved,
-            scenario_id=scenario_id,
-            feedback_anchor=anchor,
-        )
-        yield "HTML:" + html.replace("\n", "")
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    if not q.get_recent_feedback_notes(conn, scenario_id):
+        return {"skipped": True, "message": f"No feedback to review for '{scenario['name']}' yet."}
+    task = q.enqueue_task(conn, kind="scenario_refine_one", params={"scenario_id": scenario_id})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/scenarios/{scenario_id}/refine/accept", response_class=HTMLResponse)

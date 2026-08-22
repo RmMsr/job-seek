@@ -90,6 +90,29 @@ CREATE TABLE IF NOT EXISTS scenario_feedback (
     handled_at TEXT,
     UNIQUE(job_id, scenario_id)
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    params TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'done', 'failed')),
+    log TEXT NOT NULL DEFAULT '',
+    result TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS inbox_items (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    link TEXT NOT NULL,
+    task_id INTEGER REFERENCES tasks(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
 """
 
 

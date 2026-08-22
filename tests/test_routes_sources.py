@@ -1,9 +1,10 @@
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, MagicMock
 import httpx
 import respx
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
 from app.pipeline import FetchResult
+from app.task_engine import execute_task
 
 _SLACK_URL = "https://example-workspace.slack.com/archives/C0EXAMPLE1"
 
@@ -324,25 +325,40 @@ def test_slack_row_shows_cli_login_command(client, conn):
     assert "won't update automatically" in resp.text
 
 
-def test_detect_source_already_tracked_as_source_skips_detection(client, conn):
+def _run_detect(conn, url):
+    task = q.enqueue_task(conn, kind="source_detect", params={"url": url})
+    execute_task(conn, MagicMock(), MagicMock(), MagicMock(), task)
+    return q.get_task(conn, task["id"])
+
+
+def test_detect_source_enqueues_task(client, conn):
+    resp = client.post("/sources/detect", data={"url": "https://example.com/jobs"})
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "source_detect"
+    assert task["params"]["url"] == "https://example.com/jobs"
+
+
+def test_detect_source_already_tracked_as_source_skips_detection(conn):
     sid = q.insert_source(conn, "Careers Page", "https://careers.example.com/jobs", "generic_listing")
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
+        fetched = _run_detect(conn, "https://careers.example.com/jobs")
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert "Already tracked as a source" in resp.text
-    assert f'href="/sources#source-row-{sid}"' in resp.text
+    assert fetched["result"].get("needs_action") is None
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked as a source" in notice_html
+    assert f'href="/sources#source-row-{sid}"' in notice_html
 
 
-def test_detect_source_already_tracked_as_job_skips_detection(client, conn):
+def test_detect_source_already_tracked_as_job_skips_detection(conn):
     sid = q.insert_source(conn, "Manual", "", "manual")
     jid = q.insert_job(conn, source_id=sid, url="https://example.com/job/1", title="T", company="C", raw_text="r")
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
+        fetched = _run_detect(conn, "https://example.com/job/1")
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert "Already tracked as a job" in resp.text
-    assert f'href="/jobs/{jid}"' in resp.text
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked as a job" in notice_html
+    assert f'href="/jobs/{jid}"' in notice_html
 
 
 def test_confirm_source_rejects_url_already_tracked_as_source(client, conn):
@@ -351,8 +367,10 @@ def test_confirm_source_rejects_url_already_tracked_as_source(client, conn):
         "/sources/detect/confirm",
         data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
     )
-    assert resp.status_code == 200
-    assert "Already tracked as a source" in resp.text
+    task = q.get_task(conn, resp.json()["task_id"])
+    execute_task(conn, MagicMock(), MagicMock(), MagicMock(browser_profile_dir="/tmp"), task)
+    fetched = q.get_task(conn, task["id"])
+    assert "Already tracked as a source" in fetched["result"]["notices"][0]["html"]
     assert len(q.get_sources(conn)) == 1
     assert q.get_source(conn, sid)["name"] == "Careers Page"
 
@@ -364,27 +382,29 @@ def test_confirm_source_rejects_url_already_tracked_as_job(client, conn):
         "/sources/detect/confirm",
         data={"url": "https://example.com/job/1", "name": "Dup", "fetcher_type": "generic_listing"},
     )
-    assert resp.status_code == 200
-    assert "Already tracked as a job" in resp.text
-    assert f'href="/jobs/{jid}"' in resp.text
+    task = q.get_task(conn, resp.json()["task_id"])
+    execute_task(conn, MagicMock(), MagicMock(), MagicMock(browser_profile_dir="/tmp"), task)
+    fetched = q.get_task(conn, task["id"])
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked as a job" in notice_html
+    assert f'href="/jobs/{jid}"' in notice_html
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"] == []
 
 
-def test_detect_source_fast_path_slack_skips_fetch(client, conn):
+def test_detect_source_fast_path_slack_skips_fetch(conn):
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+        fetched = _run_detect(conn, _SLACK_URL)
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert "Detected type: <strong>slack</strong>" in resp.text
-    assert f'value="{_SLACK_URL}"' in resp.text
+    html = fetched["result"]["html_chunks"][0]
+    assert "Detected type: <strong>slack</strong>" in html
+    assert f'value="{_SLACK_URL}"' in html
 
 
-def test_detect_source_fast_path_finn_skips_fetch(client, conn):
+def test_detect_source_fast_path_finn_skips_fetch(conn):
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": "https://www.finn.no/job/search"})
+        fetched = _run_detect(conn, "https://www.finn.no/job/search")
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert "Detected type: <strong>finn_listing</strong>" in resp.text
+    assert "Detected type: <strong>finn_listing</strong>" in fetched["result"]["html_chunks"][0]
 
 
 _IS_A_LISTING = {
@@ -395,68 +415,65 @@ _NOT_A_LISTING = {"is_listing": False, "job_links": []}
 
 
 @respx.mock
-def test_detect_source_slow_path_listing_detected(client, conn):
+def test_detect_source_slow_path_listing_detected(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
     )
     with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING):
-        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
-    assert "Detected type: <strong>generic_listing</strong>" in resp.text
-    assert 'value="careers.example.com"' in resp.text  # default name
+        fetched = _run_detect(conn, "https://careers.example.com/jobs")
+    html = fetched["result"]["html_chunks"][0]
+    assert "Detected type: <strong>generic_listing</strong>" in html
+    assert 'value="careers.example.com"' in html  # default name
 
 
-def test_detect_source_confirm_panel_has_name_label(client, conn):
+def test_detect_source_confirm_panel_has_name_label(conn):
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+        fetched = _run_detect(conn, _SLACK_URL)
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert '<label for="detect-name"' in resp.text
-    assert ">Name:</label>" in resp.text
+    html = fetched["result"]["html_chunks"][0]
+    assert '<label for="detect-name"' in html
+    assert ">Name:</label>" in html
 
 
-def test_detect_source_confirm_panel_has_cancel_link(client, conn):
+def test_detect_source_confirm_panel_has_cancel_link(conn):
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
-        resp = client.post("/sources/detect", data={"url": _SLACK_URL})
+        fetched = _run_detect(conn, _SLACK_URL)
     mock_fetch.assert_not_called()
-    assert resp.status_code == 200
-    assert '<a href="/sources" class="btn">Cancel</a>' in resp.text
+    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_detect_source_mismatch_panel_has_cancel_link(client, conn):
+def test_detect_source_mismatch_panel_has_cancel_link(conn):
     respx.get("https://example.com/job/1").mock(
         return_value=httpx.Response(200, text="<html><body><p>A single job posting.</p></body></html>")
     )
     with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
-    assert resp.status_code == 200
-    assert '<a href="/sources" class="btn">Cancel</a>' in resp.text
+        fetched = _run_detect(conn, "https://example.com/job/1")
+    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_detect_source_slow_path_not_a_listing_shows_mismatch(client, conn):
+def test_detect_source_slow_path_not_a_listing_shows_mismatch(conn):
     respx.get("https://example.com/job/1").mock(
         return_value=httpx.Response(200, text="<html><body><p>A single job posting.</p></body></html>")
     )
     with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
-    assert resp.status_code == 200
-    assert "looks like a single job posting" in resp.text
-    assert 'data-progress-url="/jobs/add-by-url"' in resp.text
-    assert "Add as source anyway" in resp.text
+        fetched = _run_detect(conn, "https://example.com/job/1")
+    html = fetched["result"]["html_chunks"][0]
+    assert "looks like a single job posting" in html
+    assert 'data-progress-url="/jobs/add-by-url"' in html
+    assert "Add as source anyway" in html
 
 
 @respx.mock
-def test_detect_source_fetch_failure_falls_back_to_generic_listing(client, conn):
+def test_detect_source_fetch_failure_falls_back_to_generic_listing(conn):
     respx.get("https://example.com/unreachable").mock(side_effect=httpx.ConnectError("boom"))
-    resp = client.post("/sources/detect", data={"url": "https://example.com/unreachable"})
-    assert resp.status_code == 200
-    assert "Detected type: <strong>generic_listing</strong>" in resp.text
+    fetched = _run_detect(conn, "https://example.com/unreachable")
+    assert "Detected type: <strong>generic_listing</strong>" in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_detect_source_uses_generated_name_when_page_has_title(client, conn):
+def test_detect_source_uses_generated_name_when_page_has_title(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(
             200,
@@ -466,16 +483,15 @@ def test_detect_source_uses_generated_name_when_page_has_title(client, conn):
     )
     with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING), \
          patch("app.routes.sources.generate_source_name", return_value="careers/frontend-oslo") as mock_gen:
-        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
+        fetched = _run_detect(conn, "https://careers.example.com/jobs")
     mock_gen.assert_called_once_with(
         ANY, ANY, "careers.example.com", "Frontend Developer Jobs in Oslo | Careers"
     )
-    assert 'value="careers/frontend-oslo"' in resp.text
+    assert 'value="careers/frontend-oslo"' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_detect_source_falls_back_to_domain_when_name_generation_fails(client, conn):
+def test_detect_source_falls_back_to_domain_when_name_generation_fails(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(
             200,
@@ -485,13 +501,12 @@ def test_detect_source_falls_back_to_domain_when_name_generation_fails(client, c
     )
     with patch("app.routes.sources.detect_listing", return_value=_IS_A_LISTING), \
          patch("app.routes.sources.generate_source_name", return_value=None):
-        resp = client.post("/sources/detect", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
-    assert 'value="careers.example.com"' in resp.text
+        fetched = _run_detect(conn, "https://careers.example.com/jobs")
+    assert 'value="careers.example.com"' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_detect_source_mismatch_panel_also_uses_generated_name(client, conn):
+def test_detect_source_mismatch_panel_also_uses_generated_name(conn):
     respx.get("https://example.com/job/1").mock(
         return_value=httpx.Response(
             200, text="<html><head><title>Senior Engineer at Acme</title></head><body><p>Role details.</p></body></html>"
@@ -499,10 +514,10 @@ def test_detect_source_mismatch_panel_also_uses_generated_name(client, conn):
     )
     with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING), \
          patch("app.routes.sources.generate_source_name", return_value="acme/senior-engineer"):
-        resp = client.post("/sources/detect", data={"url": "https://example.com/job/1"})
-    assert resp.status_code == 200
-    assert "looks like a single job posting" in resp.text
-    assert 'value="acme/senior-engineer"' in resp.text
+        fetched = _run_detect(conn, "https://example.com/job/1")
+    html = fetched["result"]["html_chunks"][0]
+    assert "looks like a single job posting" in html
+    assert 'value="acme/senior-engineer"' in html
 
 
 def _fake_run_fetch(source, conn, client, model, profile_dir):
@@ -523,64 +538,63 @@ def _fake_run_fetch_error(source, conn, client, model, profile_dir):
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error="boom")
 
 
-def test_confirm_source_creates_source_and_streams_fetch(client, conn):
-    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
+def _run_confirm(conn, url, name, fetcher_type):
+    task = q.enqueue_task(conn, kind="source_confirm", params={"url": url, "name": name, "fetcher_type": fetcher_type})
+    execute_task(conn, MagicMock(), MagicMock(), MagicMock(browser_profile_dir="/tmp"), task)
+    return q.get_task(conn, task["id"])
+
+
+def test_confirm_source_enqueues_task(client, conn):
+    resp = client.post(
+        "/sources/detect/confirm",
+        data={"url": "https://example.com/jobs", "name": "Example", "fetcher_type": "generic_listing"},
+    )
     assert resp.status_code == 200
-    assert "Fetch complete" in resp.text
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "source_confirm"
+
+
+def test_confirm_source_creates_source_and_executes_fetch(conn):
+    with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
+        fetched = _run_confirm(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    assert "Fetch complete" in fetched["log"]
     sources = q.get_sources(conn)
     assert len(sources) == 1
     assert sources[0]["fetcher_type"] == "generic_listing"
     assert sources[0]["name"] == "careers.example.com"
 
 
-def test_confirm_source_response_has_both_oob_chunks(client, conn):
+def test_confirm_source_response_has_both_oob_chunks(conn):
     with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert 'HTML:<div id="sources-table">' in resp.text
-    assert 'HTML:<form id="add-source-panel"' in resp.text
+        fetched = _run_confirm(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    chunks = fetched["result"]["html_chunks"]
+    assert '<div id="sources-table">' in chunks[0]
+    assert '<form id="add-source-panel"' in chunks[1]
 
 
-def test_confirm_source_no_notice_when_jobs_found(client, conn):
+def test_confirm_source_no_notice_when_jobs_found(conn):
     with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "NOTICE:" not in resp.text
+        fetched = _run_confirm(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    assert fetched["result"]["notices"] == []
 
 
-def test_confirm_source_shows_persistent_notice_when_nothing_found(client, conn):
+def test_confirm_source_shows_persistent_notice_when_nothing_found(conn):
     with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch_nothing_found):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "careers.example.com" in resp.text
+        fetched = _run_confirm(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "careers.example.com" in notice["html"]
     sources = q.get_sources(conn)
     assert len(sources) == 1
-    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in notice["html"]
 
 
-def test_confirm_source_shows_persistent_notice_on_fetch_error(client, conn):
+def test_confirm_source_shows_persistent_notice_on_fetch_error(conn):
     with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch_error):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "boom" in resp.text
+        fetched = _run_confirm(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "boom" in notice["html"]
 
 
 def test_sources_page_has_notice_stack(client, conn):
@@ -598,14 +612,10 @@ def test_confirm_source_rejects_invalid_fetcher_type(client, conn):
     assert q.get_sources(conn) == []
 
 
-def test_confirm_source_slack_shows_needs_login(client, conn):
+def test_confirm_source_slack_shows_needs_login(conn):
     with patch("app.routes.sources.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/sources/detect/confirm",
-            data={"url": _SLACK_URL, "name": "Example Slack", "fetcher_type": "slack"},
-        )
-    assert resp.status_code == 200
-    assert "Needs Slack login" in resp.text
+        fetched = _run_confirm(conn, _SLACK_URL, "Example Slack", "slack")
+    assert "Needs Slack login" in fetched["result"]["html_chunks"][0]
 
 
 def test_sources_page_has_add_source_unfold(client, conn):

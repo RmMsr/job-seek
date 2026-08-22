@@ -1,20 +1,14 @@
 from __future__ import annotations
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_ai_client, get_model, get_config
+from fastapi.responses import HTMLResponse
+from app.deps import get_db
 from app.db import queries as q
 from app.pipeline import run_fetch
+from app.task_engine import register_task_kind
 from app.template_env import templates
-import openai
 
 router = APIRouter()
-
-
-def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
-    rendered = templates.get_template(template_name).render(**context)
-    prefix = "NOTICE:warning:" if level == "warning" else "NOTICE:"
-    return prefix + rendered.replace("\n", "") + "\n"
 
 
 def _fetch_panel_context(conn: sqlite3.Connection) -> dict:
@@ -29,63 +23,87 @@ def _fetch_panel_context(conn: sqlite3.Connection) -> dict:
     return {"sources": sources, "runs_by_source": runs_by_source, "stats_by_source": stats_by_source}
 
 
+def _auth_error_result(conn: sqlite3.Connection, source: dict, run_id: int) -> dict:
+    run = q.get_fetch_run(conn, run_id)
+    if run and run["auth_error"]:
+        return {
+            "needs_action": True,
+            "action_message": f"'{source['name']}' needs you to reconnect Slack to keep fetching",
+            "action_link": f"/sources#source-row-{source['id']}",
+        }
+    return {}
+
+
+@register_task_kind("fetch_source")
+def _task_fetch_source(conn, client, model, config, params):
+    source = q.get_source(conn, params["source_id"])
+    if source is None:
+        return {"html_chunks": [], "notices": []}
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    fetch_result = None
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration as stop:
+        fetch_result = stop.value
+    result = {"html_chunks": [], "notices": []}
+    if fetch_result is not None:
+        result.update(_auth_error_result(conn, source, fetch_result.run_id))
+    return result
+
+
+@register_task_kind("fetch_all")
+def _task_fetch_all(conn, client, model, config, params):
+    source_ids = params["source_ids"]
+    total_found = 0
+    total_new = 0
+    needs_action_extras = {}
+    for idx, source_id in enumerate(source_ids, start=1):
+        source = q.get_source(conn, source_id)
+        if source is None:
+            continue
+        label = f"[Source {idx}/{len(source_ids)}: {source['name']}] "
+        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+        try:
+            while True:
+                yield label + next(gen)
+        except StopIteration as stop:
+            fetch_result = stop.value
+            total_found += fetch_result.jobs_found
+            total_new += fetch_result.jobs_new
+            extra = _auth_error_result(conn, source, fetch_result.run_id)
+            if extra:
+                needs_action_extras = extra  # last auth error wins if several sources need reconnecting
+
+    notice_html = templates.get_template("fetch/_fetch_all_summary_notice.html").render(
+        total_new=total_new, total_found=total_found, source_count=len(source_ids),
+    )
+    html_chunks = []
+    if source_ids:
+        html_chunks.append(
+            templates.get_template("fetch/_table.html").render(request=None, **_fetch_panel_context(conn))
+        )
+    result = {"notices": [{"level": "info", "html": notice_html}], "html_chunks": html_chunks}
+    result.update(needs_action_extras)
+    return result
+
+
 @router.get("/fetch", response_class=HTMLResponse)
 def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "fetch/panel.html", _fetch_panel_context(conn))
 
 
 @router.post("/fetch/all")
-def trigger_fetch_all(
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-    config=Depends(get_config),
-):
+def trigger_fetch_all(conn: sqlite3.Connection = Depends(get_db)):
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
-
-    def stream():
-        yield f"Fetching {len(sources)} active source(s)\n"
-        total_found = 0
-        total_new = 0
-        for idx, source in enumerate(sources, start=1):
-            label = f"[Source {idx}/{len(sources)}: {source['name']}] "
-            gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
-            try:
-                while True:
-                    yield label + next(gen) + "\n"
-            except StopIteration as stop:
-                result = stop.value
-                total_found += result.jobs_found
-                total_new += result.jobs_new
-        yield _notice_line(
-            "fetch/_fetch_all_summary_notice.html",
-            total_new=total_new, total_found=total_found, source_count=len(sources),
-        )
-        if sources:
-            table_html = templates.get_template("fetch/_table.html").render(**_fetch_panel_context(conn))
-            yield "HTML:" + table_html.replace("\n", "") + "\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(conn, kind="fetch_all", params={"source_ids": [s["id"] for s in sources]})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/fetch/{source_id}")
-def trigger_fetch(
-    source_id: int,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-    config=Depends(get_config),
-):
+def trigger_fetch(source_id: int, conn: sqlite3.Connection = Depends(get_db)):
     source = q.get_source(conn, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-
-    def stream():
-        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration:
-            pass
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": source_id})
+    return {"task_id": task["id"], "already_active": task["already_active"]}

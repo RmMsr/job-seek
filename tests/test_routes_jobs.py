@@ -1,10 +1,11 @@
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, MagicMock
 import httpx
 import pytest
 import respx
 from app.db import queries as q
 from app.pipeline import FetchResult
+from app.task_engine import execute_task
 
 
 def _seed(conn):
@@ -464,16 +465,27 @@ def _fake_run_reprocess_job(conn, client, model, job, scenarios, profile, progre
     yield f"{progress_prefix}Reset complete: {job['url']}"
 
 
-def test_job_reset_streams_progress_and_resets_job(client, conn):
+def test_job_reset_enqueues_task(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/reset")
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "job_reset"
+    assert task["params"]["job_id"] == jid
+
+
+def test_job_reset_task_execution_resets_job(conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "rejected", "not a fit")
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
 
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post(f"/jobs/{jid}/reset")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Reprocessing" in resp.text
-    assert "Reset complete" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert "Reprocessing" in fetched["log"]
+    assert "Reset complete" in fetched["log"]
     assert q.get_job(conn, jid)["status"] == "new"
 
 
@@ -490,56 +502,68 @@ def test_job_expand_reset_button_has_progress_oob_attribute(client, conn):
     assert "data-progress-oob" in resp.text
 
 
-def test_job_reset_stream_ends_with_html_chunk_for_updated_row(client, conn):
+def test_job_reset_task_execution_html_chunk_for_updated_row(conn):
     sid, jid, scenario_id = _seed(conn)
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post(f"/jobs/{jid}/reset")
-    assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert (
+        f'<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">'
+        in fetched["result"]["html_chunks"][0]
+    )
 
 
-def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, conn):
+def test_job_pass_as_new_task_execution_html_chunk_for_updated_row(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
-        resp = client.post(f"/jobs/{jid}/pass-as-new")
-    assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert (
+        f'<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">'
+        in fetched["result"]["html_chunks"][0]
+    )
 
 
-def test_job_reset_stream_includes_counts_html_chunk(client, conn):
+def test_job_reset_task_execution_includes_counts_html_chunk(conn):
     sid, jid, scenario_id = _seed(conn)
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post(f"/jobs/{jid}/reset")
-    assert resp.status_code == 200
-    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
-def test_job_pass_as_new_stream_includes_counts_html_chunk(client, conn):
+def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
+    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
-        resp = client.post(f"/jobs/{jid}/pass-as-new")
-    assert resp.status_code == 200
-    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
-def test_job_reset_with_filter_query_forwards_it_into_rendered_row(client, conn):
+def test_job_reset_task_execution_with_filter_forwards_it_into_rendered_row(conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "accepted", "")
+    filter_ctx = {"filter_status": "accepted", "filter_content_type": ""}
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post(f"/jobs/{jid}/reset?status=accepted&content_type=")
-    assert resp.status_code == 200
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
     # Resetting an accepted job always returns it to status "new", so it falls out of
     # the Accepted tab -> renders as the stale short row, whose own expand link must
     # still carry the filter forward.
-    assert f'jobs/{jid}/expand?status=accepted&content_type=' in resp.text
+    assert f'jobs/{jid}/expand?status=accepted&content_type=' in fetched["result"]["html_chunks"][0]
 
 
 def _fake_run_reprocess_job_to_passing(conn, client, model, job, scenarios, profile, progress_prefix=""):
@@ -554,30 +578,35 @@ def _fake_run_reprocess_job_to_passing(conn, client, model, job, scenarios, prof
     yield f"{progress_prefix}Reset complete: {job['url']}"
 
 
-def test_job_reset_from_not_relevant_tab_shows_moved_to_new_badge(client, conn):
+def test_job_reset_task_execution_from_not_relevant_tab_shows_moved_to_new_badge(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
 
+    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
-        resp = client.post(f"/jobs/{jid}/reset?status=not_relevant&content_type=")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Moved to New" in resp.text
-    assert f'href="/jobs#job-{jid}"' in resp.text
+    fetched = q.get_task(conn, task["id"])
+    html = fetched["result"]["html_chunks"][0]
+    assert "Moved to New" in html
+    assert f'href="/jobs#job-{jid}"' in html
 
 
-def test_job_reset_that_stays_in_current_filter_shows_no_badge(client, conn):
+def test_job_reset_task_execution_that_stays_in_current_filter_shows_no_badge(conn):
     sid, jid, scenario_id = _seed(conn)  # already gate-passed, status "new"
+    filter_ctx = {"filter_status": None, "filter_content_type": None}
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post(f"/jobs/{jid}/reset?status=&content_type=")
-    assert resp.status_code == 200
-    assert "Moved to" not in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert "Moved to" not in fetched["result"]["html_chunks"][0]
 
 
-def test_job_reset_without_filter_query_shows_no_badge(client, conn):
+def test_job_reset_task_execution_without_filter_shows_no_badge(conn):
     # Simulates the standalone /jobs/{id} page, which never sends filter params.
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
@@ -585,25 +614,28 @@ def test_job_reset_without_filter_query_shows_no_badge(client, conn):
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
 
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
-        resp = client.post(f"/jobs/{jid}/reset")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Moved to" not in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert "Moved to" not in fetched["result"]["html_chunks"][0]
 
 
-def test_job_pass_as_new_shows_moved_to_new_badge(client, conn):
+def test_job_pass_as_new_task_execution_shows_moved_to_new_badge(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
 
+    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
+    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter_ctx": filter_ctx})
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
-        resp = client.post(f"/jobs/{jid}/pass-as-new?status=not_relevant&content_type=")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Moved to New" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert "Moved to New" in fetched["result"]["html_chunks"][0]
 
 
 def test_job_feedback_with_redirect_field_returns_hx_redirect_header(client, conn):
@@ -639,48 +671,65 @@ def test_job_expand_feedback_form_has_no_redirect_field(client, conn):
     assert 'name="redirect"' not in resp.text
 
 
-def test_job_bulk_reset_streams_progress_for_each_job(client, conn):
+def test_bulk_reset_enqueues_task_with_job_ids(client, conn):
+    sid, j1, scenario_id = _seed(conn)
+    j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
+    resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "jobs_bulk_reset"
+    assert task["params"]["job_ids"] == [j1, j2]
+
+
+def test_bulk_reset_task_execution_resets_each_job(conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_feedback(conn, j1, "rejected", "note")
     q.update_job_feedback(conn, j2, "trash", "note")
 
+    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [j1, j2], "filter_ctx": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert resp.text.count("Reprocessing") == 2
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert fetched["log"].count("Reprocessing") == 2
     assert q.get_job(conn, j1)["status"] == "new"
     assert q.get_job(conn, j2)["status"] == "new"
 
 
-def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, conn):
+def test_bulk_reset_task_execution_produces_chunk_per_job_plus_counts(conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_feedback(conn, j1, "rejected", "note")
     q.update_job_feedback(conn, j2, "trash", "note")
 
+    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [j1, j2], "filter_ctx": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
-        resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">') == 1
-    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+    fetched = q.get_task(conn, task["id"])
+    chunks = fetched["result"]["html_chunks"]
+    assert len(chunks) == 3  # 2 job rows + counts
+    assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
+    assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
+    assert '<span id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
-def test_job_bulk_reset_with_filter_shows_moved_marker_per_job(client, conn):
+def test_bulk_reset_task_execution_with_filter_shows_moved_marker_per_job(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Filtered Out", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
 
+    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
+    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [jid], "filter_ctx": filter_ctx})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
-        resp = client.post("/jobs/bulk-reset?status=not_relevant&content_type=", data={"job_ids": [jid]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Moved to New" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert "Moved to New" in fetched["result"]["html_chunks"][0]
 
 
 def test_job_bulk_reset_button_has_progress_oob_and_filter_query(client, conn):
@@ -696,43 +745,57 @@ def test_job_bulk_reevaluate_button_has_progress_oob_and_filter_query(client, co
     assert 'data-progress-url="/jobs/bulk-reevaluate?status=accepted&content_type="' in resp.text
     assert 'data-progress-jobs' in resp.text
 
-def test_job_bulk_reevaluate_streams_progress_for_each_job(client, conn):
+def test_bulk_reevaluate_enqueues_task_with_job_ids(client, conn):
+    j1 = _seed(conn)[1]
+    resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1]})
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "jobs_bulk_reevaluate"
+    assert task["params"]["job_ids"] == [j1]
+
+
+def test_bulk_reevaluate_task_execution_updates_scores_for_each_job(conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="role")
     q.upsert_job_score(conn, j2, scenario_id, 0.4, "reason", "hash1")
 
+    task = q.enqueue_task(conn, kind="jobs_bulk_reevaluate", params={"job_ids": [j1, j2], "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert resp.text.count("Scored 0.85") == 2
-    assert "Re-evaluation complete: 2 job(s)" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert fetched["log"].count("Scored 0.85") == 2
+    assert "Re-evaluation complete: 2 job(s)" in fetched["log"]
 
 
-def test_job_bulk_reevaluate_stream_includes_per_job_html_and_counts_chunks(client, conn):
+def test_bulk_reevaluate_task_execution_produces_chunk_per_job_plus_counts(conn):
     sid, j1, scenario_id = _seed(conn)
     j2 = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Data Eng", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="role")
     q.upsert_job_score(conn, j2, scenario_id, 0.4, "reason", "hash1")
 
+    task = q.enqueue_task(conn, kind="jobs_bulk_reevaluate", params={"job_ids": [j1, j2], "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">') == 1
-    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+    fetched = q.get_task(conn, task["id"])
+    chunks = fetched["result"]["html_chunks"]
+    assert len(chunks) == 3  # 2 job rows + counts
+    assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
+    assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
+    assert '<span id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
-def test_job_bulk_reevaluate_preserves_status(client, conn):
+def test_bulk_reevaluate_task_execution_preserves_status(conn):
     sid, j1, scenario_id = _seed(conn)
     q.update_job_feedback(conn, j1, "accepted", "good fit")
 
+    task = q.enqueue_task(conn, kind="jobs_bulk_reevaluate", params={"job_ids": [j1], "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1]})
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
     assert q.get_job(conn, j1)["status"] == "accepted"
 
 
@@ -742,18 +805,30 @@ def _fake_run_pass_as_new(conn, client, model, job, profile):
     yield f"Fit 0.80/0.60: {job['url']}"
 
 
-def test_job_pass_as_new_streams_progress_and_marks_override(client, conn):
+def test_job_pass_as_new_enqueues_task(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
+    resp = client.post(f"/jobs/{jid}/pass-as-new")
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "job_pass_as_new"
+    assert task["params"]["job_id"] == jid
+
+
+def test_job_pass_as_new_task_execution_marks_override(conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/failed", title="Failed Gate", company="Acme", raw_text="r")
     q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
 
+    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
-        resp = client.post(f"/jobs/{jid}/pass-as-new")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Bypassing gate threshold" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert "Bypassing gate threshold" in fetched["log"]
     assert q.get_job(conn, jid)["gate_override"] == 1
 
 
@@ -769,16 +844,27 @@ def _fake_run_reevaluate_job(conn, client, model, job, scenarios, profile, progr
     q.update_job_fit(conn, job["id"], 0.75, "strong interest", 0.65, "reachable", "phash-new")
 
 
-def test_job_reevaluate_streams_progress_and_updates_scores(client, conn):
+def test_job_reevaluate_enqueues_task(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/reevaluate")
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "job_reevaluate"
+    assert task["params"]["job_id"] == jid
+
+
+def test_job_reevaluate_task_execution_updates_scores(conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "accepted", "good fit")
 
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post(f"/jobs/{jid}/reevaluate")
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
-    assert resp.status_code == 200
-    assert "Scored 0.85" in resp.text
-    assert "Fit 0.75/0.65" in resp.text
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert "Scored 0.85" in fetched["log"]
+    assert "Fit 0.75/0.65" in fetched["log"]
     assert q.get_job(conn, jid)["status"] == "accepted"
 
 
@@ -787,20 +873,25 @@ def test_job_reevaluate_unknown_job_returns_404(client, conn):
     assert resp.status_code == 404
 
 
-def test_job_reevaluate_stream_ends_with_html_chunk_for_updated_row(client, conn):
+def test_job_reevaluate_task_execution_html_chunk_for_updated_row(conn):
     sid, jid, scenario_id = _seed(conn)
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post(f"/jobs/{jid}/reevaluate")
-    assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert (
+        f'<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">'
+        in fetched["result"]["html_chunks"][0]
+    )
 
 
-def test_job_reevaluate_stream_includes_counts_html_chunk(client, conn):
+def test_job_reevaluate_task_execution_includes_counts_html_chunk(conn):
     sid, jid, scenario_id = _seed(conn)
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": jid, "filter_ctx": {}})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
-        resp = client.post(f"/jobs/{jid}/reevaluate")
-    assert resp.status_code == 200
-    assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):
@@ -1406,16 +1497,39 @@ def _fake_run_add_job_lead(conn, client, model, source_id, url, raw_text):
 _NOT_A_LISTING = {"is_listing": False, "job_links": []}
 
 
+def _run_add_by_url(conn, url, filter_ctx=None, status=None, content_type=None):
+    task = q.enqueue_task(conn, kind="job_add_by_url", params={
+        "url": url, "status": status, "content_type": content_type, "filter_ctx": filter_ctx or {},
+    })
+    execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
+    return q.get_task(conn, task["id"])
+
+
+def _run_add_listing_source(conn, url, name, fetcher_type, status=None, content_type=None):
+    task = q.enqueue_task(conn, kind="job_add_listing_source", params={
+        "url": url, "name": name, "fetcher_type": fetcher_type, "status": status, "content_type": content_type,
+    })
+    execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
+    return q.get_task(conn, task["id"])
+
+
+def test_add_by_url_enqueues_task(client, conn):
+    resp = client.post("/jobs/add-by-url", data={"url": "https://example.com/job/1"})
+    assert resp.status_code == 200
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "job_add_by_url"
+    assert task["params"]["url"] == "https://example.com/job/1"
+
+
 @respx.mock
-def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
+def test_add_job_by_url_success_inserts_job_and_streams_progress(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
-    assert "Classified as job_posting" in resp.text
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
+    assert "Classified as job_posting" in fetched["log"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["url"] == "http://example.com/job/1"
@@ -1423,8 +1537,8 @@ def test_add_job_by_url_success_inserts_job_and_streams_progress(client, conn):
     assert source["fetcher_type"] == "manual"
     # No scenarios configured, so this job_posting can't pass any gate — lands on
     # the "Not relevant" tab rather than the default view. Still gets a notice.
-    assert "NOTICE:" in resp.text
-    assert f'href="/jobs?status=not_relevant#job-{jobs[0]["id"]}"' in resp.text
+    assert fetched["result"]["notices"]
+    assert f'href="/jobs?status=not_relevant#job-{jobs[0]["id"]}"' in fetched["result"]["notices"][0]["html"]
 
 
 def _fake_run_add_job_passed_gate(conn, client, model, source_id, url, raw_text):
@@ -1448,143 +1562,139 @@ def _fake_run_add_job_irrelevant(conn, client, model, source_id, url, raw_text):
 
 
 @respx.mock
-def test_add_job_by_url_job_posting_passed_gate_shows_notice(client, conn):
+def test_add_job_by_url_job_posting_passed_gate_shows_notice(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_passed_gate), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
     job = q.get_job_by_url(conn, "http://example.com/job/1")
-    assert "NOTICE:" in resp.text
-    assert f'href="/jobs#job-{job["id"]}"' in resp.text
+    assert fetched["result"]["notices"]
+    assert f'href="/jobs#job-{job["id"]}"' in fetched["result"]["notices"][0]["html"]
 
 
 @respx.mock
-def test_add_job_by_url_error_shows_persistent_notice(client, conn):
+def test_add_job_by_url_error_shows_persistent_notice(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_error), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
     job = q.get_job_by_url(conn, "http://example.com/job/1")
     assert job["content_type"] == "error"
-    assert "NOTICE:warning:" in resp.text
-    assert f'href="/jobs/{job["id"]}"' in resp.text
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert f'href="/jobs/{job["id"]}"' in notice["html"]
 
 
 @respx.mock
-def test_add_job_by_url_irrelevant_shows_discarded_notice(client, conn):
+def test_add_job_by_url_irrelevant_shows_discarded_notice(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_irrelevant), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
     assert q.get_job_by_url(conn, "http://example.com/job/1") is None
-    assert "NOTICE:" in resp.text
-    assert "discarded" in resp.text
+    assert fetched["result"]["notices"]
+    assert "discarded" in fetched["result"]["notices"][0]["html"]
 
 
 @respx.mock
-def test_add_job_by_url_lead_shows_persistent_notice_with_link(client, conn):
+def test_add_job_by_url_lead_shows_persistent_notice_with_link(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_lead), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
-    assert "NOTICE:" in resp.text
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
+    assert fetched["result"]["notices"]
     job = q.get_job_by_url(conn, "http://example.com/job/1")
     assert job["content_type"] == "lead"
-    assert f'href="/jobs?content_type=lead#job-{job["id"]}"' in resp.text
+    assert f'href="/jobs?content_type=lead#job-{job["id"]}"' in fetched["result"]["notices"][0]["html"]
 
 
 @respx.mock
-def test_add_job_by_url_stream_ends_with_single_html_chunk(client, conn):
+def test_add_job_by_url_stream_ends_with_single_html_chunk(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
     )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
          patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
-    assert resp.status_code == 200
-    # Only one HTML: chunk should stream back — the target-mode swap in base.html's
-    # progress JS keeps only the *last* HTML: line as the replacement innerHTML, so a
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
+    # Only one HTML chunk should come back — the target-mode swap in base.html's
+    # polling JS uses only the *last* html_chunks entry as the replacement innerHTML, so a
     # second trailing chunk (e.g. a separate counts_oob fragment) would silently clobber
     # the real content instead of updating it. _content.html's filter-bar already carries
     # fresh counts, so no second chunk is needed.
-    assert resp.text.count("HTML:") == 1
-    assert 'HTML:<div class="filter-bar">' in resp.text
-    assert 'id="count-new"' in resp.text
+    chunks = fetched["result"]["html_chunks"]
+    assert len(chunks) == 1
+    assert '<div class="filter-bar">' in chunks[0]
+    assert 'id="count-new"' in chunks[0]
 
 
 @respx.mock
-def test_add_job_by_url_duplicate_url_does_not_insert(client, conn):
+def test_add_job_by_url_duplicate_url_does_not_insert(conn):
     sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
 
-    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
-    assert resp.status_code == 200
-    assert "Already tracked" in resp.text
-    assert f"/jobs/{jid}" in resp.text
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked" in notice_html
+    assert f"/jobs/{jid}" in notice_html
     assert len(q.get_jobs(conn)) == 1
 
 
-def test_add_job_by_url_duplicate_url_shows_persistent_link_to_job(client, conn):
+def test_add_job_by_url_duplicate_url_shows_persistent_link_to_job(conn):
     sid = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/job/1", title="T", company="C", raw_text="r")
 
-    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+    fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
-    assert resp.status_code == 200
-    assert f'<a href="/jobs/{jid}">View this job</a>' in resp.text
+    assert f'<a href="/jobs/{jid}">View this job</a>' in fetched["result"]["notices"][0]["html"]
 
 
-def test_add_job_by_url_existing_source_url_shows_link_to_source(client, conn):
+def test_add_job_by_url_existing_source_url_shows_link_to_source(conn):
     sid = q.insert_source(conn, "Careers Page", "https://careers.example.com/jobs", "generic_listing")
 
-    resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+    fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
 
-    assert resp.status_code == 200
-    assert "Already tracked as a source" in resp.text
-    assert f'<a href="/sources#source-row-{sid}">' in resp.text
-    assert "Careers Page" in resp.text
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked as a source" in notice_html
+    assert f'<a href="/sources#source-row-{sid}">' in notice_html
+    assert "Careers Page" in notice_html
     assert q.get_jobs(conn) == []
 
 
-def test_add_job_by_url_duplicate_error_job_points_to_trash(client, conn):
+def test_add_job_by_url_duplicate_error_job_points_to_trash(conn):
     sid = q.insert_source(conn, "Manual", "", "manual")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/broken", title="http://example.com/broken", company="", raw_text="")
     q.update_job_pipeline(conn, jid, simplified_content="", content_type="error")
     q.update_job_feedback(conn, jid, "trash", "Failed to fetch: HTTP 404")
 
-    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/broken"})
+    fetched = _run_add_by_url(conn, "http://example.com/broken")
 
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "recorded as an error" in resp.text
-    assert f'<a href="/jobs/{jid}">view it</a>' in resp.text
-    assert '<a href="/jobs?status=trash">Trash</a>' in resp.text
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "recorded as an error" in notice["html"]
+    assert f'<a href="/jobs/{jid}">view it</a>' in notice["html"]
+    assert '<a href="/jobs?status=trash">Trash</a>' in notice["html"]
     assert len(q.get_jobs(conn)) == 1
 
 
 @respx.mock
-def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
+def test_add_job_by_url_fetch_failure_inserts_error_job(conn):
     respx.get("http://example.com/broken").mock(return_value=httpx.Response(404))
 
-    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/broken"})
+    fetched = _run_add_by_url(conn, "http://example.com/broken")
 
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "Couldn't add" in resp.text
-    assert "HTTP 404" in resp.text
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "Couldn't add" in notice["html"]
+    assert "HTTP 404" in notice["html"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
@@ -1593,14 +1703,14 @@ def test_add_job_by_url_fetch_failure_inserts_error_job(client, conn):
 
 
 @respx.mock
-def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
+def test_add_job_by_url_fetch_network_error_inserts_error_job(conn):
     respx.get("http://example.com/unreachable").mock(side_effect=httpx.ConnectError("boom"))
 
-    resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/unreachable"})
+    fetched = _run_add_by_url(conn, "http://example.com/unreachable")
 
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "Couldn't add" in resp.text
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "Couldn't add" in notice["html"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
@@ -1608,7 +1718,7 @@ def test_add_job_by_url_fetch_network_error_inserts_error_job(client, conn):
 
 
 @respx.mock
-def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
+def test_add_job_by_url_js_only_page_shows_no_content_notice(conn):
     # Real shell HTML from a client-side-rendered job board (Ashby): 200 OK, but the
     # only text present is a noscript-style placeholder — no real posting content.
     js_shell_html = (
@@ -1621,13 +1731,13 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
 
     with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
          patch("app.routes.jobs.render_html", return_value=None):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
+        fetched = _run_add_by_url(conn, "http://example.com/js-app")
 
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "No job content detected" in resp.text
-    assert "load its content dynamically" in resp.text
-    assert "JavaScript" in resp.text
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "No job content detected" in notice["html"]
+    assert "load its content dynamically" in notice["html"]
+    assert "JavaScript" in notice["html"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "error"
@@ -1636,7 +1746,7 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(client, conn):
 
 
 @respx.mock
-def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(client, conn):
+def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(conn):
     js_shell_html = (
         "<html><body>"
         "<h1>Trener Jobs</h1>"
@@ -1648,11 +1758,10 @@ def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(client, conn):
     with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
          patch("app.routes.jobs.render_html", return_value=_JOB_POSTING_HTML) as mock_render, \
          patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/js-app"})
+        fetched = _run_add_by_url(conn, "http://example.com/js-app")
 
     mock_render.assert_called_once_with("http://example.com/js-app")
-    assert resp.status_code == 200
-    assert "Classified as job_posting" in resp.text
+    assert "Classified as job_posting" in fetched["log"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
     assert jobs[0]["content_type"] == "job_posting"
@@ -1660,7 +1769,7 @@ def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(client, conn):
 
 
 @respx.mock
-def test_add_job_by_url_thin_page_not_rendered_when_already_rich(client, conn):
+def test_add_job_by_url_thin_page_not_rendered_when_already_rich(conn):
     # Plain HTML already clears the content threshold — render_html must not
     # be called at all, since that's the whole point of trying cheap HTTP first.
     respx.get("http://example.com/job/1").mock(return_value=httpx.Response(200, text=_JOB_POSTING_HTML))
@@ -1668,10 +1777,10 @@ def test_add_job_by_url_thin_page_not_rendered_when_already_rich(client, conn):
     with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
          patch("app.routes.jobs.render_html") as mock_render, \
          patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
     mock_render.assert_not_called()
-    assert resp.status_code == 200
+    assert fetched["status"] == "done"
 
 
 _IS_A_LISTING = {
@@ -1681,35 +1790,35 @@ _IS_A_LISTING = {
 
 
 @respx.mock
-def test_add_job_by_url_listing_detected_shows_confirm_panel(client, conn):
+def test_add_job_by_url_listing_detected_shows_confirm_panel(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
     )
     with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
+        fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
 
-    assert resp.status_code == 200
-    assert "Detected 2 job posting" in resp.text
-    assert "careers.example.com" in resp.text
-    assert 'data-progress-url="/jobs/add-listing-source"' in resp.text
-    assert '<label for="listing-name"' in resp.text
-    assert ">Name:</label>" in resp.text
+    html = fetched["result"]["html_chunks"][0]
+    assert "Detected 2 job posting" in html
+    assert "careers.example.com" in html
+    assert 'data-progress-url="/jobs/add-listing-source"' in html
+    assert '<label for="listing-name"' in html
+    assert ">Name:</label>" in html
+    assert fetched["result"]["needs_action"] is True
     assert q.get_jobs(conn) == []
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []
 
 
 @respx.mock
-def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(client, conn):
+def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(conn):
     respx.get("http://example.com/job/1").mock(
         return_value=httpx.Response(200, text=_JOB_POSTING_HTML.replace("</body>", "<a href='/apply'>Apply</a></body>"))
     )
     one_link_listing = {"is_listing": True, "job_links": ["http://example.com/job/1"]}
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
          patch("app.routes.jobs.detect_listing", return_value=one_link_listing):
-        resp = client.post("/jobs/add-by-url", data={"url": "http://example.com/job/1"})
+        fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
-    assert resp.status_code == 200
-    assert "Classified as job_posting" in resp.text
+    assert "Classified as job_posting" in fetched["log"]
     assert len(q.get_jobs(conn)) == 1
 
 
@@ -1725,92 +1834,76 @@ def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir):
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error=None)
 
 
-def test_add_listing_source_creates_source_and_streams_fetch(client, conn):
-    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-
+def test_add_listing_source_enqueues_task(client, conn):
+    resp = client.post(
+        "/jobs/add-listing-source",
+        data={"url": "https://example.com/jobs", "name": "Example", "fetcher_type": "generic_listing"},
+    )
     assert resp.status_code == 200
-    assert "Fetch complete" in resp.text
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["kind"] == "job_add_listing_source"
+
+
+def test_add_listing_source_creates_source_and_executes_fetch(conn):
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+
+    assert "Fetch complete" in fetched["log"]
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
     assert len(sources) == 1
     assert sources[0]["name"] == "careers.example.com"
 
 
-def test_add_listing_source_rejects_url_already_tracked_as_source(client, conn):
+def test_add_listing_source_rejects_url_already_tracked_as_source(conn):
     sid = q.insert_source(conn, "Existing", "https://careers.example.com/jobs", "generic_listing")
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "Already tracked as a source" in resp.text
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "Dup", "generic_listing")
+    assert "Already tracked as a source" in fetched["result"]["notices"][0]["html"]
     assert len(q.get_sources(conn)) == 1
     assert q.get_source(conn, sid)["name"] == "Existing"
 
 
-def test_add_listing_source_rejects_url_already_tracked_as_job(client, conn):
+def test_add_listing_source_rejects_url_already_tracked_as_job(conn):
     manual_sid = q.insert_source(conn, "Manual", "", "manual")
     jid = q.insert_job(conn, source_id=manual_sid, url="https://careers.example.com/jobs", title="T", company="C", raw_text="r")
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "Dup", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "Already tracked as a job" in resp.text
-    assert f'href="/jobs/{jid}"' in resp.text
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "Dup", "generic_listing")
+    notice_html = fetched["result"]["notices"][0]["html"]
+    assert "Already tracked as a job" in notice_html
+    assert f'href="/jobs/{jid}"' in notice_html
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual"] == []
 
 
-def test_add_listing_source_stream_ends_with_html_chunk(client, conn):
+def test_add_listing_source_stream_ends_with_html_chunk(conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
 
-    assert resp.status_code == 200
-    assert 'HTML:<div class="filter-bar">' in resp.text
+    assert '<div class="filter-bar">' in fetched["result"]["html_chunks"][0]
 
 
-def test_add_listing_source_shows_persistent_notice_with_link(client, conn):
+def test_add_listing_source_shows_persistent_notice_with_link(conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "NOTICE:" in resp.text
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    assert fetched["result"]["notices"]
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
     assert len(sources) == 1
-    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in fetched["result"]["notices"][0]["html"]
 
 
-def test_add_listing_source_shows_warning_notice_when_nothing_found(client, conn):
+def test_add_listing_source_shows_warning_notice_when_nothing_found(conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch_nothing_found):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://careers.example.com/jobs", "name": "careers.example.com", "fetcher_type": "generic_listing"},
-        )
-    assert resp.status_code == 200
-    assert "NOTICE:warning:" in resp.text
-    assert "found nothing" in resp.text
+        fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
+    notice = fetched["result"]["notices"][0]
+    assert notice["level"] == "warning"
+    assert "found nothing" in notice["html"]
     sources = q.get_sources(conn)
     assert len(sources) == 1
-    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in resp.text
+    assert f'href="/fetch#fetch-row-{sources[0]["id"]}"' in notice["html"]
 
 
-def test_add_listing_source_passes_through_finn_listing_type(client, conn):
+def test_add_listing_source_passes_through_finn_listing_type(conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
-        resp = client.post(
-            "/jobs/add-listing-source",
-            data={"url": "https://www.finn.no/job/search", "name": "Finn AI", "fetcher_type": "finn_listing"},
-        )
-    assert resp.status_code == 200
+        _run_add_listing_source(conn, "https://www.finn.no/job/search", "Finn AI", "finn_listing")
     sources = q.get_sources(conn)
     assert len(sources) == 1
     assert sources[0]["fetcher_type"] == "finn_listing"
@@ -1826,30 +1919,28 @@ def test_add_listing_source_rejects_invalid_fetcher_type(client, conn):
 
 
 @respx.mock
-def test_add_job_by_url_listing_confirm_panel_carries_detected_fetcher_type(client, conn):
+def test_add_job_by_url_listing_confirm_panel_carries_detected_fetcher_type(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
     )
     with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
-        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
-    assert 'id="listing-fetcher-type" value="generic_listing"' in resp.text
+        fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
+    assert 'id="listing-fetcher-type" value="generic_listing"' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_add_job_by_url_listing_confirm_panel_detects_finn_no(client, conn):
+def test_add_job_by_url_listing_confirm_panel_detects_finn_no(conn):
     respx.get("https://www.finn.no/job/search").mock(
         return_value=httpx.Response(200, text="<html><body><a href='/job/1'>A</a><a href='/job/2'>B</a></body></html>")
     )
     finn_listing = {"is_listing": True, "job_links": ["https://www.finn.no/job/1", "https://www.finn.no/job/2"]}
     with patch("app.routes.jobs.detect_listing", return_value=finn_listing):
-        resp = client.post("/jobs/add-by-url", data={"url": "https://www.finn.no/job/search"})
-    assert resp.status_code == 200
-    assert 'id="listing-fetcher-type" value="finn_listing"' in resp.text
+        fetched = _run_add_by_url(conn, "https://www.finn.no/job/search")
+    assert 'id="listing-fetcher-type" value="finn_listing"' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_title(client, conn):
+def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_title(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(
             200,
@@ -1859,16 +1950,15 @@ def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_
     )
     with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
          patch("app.routes.jobs.generate_source_name", return_value="careers/frontend-oslo") as mock_gen:
-        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
+        fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
     mock_gen.assert_called_once_with(
         ANY, ANY, "careers.example.com", "Frontend Developer Jobs in Oslo | Careers"
     )
-    assert 'id="listing-name" value="careers/frontend-oslo"' in resp.text
+    assert 'id="listing-name" value="careers/frontend-oslo"' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
-def test_add_job_by_url_listing_confirm_panel_falls_back_to_domain_when_name_generation_fails(client, conn):
+def test_add_job_by_url_listing_confirm_panel_falls_back_to_domain_when_name_generation_fails(conn):
     respx.get("https://careers.example.com/jobs").mock(
         return_value=httpx.Response(
             200,
@@ -1878,9 +1968,8 @@ def test_add_job_by_url_listing_confirm_panel_falls_back_to_domain_when_name_gen
     )
     with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
          patch("app.routes.jobs.generate_source_name", return_value=None):
-        resp = client.post("/jobs/add-by-url", data={"url": "https://careers.example.com/jobs"})
-    assert resp.status_code == 200
-    assert 'id="listing-name" value="careers.example.com"' in resp.text
+        fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
+    assert 'id="listing-name" value="careers.example.com"' in fetched["result"]["html_chunks"][0]
 
 
 def test_job_list_has_add_by_url_form(client, conn):

@@ -1,10 +1,9 @@
 from __future__ import annotations
 import sqlite3
 from urllib.parse import urlsplit
-import openai
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_ai_client, get_model, get_config
+from fastapi.responses import HTMLResponse
+from app.deps import get_db
 from app.db import queries as q
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
 from app.fetchers.links import extract_links
@@ -15,7 +14,8 @@ from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.generate_source_name import generate_source_name
-from app.routes.sources import check_already_tracked_notice
+from app.routes.sources import check_already_tracked_notice_data
+from app.task_engine import register_task_kind
 from app.template_env import templates
 
 router = APIRouter()
@@ -265,171 +265,166 @@ def job_scenario_feedback(
     )
 
 
+@register_task_kind("job_reset")
+def _task_job_reset(conn, client, model, config, params):
+    job = q.get_job(conn, params["job_id"])
+    if job is None:
+        return {"html_chunks": [], "notices": []}
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    gen = run_reprocess_job(conn, client, model, job, scenarios, profile)
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration:
+        pass
+    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    counts_html = templates.get_template("jobs/_counts_oob.html").render(
+        request=None, counts=q.get_job_counts(conn)
+    )
+    return {"html_chunks": [html, counts_html], "notices": []}
+
+
+@register_task_kind("job_pass_as_new")
+def _task_job_pass_as_new(conn, client, model, config, params):
+    job = q.get_job(conn, params["job_id"])
+    if job is None:
+        return {"html_chunks": [], "notices": []}
+    profile = q.get_profile(conn)
+    gen = run_pass_as_new(conn, client, model, job, profile)
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration:
+        pass
+    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    counts_html = templates.get_template("jobs/_counts_oob.html").render(
+        request=None, counts=q.get_job_counts(conn)
+    )
+    return {"html_chunks": [html, counts_html], "notices": []}
+
+
+@register_task_kind("job_reevaluate")
+def _task_job_reevaluate(conn, client, model, config, params):
+    job = q.get_job(conn, params["job_id"])
+    if job is None:
+        return {"html_chunks": [], "notices": []}
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    gen = run_reevaluate_job(conn, client, model, job, scenarios, profile)
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration:
+        pass
+    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    counts_html = templates.get_template("jobs/_counts_oob.html").render(
+        request=None, counts=q.get_job_counts(conn)
+    )
+    return {"html_chunks": [html, counts_html], "notices": []}
+
+
 @router.post("/jobs/{job_id}/reset")
-def job_reset(
-    job_id: int,
-    request: Request,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+def job_reset(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     job = q.get_job(conn, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    scenarios = q.get_scenarios(conn)
-    profile = q.get_profile(conn)
-    filter_ctx = _filter_context(request)
-
-    def stream():
-        gen = run_reprocess_job(conn, client, model, job, scenarios, profile)
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration:
-            pass
-        html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-        yield "HTML:" + html.replace("\n", "") + "\n"
-        counts_html = templates.get_template("jobs/_counts_oob.html").render(
-            request=request, counts=q.get_job_counts(conn)
-        )
-        yield "HTML:" + counts_html.replace("\n", "")
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(
+        conn, kind="job_reset", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/{job_id}/pass-as-new")
-def job_pass_as_new(
-    job_id: int,
-    request: Request,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+def job_pass_as_new(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     job = q.get_job(conn, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    profile = q.get_profile(conn)
-    filter_ctx = _filter_context(request)
-
-    def stream():
-        gen = run_pass_as_new(conn, client, model, job, profile)
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration:
-            pass
-        html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-        yield "HTML:" + html.replace("\n", "") + "\n"
-        counts_html = templates.get_template("jobs/_counts_oob.html").render(
-            request=request, counts=q.get_job_counts(conn)
-        )
-        yield "HTML:" + counts_html.replace("\n", "")
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(
+        conn, kind="job_pass_as_new", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/{job_id}/reevaluate")
-def job_reevaluate(
-    job_id: int,
-    request: Request,
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
+def job_reevaluate(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     job = q.get_job(conn, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    task = q.enqueue_task(
+        conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
+
+
+@register_task_kind("jobs_bulk_reset")
+def _task_jobs_bulk_reset(conn, client, model, config, params):
+    job_ids = params["job_ids"]
+    filter_ctx = params["filter_ctx"]
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
-    filter_ctx = _filter_context(request)
-
-    def stream():
-        gen = run_reevaluate_job(conn, client, model, job, scenarios, profile)
+    yield f"Resetting {len(job_ids)} job(s)"
+    html_chunks = []
+    for idx, job_id in enumerate(job_ids, start=1):
+        job = q.get_job(conn, job_id)
+        if not job:
+            continue
+        prefix = f"[{idx}/{len(job_ids)}] "
+        gen = run_reprocess_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
         try:
             while True:
-                yield next(gen) + "\n"
+                yield next(gen)
         except StopIteration:
             pass
-        html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-        yield "HTML:" + html.replace("\n", "") + "\n"
-        counts_html = templates.get_template("jobs/_counts_oob.html").render(
-            request=request, counts=q.get_job_counts(conn)
-        )
-        yield "HTML:" + counts_html.replace("\n", "")
+        html_chunks.append(_render_updated_job_html(conn, None, job_id, filter_ctx))
+    html_chunks.append(
+        templates.get_template("jobs/_counts_oob.html").render(request=None, counts=q.get_job_counts(conn))
+    )
+    yield f"Reset complete: {len(job_ids)} job(s) reprocessed"
+    return {"html_chunks": html_chunks, "notices": []}
 
-    return StreamingResponse(stream(), media_type="text/plain")
+
+@register_task_kind("jobs_bulk_reevaluate")
+def _task_jobs_bulk_reevaluate(conn, client, model, config, params):
+    job_ids = params["job_ids"]
+    filter_ctx = params["filter_ctx"]
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    yield f"Re-evaluating {len(job_ids)} job(s)"
+    html_chunks = []
+    for idx, job_id in enumerate(job_ids, start=1):
+        job = q.get_job(conn, job_id)
+        if not job:
+            continue
+        prefix = f"[{idx}/{len(job_ids)}] "
+        gen = run_reevaluate_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
+        try:
+            while True:
+                yield next(gen)
+        except StopIteration:
+            pass
+        html_chunks.append(_render_updated_job_html(conn, None, job_id, filter_ctx))
+    html_chunks.append(
+        templates.get_template("jobs/_counts_oob.html").render(request=None, counts=q.get_job_counts(conn))
+    )
+    yield f"Re-evaluation complete: {len(job_ids)} job(s) updated"
+    return {"html_chunks": html_chunks, "notices": []}
 
 
 @router.post("/jobs/bulk-reset")
-def job_bulk_reset(
-    request: Request,
-    job_ids: list[int] = Form(...),
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    scenarios = q.get_scenarios(conn)
-    profile = q.get_profile(conn)
-    filter_ctx = _filter_context(request)
-
-    def stream():
-        yield f"Resetting {len(job_ids)} job(s)\n"
-        for idx, job_id in enumerate(job_ids, start=1):
-            job = q.get_job(conn, job_id)
-            if not job:
-                continue
-            prefix = f"[{idx}/{len(job_ids)}] "
-            gen = run_reprocess_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
-            try:
-                while True:
-                    yield next(gen) + "\n"
-            except StopIteration:
-                pass
-            html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-            yield "HTML:" + html.replace("\n", "") + "\n"
-        counts_html = templates.get_template("jobs/_counts_oob.html").render(
-            request=request, counts=q.get_job_counts(conn)
-        )
-        yield "HTML:" + counts_html.replace("\n", "") + "\n"
-        yield f"Reset complete: {len(job_ids)} job(s) reprocessed\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+def job_bulk_reset(request: Request, job_ids: list[int] = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    task = q.enqueue_task(
+        conn, kind="jobs_bulk_reset", params={"job_ids": job_ids, "filter_ctx": _filter_context(request)}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/bulk-reevaluate")
-def job_bulk_reevaluate(
-    request: Request,
-    job_ids: list[int] = Form(...),
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    scenarios = q.get_scenarios(conn)
-    profile = q.get_profile(conn)
-    filter_ctx = _filter_context(request)
-
-    def stream():
-        yield f"Re-evaluating {len(job_ids)} job(s)\n"
-        for idx, job_id in enumerate(job_ids, start=1):
-            job = q.get_job(conn, job_id)
-            if not job:
-                continue
-            prefix = f"[{idx}/{len(job_ids)}] "
-            gen = run_reevaluate_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
-            try:
-                while True:
-                    yield next(gen) + "\n"
-            except StopIteration:
-                pass
-            html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-            yield "HTML:" + html.replace("\n", "") + "\n"
-        counts_html = templates.get_template("jobs/_counts_oob.html").render(
-            request=request, counts=q.get_job_counts(conn)
-        )
-        yield "HTML:" + counts_html.replace("\n", "") + "\n"
-        yield f"Re-evaluation complete: {len(job_ids)} job(s) updated\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+def job_bulk_reevaluate(request: Request, job_ids: list[int] = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    task = q.enqueue_task(
+        conn, kind="jobs_bulk_reevaluate", params={"job_ids": job_ids, "filter_ctx": _filter_context(request)}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/bulk-feedback", response_class=HTMLResponse)
@@ -523,173 +518,202 @@ def job_bulk_actions_cancel(
     return templates.TemplateResponse(request, "jobs/_bulk_actions.html", {"status": status_filter or None})
 
 
-@router.post("/jobs/add-by-url")
-def job_add_by_url(
-    request: Request,
-    url: str = Form(...),
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    status = request.query_params.get("status") or None
-    content_type = request.query_params.get("content_type") or None
+@register_task_kind("job_add_by_url")
+def _task_job_add_by_url(conn, client, model, config, params):
+    url = params["url"]
+    status = params.get("status")
+    content_type = params.get("content_type")
+    notices: list[dict] = []
+    html_chunks: list[str] = []
+    result = {"notices": notices, "html_chunks": html_chunks}
 
-    def stream():
-        existing_job = q.get_job_by_url(conn, url)
-        if existing_job is not None:
-            if existing_job["content_type"] == "error":
-                yield _notice_line(
-                    "jobs/_already_tracked.html", level="warning", request=request, kind="error",
-                    link_href=f"/jobs/{existing_job['id']}",
-                )
-            else:
-                yield _notice_line(
-                    "jobs/_already_tracked.html", request=request, kind="job",
-                    link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
-                )
+    existing_job = q.get_job_by_url(conn, url)
+    if existing_job is not None:
+        if existing_job["content_type"] == "error":
+            notices.append({
+                "level": "warning",
+                "html": templates.get_template("jobs/_already_tracked.html").render(
+                    request=None, kind="error", link_href=f"/jobs/{existing_job['id']}",
+                ),
+            })
         else:
-            existing_source = q.get_source_by_url(conn, url)
-            if existing_source is not None:
-                yield _notice_line(
-                    "jobs/_already_tracked.html", request=request, kind="source",
-                    link_href=f"/sources#source-row-{existing_source['id']}",
-                    link_text=f'View "{existing_source["name"]}" in Sources',
-                )
+            notices.append({
+                "level": "info",
+                "html": templates.get_template("jobs/_already_tracked.html").render(
+                    request=None, kind="job", link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
+                ),
+            })
+    else:
+        already_tracked = check_already_tracked_notice_data(conn, url)
+        if already_tracked is not None:
+            notices.append(already_tracked)
+        else:
+            try:
+                html = fetch_url_html(url)
+            except FetchError as exc:
+                _insert_error_job(conn, url, f"Failed to fetch: {exc}")
+                notices.append({
+                    "level": "warning",
+                    "html": templates.get_template("jobs/_fetch_failed_notice.html").render(
+                        request=None, url=url, reason=str(exc),
+                    ),
+                })
             else:
+                if not has_enough_content(html):
+                    rendered = render_html(url)
+                    if rendered and has_enough_content(rendered):
+                        html = rendered
+                links = extract_links(html, url)
+                detection = detect_listing(client, model, links, url)
+                if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                    domain = urlsplit(url).netloc
+                    default_name = domain
+                    page_title = extract_page_title(html)
+                    if page_title:
+                        generated_name = generate_source_name(client, model, domain, page_title)
+                        if generated_name:
+                            default_name = generated_name
+                    panel_context = {
+                        "request": None, "url": url,
+                        "fetcher_type": classify_known_source(url) or "generic_listing",
+                        "link_count": len(detection["job_links"]), "domain": domain,
+                        "default_name": default_name,
+                    }
+                    panel_context.update(params.get("filter_ctx", {}))
+                    panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
+                    html_chunks.append(panel)
+                    result["needs_action"] = True
+                    result["action_message"] = f"'{default_name}' looks like a job listing — confirm how to add it"
+                    result["resume_html"] = panel
+                    return result
                 try:
-                    html = fetch_url_html(url)
-                except FetchError as exc:
-                    _insert_error_job(conn, url, f"Failed to fetch: {exc}")
-                    yield _notice_line(
-                        "jobs/_fetch_failed_notice.html", level="warning",
-                        request=request, url=url, reason=str(exc),
+                    raw_text = extract_text_or_raise(html)
+                except NoContentError:
+                    _insert_error_job(
+                        conn, url, "No extractable content — page likely requires JavaScript to render"
                     )
+                    notices.append({
+                        "level": "warning",
+                        "html": templates.get_template("jobs/_no_content_notice.html").render(request=None, url=url),
+                    })
                 else:
-                    if not has_enough_content(html):
-                        rendered = render_html(url)
-                        if rendered and has_enough_content(rendered):
-                            html = rendered
-                    links = extract_links(html, url)
-                    detection = detect_listing(client, model, links, url)
-                    if detection["is_listing"] and len(detection["job_links"]) >= 2:
-                        domain = urlsplit(url).netloc
-                        default_name = domain
-                        page_title = extract_page_title(html)
-                        if page_title:
-                            generated_name = generate_source_name(client, model, domain, page_title)
-                            if generated_name:
-                                default_name = generated_name
-                        panel_context = {
-                            "request": request,
-                            "url": url,
-                            "fetcher_type": classify_known_source(url) or "generic_listing",
-                            "link_count": len(detection["job_links"]),
-                            "domain": domain,
-                            "default_name": default_name,
-                        }
-                        panel_context.update(_filter_context(request))
-                        panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
-                        yield "HTML:" + panel.replace("\n", "") + "\n"
-                        return
+                    source_id = q.get_or_create_manual_source(conn)
+                    gen = run_add_job(conn, client, model, source_id, url, raw_text)
                     try:
-                        raw_text = extract_text_or_raise(html)
-                    except NoContentError:
-                        _insert_error_job(
-                            conn, url, "No extractable content — page likely requires JavaScript to render",
-                        )
-                        yield _notice_line(
-                            "jobs/_no_content_notice.html", level="warning", request=request, url=url,
-                        )
+                        while True:
+                            yield next(gen)
+                    except StopIteration:
+                        pass
+                    added_job = q.get_job_by_url(conn, url)
+                    if added_job is None:
+                        notices.append({
+                            "level": "info",
+                            "html": templates.get_template("jobs/_discarded_notice.html").render(request=None),
+                        })
                     else:
-                        source_id = q.get_or_create_manual_source(conn)
-                        gen = run_add_job(conn, client, model, source_id, url, raw_text)
-                        try:
-                            while True:
-                                yield next(gen) + "\n"
-                        except StopIteration:
-                            pass
-                        added_job = q.get_job_by_url(conn, url)
-                        if added_job is None:
-                            yield _notice_line("jobs/_discarded_notice.html", request=request)
-                        else:
-                            added_job = q.get_job(conn, added_job["id"])
-                            if added_job["content_type"] == "lead":
-                                yield _notice_line(
-                                    "jobs/_lead_added_notice.html", request=request, job_id=added_job["id"],
-                                )
-                            elif added_job["content_type"] == "error":
-                                yield _notice_line(
-                                    "jobs/_error_added_notice.html", level="warning",
-                                    request=request, job_id=added_job["id"],
-                                )
-                            elif added_job["content_type"] == "job_posting":
-                                passed_gate = bool(added_job["passed_gate_count"]) or bool(added_job["gate_override"])
-                                template_name = (
-                                    "jobs/_job_added_notice.html" if passed_gate
-                                    else "jobs/_not_relevant_added_notice.html"
-                                )
-                                yield _notice_line(
-                                    template_name, request=request, job_id=added_job["id"],
-                                )
+                        added_job = q.get_job(conn, added_job["id"])
+                        if added_job["content_type"] == "lead":
+                            notices.append({
+                                "level": "info",
+                                "html": templates.get_template("jobs/_lead_added_notice.html").render(
+                                    request=None, job_id=added_job["id"],
+                                ),
+                            })
+                        elif added_job["content_type"] == "error":
+                            notices.append({
+                                "level": "warning",
+                                "html": templates.get_template("jobs/_error_added_notice.html").render(
+                                    request=None, job_id=added_job["id"],
+                                ),
+                            })
+                        elif added_job["content_type"] == "job_posting":
+                            passed_gate = bool(added_job["passed_gate_count"]) or bool(added_job["gate_override"])
+                            template_name = (
+                                "jobs/_job_added_notice.html" if passed_gate
+                                else "jobs/_not_relevant_added_notice.html"
+                            )
+                            notices.append({
+                                "level": "info",
+                                "html": templates.get_template(template_name).render(
+                                    request=None, job_id=added_job["id"],
+                                ),
+                            })
 
-        html_chunk = templates.get_template("jobs/_content.html").render(
-            request=request, **_content_context(conn, status, content_type)
+    html_chunks.append(
+        templates.get_template("jobs/_content.html").render(
+            request=None, **_content_context(conn, status, content_type)
         )
-        yield "HTML:" + html_chunk.replace("\n", "") + "\n"
+    )
+    return result
 
-    return StreamingResponse(stream(), media_type="text/plain")
+
+@register_task_kind("job_add_listing_source")
+def _task_job_add_listing_source(conn, client, model, config, params):
+    url, name, fetcher_type = params["url"], params["name"], params["fetcher_type"]
+    status = params.get("status")
+    content_type = params.get("content_type")
+    notices = []
+
+    already_tracked = check_already_tracked_notice_data(conn, url)
+    if already_tracked is not None:
+        notices.append(already_tracked)
+        html_chunks = [templates.get_template("jobs/_content.html").render(
+            request=None, **_content_context(conn, status, content_type)
+        )]
+        return {"notices": notices, "html_chunks": html_chunks}
+
+    source_id = q.insert_source(conn, name, url, fetcher_type)
+    source = q.get_source(conn, source_id)
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    fetch_result = None
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration as stop:
+        fetch_result = stop.value
+
+    if fetch_result is not None and fetch_result.jobs_found == 0:
+        notices.append({
+            "level": "warning",
+            "html": templates.get_template("sources/_fetch_nothing_found_notice.html").render(
+                request=None, name=name, url=url, error=fetch_result.error, source_id=source_id,
+            ),
+        })
+    else:
+        notices.append({
+            "level": "info",
+            "html": templates.get_template("jobs/_source_added_notice.html").render(
+                request=None, name=name, source_id=source_id,
+            ),
+        })
+
+    html_chunks = [templates.get_template("jobs/_content.html").render(
+        request=None, **_content_context(conn, status, content_type)
+    )]
+    return {"notices": notices, "html_chunks": html_chunks}
+
+
+@router.post("/jobs/add-by-url")
+def job_add_by_url(request: Request, url: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    task = q.enqueue_task(conn, kind="job_add_by_url", params={
+        "url": url,
+        "status": request.query_params.get("status") or None,
+        "content_type": request.query_params.get("content_type") or None,
+        "filter_ctx": _filter_context(request),
+    })
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/add-listing-source")
 def job_add_listing_source(
-    request: Request,
-    url: str = Form(...),
-    name: str = Form(...),
-    fetcher_type: str = Form(...),
+    request: Request, url: str = Form(...), name: str = Form(...), fetcher_type: str = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-    config=Depends(get_config),
 ):
     if fetcher_type not in DETECTABLE_FETCHER_TYPES:
         raise HTTPException(status_code=400, detail="Invalid fetcher_type")
-
-    status = request.query_params.get("status") or None
-    content_type = request.query_params.get("content_type") or None
-
-    def stream():
-        already_tracked = check_already_tracked_notice(conn, request, url)
-        if already_tracked is not None:
-            yield already_tracked
-            html_chunk = templates.get_template("jobs/_content.html").render(
-                request=request, **_content_context(conn, status, content_type)
-            )
-            yield "HTML:" + html_chunk.replace("\n", "") + "\n"
-            return
-
-        source_id = q.insert_source(conn, name, url, fetcher_type)
-        source = q.get_source(conn, source_id)
-        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
-        fetch_result = None
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration as stop:
-            fetch_result = stop.value
-
-        if fetch_result is not None and fetch_result.jobs_found == 0:
-            yield _notice_line(
-                "sources/_fetch_nothing_found_notice.html", level="warning",
-                request=request, name=name, url=url, error=fetch_result.error, source_id=source_id,
-            )
-        else:
-            yield _notice_line(
-                "jobs/_source_added_notice.html", request=request, name=name, source_id=source_id,
-            )
-
-        html_chunk = templates.get_template("jobs/_content.html").render(
-            request=request, **_content_context(conn, status, content_type)
-        )
-        yield "HTML:" + html_chunk.replace("\n", "") + "\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(conn, kind="job_add_listing_source", params={
+        "url": url, "name": name, "fetcher_type": fetcher_type,
+        "status": request.query_params.get("status") or None,
+        "content_type": request.query_params.get("content_type") or None,
+    })
+    return {"task_id": task["id"], "already_active": task["already_active"]}

@@ -2,10 +2,9 @@ from __future__ import annotations
 import sqlite3
 from typing import Optional
 from urllib.parse import urlsplit
-import openai
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
-from app.deps import get_db, get_config, get_ai_client, get_model
+from fastapi.responses import HTMLResponse
+from app.deps import get_db
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
 from app.fetchers.links import extract_links
@@ -15,15 +14,10 @@ from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCH
 from app.ai.detect_listing import detect_listing
 from app.ai.generate_source_name import generate_source_name
 from app.pipeline import run_fetch
+from app.task_engine import register_task_kind
 from app.template_env import templates
 
 router = APIRouter()
-
-
-def _notice_line(template_name: str, *, level: str = "info", **context) -> str:
-    rendered = templates.get_template(template_name).render(**context)
-    prefix = "NOTICE:warning:" if level == "warning" else "NOTICE:"
-    return prefix + rendered.replace("\n", "") + "\n"
 
 
 def _slack_login_state(source: dict, stats_by_source: dict) -> str | None:
@@ -58,20 +52,25 @@ def _live_slack_check(source: dict) -> bool | None:
         return None
 
 
-def check_already_tracked_notice(conn: sqlite3.Connection, request: Request, url: str) -> str | None:
+def check_already_tracked_notice_data(conn: sqlite3.Connection, url: str) -> dict | None:
     existing_source = q.get_source_by_url(conn, url)
     if existing_source is not None:
-        return _notice_line(
-            "jobs/_already_tracked.html", request=request, kind="source",
-            link_href=f"/sources#source-row-{existing_source['id']}",
-            link_text=f'View "{existing_source["name"]}" in Sources',
-        )
+        return {
+            "level": "info",
+            "html": templates.get_template("jobs/_already_tracked.html").render(
+                request=None, kind="source",
+                link_href=f"/sources#source-row-{existing_source['id']}",
+                link_text=f'View "{existing_source["name"]}" in Sources',
+            ),
+        }
     existing_job = q.get_job_by_url(conn, url)
     if existing_job is not None:
-        return _notice_line(
-            "jobs/_already_tracked.html", request=request, kind="job",
-            link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
-        )
+        return {
+            "level": "info",
+            "html": templates.get_template("jobs/_already_tracked.html").render(
+                request=None, kind="job", link_href=f"/jobs/{existing_job['id']}", link_text="View this job",
+            ),
+        }
     return None
 
 
@@ -97,106 +96,102 @@ def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "sources/index.html", _sources_context(conn))
 
 
-@router.post("/sources/detect")
-def detect_source(
-    request: Request,
-    url: str = Form(...),
-    conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-):
-    def stream():
-        already_tracked = check_already_tracked_notice(conn, request, url)
-        if already_tracked is not None:
-            yield already_tracked
-            return
+@register_task_kind("source_detect")
+def _task_source_detect(conn, client, model, config, params):
+    url = params["url"]
+    already_tracked = check_already_tracked_notice_data(conn, url)
+    if already_tracked is not None:
+        return {"notices": [already_tracked], "html_chunks": []}
 
-        default_name = urlsplit(url).netloc
-        fetcher_type = classify_known_source(url)
-        if fetcher_type is None:
-            yield "Checking the page...\n"
-            try:
-                html = fetch_url_html(url)
-            except FetchError:
-                fetcher_type = "generic_listing"
-            else:
-                if not has_enough_content(html):
-                    rendered = render_html(url)
-                    if rendered and has_enough_content(rendered):
-                        html = rendered
-                page_title = extract_page_title(html)
-                if page_title:
-                    generated_name = generate_source_name(client, model, default_name, page_title)
-                    if generated_name:
-                        default_name = generated_name
-                links = extract_links(html, url)
-                detection = detect_listing(client, model, links, url)
-                if detection["is_listing"] and len(detection["job_links"]) >= 2:
-                    fetcher_type = "generic_listing"
-
-        if fetcher_type is not None:
-            panel = templates.get_template("sources/_detect_confirm.html").render(
-                request=request, url=url, name=default_name, fetcher_type=fetcher_type,
-            )
+    default_name = urlsplit(url).netloc
+    fetcher_type = classify_known_source(url)
+    if fetcher_type is None:
+        yield "Checking the page..."
+        try:
+            html = fetch_url_html(url)
+        except FetchError:
+            fetcher_type = "generic_listing"
         else:
-            panel = templates.get_template("sources/_detect_mismatch.html").render(
-                request=request, url=url, name=default_name,
-            )
-        yield "HTML:" + panel.replace("\n", "") + "\n"
+            if not has_enough_content(html):
+                rendered = render_html(url)
+                if rendered and has_enough_content(rendered):
+                    html = rendered
+            page_title = extract_page_title(html)
+            if page_title:
+                generated_name = generate_source_name(client, model, default_name, page_title)
+                if generated_name:
+                    default_name = generated_name
+            links = extract_links(html, url)
+            detection = detect_listing(client, model, links, url)
+            if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                fetcher_type = "generic_listing"
 
-    return StreamingResponse(stream(), media_type="text/plain")
+    if fetcher_type is not None:
+        panel = templates.get_template("sources/_detect_confirm.html").render(
+            request=None, url=url, name=default_name, fetcher_type=fetcher_type,
+        )
+    else:
+        panel = templates.get_template("sources/_detect_mismatch.html").render(
+            request=None, url=url, name=default_name,
+        )
+    return {
+        "notices": [], "html_chunks": [panel],
+        "needs_action": True,
+        "action_message": f"New source detected: {default_name}",
+        "resume_html": panel,
+    }
+
+
+@register_task_kind("source_confirm")
+def _task_source_confirm(conn, client, model, config, params):
+    url, name, fetcher_type = params["url"], params["name"], params["fetcher_type"]
+    already_tracked = check_already_tracked_notice_data(conn, url)
+    if already_tracked is not None:
+        table = templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn))
+        add_form = templates.get_template("sources/_add_form.html").render(request=None)
+        return {"notices": [already_tracked], "html_chunks": [table, add_form]}
+
+    source_id = q.insert_source(conn, name, url, fetcher_type)
+    source = q.get_source(conn, source_id)
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    fetch_result = None
+    try:
+        while True:
+            yield next(gen)
+    except StopIteration as stop:
+        fetch_result = stop.value
+
+    notices = []
+    if fetch_result is not None and fetch_result.jobs_found == 0:
+        notices.append({
+            "level": "warning",
+            "html": templates.get_template("sources/_fetch_nothing_found_notice.html").render(
+                request=None, name=name, url=url, error=fetch_result.error, source_id=source_id,
+            ),
+        })
+
+    table = templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn))
+    add_form = templates.get_template("sources/_add_form.html").render(request=None)
+    return {"notices": notices, "html_chunks": [table, add_form]}
+
+
+@router.post("/sources/detect")
+def detect_source(url: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    task = q.enqueue_task(conn, kind="source_detect", params={"url": url})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/sources/detect/confirm")
 def confirm_source(
-    request: Request,
-    url: str = Form(...),
-    name: str = Form(...),
-    fetcher_type: str = Form(...),
+    url: str = Form(...), name: str = Form(...), fetcher_type: str = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
-    client: openai.OpenAI = Depends(get_ai_client),
-    model: str = Depends(get_model),
-    config=Depends(get_config),
 ):
     if fetcher_type not in DETECTABLE_FETCHER_TYPES:
         raise HTTPException(status_code=400, detail="Invalid fetcher_type")
-
-    def stream():
-        already_tracked = check_already_tracked_notice(conn, request, url)
-        if already_tracked is not None:
-            yield already_tracked
-            table = templates.get_template("sources/_table.html").render(
-                request=request, **_sources_context(conn)
-            )
-            yield "HTML:" + table.replace("\n", "") + "\n"
-            add_form = templates.get_template("sources/_add_form.html").render(request=request)
-            yield "HTML:" + add_form.replace("\n", "") + "\n"
-            return
-
-        source_id = q.insert_source(conn, name, url, fetcher_type)
-        source = q.get_source(conn, source_id)
-        gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
-        fetch_result = None
-        try:
-            while True:
-                yield next(gen) + "\n"
-        except StopIteration as stop:
-            fetch_result = stop.value
-
-        if fetch_result is not None and fetch_result.jobs_found == 0:
-            yield _notice_line(
-                "sources/_fetch_nothing_found_notice.html", level="warning",
-                name=name, url=url, error=fetch_result.error, source_id=source_id,
-            )
-
-        table = templates.get_template("sources/_table.html").render(
-            request=request, **_sources_context(conn)
-        )
-        yield "HTML:" + table.replace("\n", "") + "\n"
-        add_form = templates.get_template("sources/_add_form.html").render(request=request)
-        yield "HTML:" + add_form.replace("\n", "") + "\n"
-
-    return StreamingResponse(stream(), media_type="text/plain")
+    task = q.enqueue_task(
+        conn, kind="source_confirm", params={"url": url, "name": name, "fetcher_type": fetcher_type}
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 def _get_source_or_404(conn: sqlite3.Connection, source_id: int) -> dict:
