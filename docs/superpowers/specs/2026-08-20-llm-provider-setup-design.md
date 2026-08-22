@@ -59,10 +59,13 @@ model = "gpt-4o-mini"         # required for hosted providers; optional for loca
   string is never used because the OpenAI SDK rejects it; hosted providers are
   validated to have a key at save time anyway.
 - **Model resolution:** `llm.model` verbatim, no per-provider fallback. A
-  local/custom provider with no configured model is allowed to be empty →
-  model is empty at runtime (the user sees an LLM error they can fix on
-  `/setup`). A hosted provider with no configured model is rejected at save
-  time (see Validation rules) since there is no default left to fall back to.
+  local/custom provider with no configured model is allowed to be empty, and
+  `check_config_status().ok` treats endpoint-only as fully configured for it
+  (a self-hosted server often only ever serves one model, so demanding one
+  here would be a false "not configured" reading — see 2026-08-22 revision
+  below). A hosted provider with no configured model is rejected at save time
+  (see Validation rules) since there is no default left to fall back to, and
+  `.ok` requires a model for it too.
 
 No API key is ever written unless the user typed one.
 
@@ -158,8 +161,10 @@ through the symlink to the volume-mounted file.
 ## Wiring
 
 - `app/config.py` — `Config` gains `llm_api_key: str`; `load_config()`
-  resolves endpoint/model/api key via `app.providers`. `ConfigStatus` gained
-  nothing: `.ok` still means config exists and an LLM endpoint+model resolved.
+  resolves endpoint/model/api key via `app.providers`. `ConfigStatus` gained a
+  `model_required` field (2026-08-22): `.ok` means config exists, an LLM
+  endpoint resolved, and — only for hosted presets — a model resolved too.
+  Custom/legacy configs are `ok` on endpoint alone.
 - `app/ai/client.py` and `app/deps.py:get_ai_client()` — build the OpenAI
   client with `config.llm_api_key` instead of the hardcoded `"not-needed"`.
 - `app/main.py` — include `setup.router`.

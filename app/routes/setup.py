@@ -90,12 +90,6 @@ def setup_test(
         )
 
     resolved_endpoint = _resolve_endpoint(provider, endpoint)
-    if not model:
-        return templates.TemplateResponse(
-            request,
-            "setup/_test_result.html",
-            {"ok": False, "message": "Model is required to test the connection."},
-        )
     resolved_key = api_key or "not-needed"
 
     try:

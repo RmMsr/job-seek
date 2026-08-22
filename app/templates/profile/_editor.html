@@ -2,7 +2,7 @@
   {% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
   <form method="post" action="/profile" id="profile-save-form">
     <label>Your skills, interests, and constraints (markdown supported):<br>
-      <textarea name="content" style="width:100%; min-height:300px; font-family:monospace;">{{ content }}</textarea>
+      <textarea name="content" style="width:100%; min-height:300px; padding:0.75rem; font-family:monospace; box-sizing:border-box;">{{ content }}</textarea>
     </label>
     <details style="margin:0.3rem 0 0.75rem; font-size:0.85em; color:#666;">
       <summary style="cursor:pointer; color:#888;">Formatting tips</summary>

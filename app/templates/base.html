@@ -36,6 +36,18 @@
       --score-low-tint: #eceaea;
       --score-neutral-tint: #e9e6e1;
 
+      /* Continuous fit-score scale: reuses themed tokens above but trends
+         toward red at the top instead of the cooler score-high teal, so a
+         great match reads as "hot" rather than calm. */
+      --fit-low: var(--score-low);
+      --fit-low-tint: var(--score-low-tint);
+      --fit-mid: var(--score-mid);
+      --fit-mid-tint: var(--score-mid-tint);
+      --fit-high: var(--score-exceptional);
+      --fit-high-tint: var(--score-exceptional-tint);
+      --fit-top: var(--alert);
+      --fit-top-tint: var(--alert-tint);
+
       --font-serif: "Crimson Text", Georgia, serif;
       --font-sans: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -121,7 +133,11 @@
       margin: 0 0 1rem;
     }
 
-    nav { margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+    nav {
+      position: sticky; top: 0; z-index: 20; background: var(--ground);
+      margin-bottom: 1.5rem; padding-top: 0.75rem; padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem;
+    }
     nav a { text-decoration: none; color: var(--text-secondary); font-weight: 500; }
     nav a:hover { color: var(--accent); }
     nav a.active { font-weight: 600; color: var(--text-primary); }
@@ -132,6 +148,10 @@
     .score-mid { background: var(--score-mid-tint); color: var(--score-mid); }
     .score-low { background: var(--score-low-tint); color: var(--score-low); }
     .score-neutral { background: var(--score-neutral-tint); color: var(--text-secondary); }
+    .score-fluid {
+      background: color-mix(in oklch, var(--from-tint) calc(100% - var(--blend)), var(--to-tint) var(--blend));
+      color: color-mix(in oklch, var(--from) calc(100% - var(--blend)), var(--to) var(--blend));
+    }
 
     .tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 0.8em; background: var(--border); color: var(--text-secondary); }
     .tag-accent { background: var(--accent-tint); color: var(--accent); }
@@ -154,12 +174,14 @@
     .stale-note { margin: 0.35rem 0 0; font-size: 0.9em; color: var(--text-muted); }
     .stale-note a { color: inherit; }
 
-    .job-row-score { flex: none; display: flex; }
+    .job-row-score { flex: none; display: flex; min-width: 3.75rem; }
     .job-row-score .score-badge {
       display: flex;
+      flex: 1;
       align-items: center;
+      justify-content: center;
       border-radius: 0;
-      padding: 0 0.9rem;
+      padding: 0 0.6rem;
       font-size: 0.95rem;
       font-weight: 700;
       letter-spacing: 0.01em;
@@ -200,15 +222,18 @@
     .score-compare-details[open] summary::before { content:"▾"; }
     .score-compare-details summary > span:first-child { font-weight:600; margin-right:0.2rem; color: var(--text-secondary); }
     .score-compare-details summary .score-compare-summary-scores { display:contents; }
-    .score-compare-pair { display:inline-flex; align-items:center; gap:0; border-radius:999px; overflow:hidden; }
-    .score-compare-pair .tag { border-radius:0; margin:0; font-size:0.85em; }
-    .score-compare-pair .score-badge { border-radius:0; margin:0; }
-    .score-compare-details[open] summary .score-compare-summary-scores { display:none; }
+    .score-compare-pair, .score-tab-card {
+      display: inline-flex; align-items: center; gap: 0; border-radius: 999px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .score-compare-pair .tag, .score-tab-card .tag { border-radius:0; margin:0; font-size:0.85em; background: transparent; }
+    .score-compare-pair .score-badge, .score-tab-card .score-badge { border-radius:0; margin:0; }
+    .score-pill-failed { text-decoration: line-through; text-decoration-color: var(--text-muted); opacity: 0.7; }
     .score-compare-details > form { margin-top:0.75rem; }
-    .score-tabs { display:flex; flex-wrap:wrap; }
+    .score-tabs { display:flex; flex-wrap:wrap; gap: 0.4rem; }
     .score-tab-input { position:absolute; opacity:0; width:0; height:0; }
-    .score-tab-card { display:flex; align-items:center; gap:0.3rem; padding:0.3rem 0.6rem; margin:0 0.3rem 0.5rem 0; border:1px solid var(--border); border-radius:6px; cursor:pointer; background:var(--surface); }
-    .score-tab-input:checked + .score-tab-card { border-color: var(--accent); background: var(--accent-tint); }
+    .score-tab-card { margin: 0 0 0.5rem; cursor:pointer; background:var(--surface); }
+    .score-tab-input:checked + .score-tab-card { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
     .score-tab-panel { display:none; width:100%; order:1; }
     .score-tab-input:checked + .score-tab-card + .score-tab-panel { display:block; }
     .fit-scorecard-grid { display:grid; grid-template-columns:auto 1fr; gap:0.4rem 0.75rem; align-items:start; margin:0; }
@@ -227,6 +252,9 @@
     @keyframes target-highlight {
       0% { background: var(--warning-tint); }
       100% { background: transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
     }
     .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
     .decision-panel { grid-template-columns: 1fr minmax(180px, auto); gap: 0.5rem 1rem; }

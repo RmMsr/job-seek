@@ -1,7 +1,7 @@
 {% macro fit_score_badge(job, size="") %}
 {% if job.fit_score is not none %}
 {% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format(job.interest_score * 100, job.attainability_score * 100) %}
-<span class="score-badge {{ job.fit_score | score_class }}{% if size %} {{ size }}{% endif %}" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+<span class="score-badge score-fluid{% if size %} {{ size }}{% endif %}" style="{{ job.fit_score | score_style }}" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
 {% endif %}
 {% endmacro %}
 

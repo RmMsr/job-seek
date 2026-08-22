@@ -56,13 +56,26 @@ def test_load_config_custom_provider_uses_endpoint(tmp_path):
     assert result.llm_endpoint == "http://my-server:9000/v1"
 
 
-def test_check_config_status_custom_provider_without_model_not_ok(tmp_path):
-    # No preset default to fall back to any more: a provider-only config
-    # resolves to an empty model, which check_config_status already treats
-    # as "not fully configured" (has_llm_model requires a non-empty string).
+def test_check_config_status_custom_provider_without_model_is_ok(tmp_path):
+    # A custom/self-hosted endpoint often only ever serves one model, so an
+    # endpoint alone (no model) is a complete config for it — unlike hosted
+    # providers, which always need an explicit model chosen.
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         '[llm]\nprovider = "custom"\nendpoint = "http://x:1/v1"\n'
+        '[database]\npath = "x.db"\n'
+        '[browser]\nprofile_dir = "x"\n'
+    )
+    status = check_config_status(str(cfg))
+    assert status.exists and status.has_llm_endpoint
+    assert not status.has_llm_model
+    assert status.ok
+
+
+def test_check_config_status_hosted_provider_without_model_not_ok(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[llm]\nprovider = "openai"\napi_key = "sk-live"\n'
         '[database]\npath = "x.db"\n'
         '[browser]\nprofile_dir = "x"\n'
     )

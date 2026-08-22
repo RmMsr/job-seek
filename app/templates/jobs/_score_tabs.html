@@ -2,12 +2,12 @@
   {% if saved %}<p class="save-confirmation" aria-live="polite">Feedback saved.</p>{% endif %}
   <details class="score-compare-details"{% if saved %} open{% endif %}>
     <summary>
-      <span>Scenario alignment</span>
+      <span>Scenario fit</span>
       <span class="score-compare-summary-scores">
         {% for js in job_scores %}
-          <span class="score-compare-pair">
+          <span class="score-compare-pair{% if js.relevance_score < js.scenario_gate_threshold %} score-pill-failed{% endif %}">
             <span class="tag">{{ js.scenario_name }}</span>
-            <span class="score-badge {{ js.relevance_score | score_class }}">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
+            <span class="score-badge score-fluid" style="{{ js.relevance_score | score_style }}">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
           </span>
         {% endfor %}
       </span>
@@ -17,12 +17,9 @@
       <div class="score-tabs">
         {% for js in job_scores %}
           <input type="radio" id="score-tab-{{ job.id }}-{{ js.scenario_id }}" name="score-tab-{{ job.id }}" class="score-tab-input" {% if js.scenario_id == job.top_passed_scenario_id %}checked{% endif %}>
-          <label for="score-tab-{{ job.id }}-{{ js.scenario_id }}" class="score-tab-card">
-            {% if js.relevance_score >= js.scenario_gate_threshold %}<span title="Passed gate">✓</span>
-            {% else %}<span title="Below gate threshold">✗</span>
-            {% endif %}
+          <label for="score-tab-{{ job.id }}-{{ js.scenario_id }}" class="score-tab-card{% if js.relevance_score < js.scenario_gate_threshold %} score-pill-failed{% endif %}">
+            <span class="sr-only">{% if js.relevance_score >= js.scenario_gate_threshold %}Passed gate{% else %}Below gate threshold{% endif %}</span>
             <span class="tag">{{ js.scenario_name }}</span>
-            <span class="score-badge {{ js.relevance_score | score_class }}">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
           </label>
           {% include "jobs/_score_tab_panel.html" %}
         {% endfor %}

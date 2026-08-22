@@ -495,7 +495,7 @@ def test_job_reset_stream_ends_with_html_chunk_for_updated_row(client, conn):
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         resp = client.post(f"/jobs/{jid}/reset")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
 
 
 def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, conn):
@@ -507,7 +507,7 @@ def test_job_pass_as_new_stream_ends_with_html_chunk_for_updated_row(client, con
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
         resp = client.post(f"/jobs/{jid}/pass-as-new")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
 
 
 def test_job_reset_stream_includes_counts_html_chunk(client, conn):
@@ -664,8 +664,8 @@ def test_job_bulk_reset_stream_includes_per_job_html_and_counts_chunks(client, c
         resp = client.post("/jobs/bulk-reset", data={"job_ids": [j1, j2]})
 
     assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">') == 1
     assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
 
 
@@ -720,8 +720,8 @@ def test_job_bulk_reevaluate_stream_includes_per_job_html_and_counts_chunks(clie
         resp = client.post("/jobs/bulk-reevaluate", data={"job_ids": [j1, j2]})
 
     assert resp.status_code == 200
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}">') == 1
-    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">') == 1
+    assert resp.text.count(f'HTML:<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">') == 1
     assert 'HTML:<span id="count-new" hx-swap-oob="true">' in resp.text
 
 
@@ -792,7 +792,7 @@ def test_job_reevaluate_stream_ends_with_html_chunk_for_updated_row(client, conn
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
         resp = client.post(f"/jobs/{jid}/reevaluate")
     assert resp.status_code == 200
-    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}">' in resp.text
+    assert f'HTML:<article class="job-row job-row-expanded" id="job-{jid}" style="view-transition-name: job-row-{jid}">' in resp.text
 
 
 def test_job_reevaluate_stream_includes_counts_html_chunk(client, conn):

@@ -425,3 +425,32 @@ def test_setup_test_reports_model_from_response_not_request(client, monkeypatch,
     assert resp.status_code == 200
     assert "actual-model-served" in resp.text
     assert "requested-model-name" not in resp.text
+
+
+def test_setup_test_custom_provider_allows_empty_model(client, monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[llm]\nprovider = "custom"\nendpoint = "http://localhost:8080/v1"\n'
+        '[database]\npath = "test.db"\n'
+        '[browser]\nprofile_dir = "browser-profile"\n'
+    )
+    from app.config import check_config_status, load_config, load_raw_llm
+    monkeypatch.setattr(check_config_status, "__defaults__", (str(config_path),))
+    monkeypatch.setattr(load_config, "__defaults__", (str(config_path),))
+    monkeypatch.setattr(load_raw_llm, "__defaults__", (str(config_path),))
+    import app.routes.setup as setup_mod
+    captured = {}
+
+    def fake_ping(provider, endpoint, model, api_key):
+        captured["model"] = model
+        return "local-model"
+
+    monkeypatch.setattr(setup_mod, "_ping", fake_ping)
+
+    resp = client.post(
+        "/setup/test",
+        data={"provider": "custom", "api_key": "", "model": "", "endpoint": "http://localhost:8080/v1"},
+    )
+    assert resp.status_code == 200
+    assert "Connection OK" in resp.text
+    assert captured["model"] == ""

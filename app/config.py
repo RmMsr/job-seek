@@ -33,10 +33,11 @@ class ConfigStatus:
     exists: bool
     has_llm_endpoint: bool
     has_llm_model: bool
+    model_required: bool = True
 
     @property
     def ok(self) -> bool:
-        return self.exists and self.has_llm_endpoint and self.has_llm_model
+        return self.exists and self.has_llm_endpoint and (self.has_llm_model or not self.model_required)
 
 
 def check_config_status(path: str = "config.toml") -> ConfigStatus:
@@ -49,11 +50,19 @@ def check_config_status(path: str = "config.toml") -> ConfigStatus:
             raw = tomllib.load(f)
     except (FileNotFoundError, tomllib.TOMLDecodeError):
         return ConfigStatus(exists=False, has_llm_endpoint=False, has_llm_model=False)
-    llm_endpoint, llm_model, _ = resolve_llm(raw.get("llm", {}))
+    llm = raw.get("llm", {})
+    provider = llm.get("provider", "")
+    llm_endpoint, llm_model, _ = resolve_llm(llm)
     return ConfigStatus(
         exists=True,
         has_llm_endpoint=bool(llm_endpoint),
         has_llm_model=bool(llm_model),
+        # Mirrors resolve_llm()'s own hosted-vs-custom split: a hosted preset
+        # needs an explicit model, but a custom/self-hosted endpoint (or a
+        # legacy endpoint-only config with no provider key) often only ever
+        # serves one model, so requiring one here would be a false "not
+        # configured" reading of an intentionally model-less setup.
+        model_required=provider in LLM_PROVIDERS and provider != "custom",
     )
 
 
