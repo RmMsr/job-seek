@@ -220,8 +220,56 @@ def test_job_expand_top_passed_scenario_tab_is_checked(client, conn):
     resp = client.get(f"/jobs/{jid}/expand")
 
     assert resp.status_code == 200
-    assert f'id="score-tab-{jid}-{scenario_a}" name="score-tab-{jid}" class="score-tab-input" checked' in resp.text
-    assert f'id="score-tab-{jid}-{scenario_b}" name="score-tab-{jid}" class="score-tab-input" checked' not in resp.text
+    checked_a = (
+        f'id="score-tab-{jid}-{scenario_a}" name="active_scenario_id" value="{scenario_a}" '
+        f'class="score-tab-input" form="scenario-feedback-form-{jid}" checked'
+    )
+    checked_b = (
+        f'id="score-tab-{jid}-{scenario_b}" name="active_scenario_id" value="{scenario_b}" '
+        f'class="score-tab-input" form="scenario-feedback-form-{jid}" checked'
+    )
+    assert checked_a in resp.text
+    assert checked_b not in resp.text
+
+
+def test_job_expand_shows_explainer_note(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert "How well does this job match your search criteria?" in resp.text
+    assert "Tuning this helps showing you only relevant new jobs." in resp.text
+
+
+def test_job_expand_scenario_name_appears_once_per_scenario(client, conn):
+    # The scenario-fit header used to render each scenario's name pill twice:
+    # once as a static summary pill, once as a separate tab-selector card.
+    # The merged pill/tab element should render it exactly once. (The job's
+    # "Matched scenarios" meta tag list also shows scenario names elsewhere
+    # on the page — unrelated, and out of scope here — so this scopes the
+    # count to the score-pill's own markup rather than the raw name text.)
+    sid, jid, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other Scenario", "")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert resp.text.count('<span class="tag">Remote ML</span>') == 1
+    assert resp.text.count('<span class="tag">Other Scenario</span>') == 1
+
+
+def test_job_expand_panel_has_scenario_id_and_default_active_class(client, conn):
+    sid, jid, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other Scenario", "")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
+
+    resp = client.get(f"/jobs/{jid}/expand")
+
+    assert resp.status_code == 200
+    assert f'class="score-tab-panel score-tab-panel-active" data-scenario-id="{scenario_a}"' in resp.text
+    assert f'class="score-tab-panel" data-scenario-id="{scenario_b}"' in resp.text
 
 
 def test_job_expand_shows_gate_pass_indicator(client, conn):
@@ -1065,21 +1113,49 @@ def test_scenario_feedback_returns_updated_tabs_with_confirmation(client, conn):
         data={"scenario_id": [scenario_id], "note": ["should count more"], "direction": ["higher"]},
     )
     assert resp.status_code == 200
-    assert 'class="score-box score-compare"' in resp.text
+    assert 'class="score-box score-compare score-compare-open"' in resp.text
     assert 'aria-pressed="true"' in resp.text
-    assert "Feedback saved" in resp.text
+    assert "All feedback saved" in resp.text
+
+
+def test_scenario_feedback_keeps_non_default_tab_active_after_save(client, conn):
+    # Submitting feedback re-renders from the scenario the user had open
+    # (via the submitted active_scenario_id), not always the top-passed one
+    # — otherwise the response looks like it switched to a different,
+    # possibly-empty panel, which reads as "my input got cleared".
+    sid, jid, scenario_a = _seed(conn)
+    scenario_b = q.insert_scenario(conn, "Other Scenario", "")
+    q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
+
+    resp = client.post(
+        f"/jobs/{jid}/scenario-feedback",
+        data={
+            "scenario_id": [scenario_a, scenario_b],
+            "note": ["", "not close at all"],
+            "direction": ["", "lower"],
+            "active_scenario_id": [scenario_b],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert f'class="score-tab-panel score-tab-panel-active" data-scenario-id="{scenario_b}"' in resp.text
+    assert f'class="score-tab-panel" data-scenario-id="{scenario_a}"' in resp.text
+    assert (
+        f'id="score-tab-{jid}-{scenario_b}" name="active_scenario_id" value="{scenario_b}" '
+        f'class="score-tab-input" form="scenario-feedback-form-{jid}" checked' in resp.text
+    )
 
 
 def test_job_expand_save_all_feedback_button_is_visually_primary(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert '<button type="submit" class="btn btn-primary">Save all feedback</button>' in resp.text
+    assert '<button type="submit" class="btn btn-primary">Send collected feedback for this job</button>' in resp.text
 
 
 def test_scenario_feedback_keeps_note_textarea_populated_after_save(client, conn):
-    # The "Feedback saved" banner is the send confirmation now — clearing the
-    # textarea on top of that just makes it look like the note didn't stick.
+    # The "All feedback saved" banner is the send confirmation now — clearing
+    # the textarea on top of that just makes it look like the note didn't stick.
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(
         f"/jobs/{jid}/scenario-feedback",
@@ -1105,7 +1181,7 @@ def test_job_expand_has_one_save_button_for_all_scenario_feedback(client, conn):
     q.upsert_job_score(conn, jid, scenario_b, 0.4, "weaker fit", "hash2")
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert resp.text.count("Save all feedback") == 1
+    assert resp.text.count("Send collected feedback for this job") == 1
     assert resp.text.count(f'hx-post="/jobs/{jid}/scenario-feedback"') == 1
 
 

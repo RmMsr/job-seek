@@ -225,36 +225,31 @@
 
     .score-box { margin-top:0.75rem; padding:0.75rem; border:1px solid var(--border); border-radius:6px; background:var(--ground); }
     .score-box dl.job-tags { margin-bottom:0.5rem; }
-    .score-compare-details summary { cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; list-style:none; }
-    .score-compare-details summary::-webkit-details-marker { display:none; }
-    .score-compare-details summary::before { content:"▸"; color: var(--text-muted); }
-    .score-compare-details[open] summary::before { content:"▾"; }
-    .score-compare-details summary > span:first-child { font-weight:600; margin-right:0.2rem; color: var(--text-secondary); }
-    .score-compare-details summary .score-compare-summary-scores { display:contents; }
-    .score-compare-pair {
-      display: inline-flex; align-items: center; gap: 0; border-radius: 999px; overflow: hidden;
+    /* Custom open/close via a JS-toggled .score-compare-open class, not
+       <details>/<summary> — the native element hides ALL non-summary
+       children (including a sibling pill row meant to stay visible when
+       folded) via internal shadow-DOM slotting that plain author CSS can't
+       override. A plain div gives full control over layout instead. */
+    .score-compare-toggle { cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; }
+    .score-compare-toggle > span:first-child { font-weight:600; color: var(--text-secondary); }
+    .score-compare-toggle > span:first-child::before { content:"▸"; color: var(--text-muted); margin-right:0.3rem; }
+    .score-compare-open .score-compare-toggle > span:first-child::before { content:"▾"; }
+    .score-pill {
+      cursor:pointer; display: inline-flex; align-items: center; gap: 0; border-radius: 999px; overflow: hidden;
       border: 1px solid var(--border);
     }
-    .score-compare-pair .tag { border-radius:0; margin:0; font-size:0.85em; background: transparent; }
-    .score-compare-pair .score-badge { border-radius:0; margin:0; }
+    .score-pill .tag { border-radius:0; margin:0; font-size:0.85em; background: transparent; }
+    .score-pill .score-badge { border-radius:0; margin:0; }
     .score-pill-failed { text-decoration: line-through; text-decoration-color: var(--text-muted); opacity: 0.7; }
-    .score-compare-details > form { margin-top:0.75rem; }
-    .score-tabs { display:flex; flex-wrap:wrap; gap: 0.4rem; }
+    .score-compare-note { margin:0.5rem 0 0; color: var(--text-muted); font-size:0.9em; }
+    .score-compare-body { display:none; margin-top:0.75rem; }
+    .score-compare-open .score-compare-body { display:block; }
     .score-tab-input { position:absolute; opacity:0; width:0; height:0; }
-    /* Deliberately not pill-shaped like .score-compare-pair above — this is
-       a tab selector, not a second copy of the summary's scenario chips. */
-    .score-tab-card {
-      margin: 0 0 0.5rem; cursor:pointer; background:var(--surface); display:inline-flex; align-items:center;
-      padding:0.25rem 0.7rem; border-radius:6px; border:1px solid var(--border);
-      font-size:0.85em; color:var(--text-secondary);
+    .score-compare-open .score-tab-input:checked + .score-pill {
+      border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent);
     }
-    .score-tab-card .tag { background:transparent; padding:0; border-radius:0; font-size:1em; color:inherit; }
-    .score-tab-input:checked + .score-tab-card {
-      border-color: var(--accent); color:var(--text-primary); background:var(--accent-tint);
-      box-shadow: 0 0 0 1px var(--accent);
-    }
-    .score-tab-panel { display:none; width:100%; order:1; }
-    .score-tab-input:checked + .score-tab-card + .score-tab-panel { display:block; }
+    .score-tab-panel { display:none; }
+    .score-tab-panel-active { display:block; }
     .fit-scorecard-grid { display:grid; grid-template-columns:auto 1fr; gap:0.4rem 0.75rem; align-items:start; margin:0; }
     .fit-scorecard-grid dt { font-weight:600; color: var(--text-secondary); }
     .fit-scorecard-grid dd { margin:0; }
@@ -732,6 +727,60 @@ document.addEventListener('click', function (e) {
     hidden.value = btn.dataset.direction;
     btn.setAttribute('aria-pressed', 'true');
   }
+});
+  </script>
+  <script>
+function toggleScoreCompare(section, forceOpen) {
+  var isOpen;
+  if (forceOpen) {
+    section.classList.add('score-compare-open');
+    isOpen = true;
+  } else {
+    isOpen = section.classList.toggle('score-compare-open');
+  }
+  var toggle = section.querySelector('.score-compare-toggle');
+  if (toggle) toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+document.body.addEventListener('change', function (e) {
+  var input = e.target.closest('.score-tab-input');
+  if (!input) return;
+  var section = input.closest('.score-compare');
+  if (!section) return;
+  section.querySelectorAll('.score-tab-panel').forEach(function (p) {
+    p.classList.toggle('score-tab-panel-active', p.dataset.scenarioId === input.value);
+  });
+});
+document.body.addEventListener('click', function (e) {
+  var toggle = e.target.closest('.score-compare-toggle');
+  if (!toggle) return;
+  var section = toggle.closest('.score-compare');
+  if (!section) return;
+  if (!section.classList.contains('score-compare-open')) {
+    // Collapsed: any click in the header (pill or not) just unfolds it.
+    // Block the pill's native effect (checking its radio) so folding never
+    // also changes which scenario is selected.
+    e.preventDefault();
+    toggleScoreCompare(section, true);
+    return;
+  }
+  if (e.target.closest('.score-pill, .score-tab-input')) {
+    // Open: a pill click only steers the active scenario. Also matches the
+    // input itself — clicking a <label for> fires a second, browser-
+    // synthesized click targeted directly at its associated bare <input>
+    // (not nested inside .score-pill), which would otherwise fall through
+    // to the fold branch below and close the section right after opening it.
+    return;
+  }
+  // Open, clicked the rest of the header: fold it back up.
+  toggleScoreCompare(section, false);
+});
+document.body.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  var toggle = e.target.closest('.score-compare-toggle');
+  if (!toggle) return;
+  e.preventDefault();
+  var section = toggle.closest('.score-compare');
+  if (section) toggleScoreCompare(section, false);
 });
   </script>
   <script>

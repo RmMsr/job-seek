@@ -1,4 +1,4 @@
-<div class="score-tab-panel">
+<div class="score-tab-panel{% if js.scenario_id == active_scenario_id %} score-tab-panel-active{% endif %}" data-scenario-id="{{ js.scenario_id }}">
   {{ js.score_reasoning | markdown }}
   <input type="hidden" name="scenario_id" value="{{ js.scenario_id }}">
   <input type="hidden" name="direction" value="{{ js.feedback_direction or '' }}" class="direction-hidden">

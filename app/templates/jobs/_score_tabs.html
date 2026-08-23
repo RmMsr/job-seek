@@ -1,30 +1,25 @@
-<section class="score-box score-compare" id="score-tabs-{{ job.id }}" aria-label="Scenario score comparison">
-  {% if saved %}<p class="save-confirmation" aria-live="polite">Feedback saved.</p>{% endif %}
-  <details class="score-compare-details"{% if saved %} open{% endif %}>
-    <summary>
-      <span>Scenario fit</span>
-      <span class="score-compare-summary-scores">
-        {% for js in job_scores %}
-          <span class="score-compare-pair{% if js.relevance_score < js.scenario_gate_threshold %} score-pill-failed{% endif %}">
-            <span class="tag">{{ js.scenario_name }}</span>
-            <span class="score-badge score-fluid" style="{{ js.relevance_score | score_style }}">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
-          </span>
-        {% endfor %}
-      </span>
-    </summary>
-    <form class="scenario-feedback-form" hx-post="/jobs/{{ job.id }}/scenario-feedback"
+<section class="score-box score-compare{% if saved %} score-compare-open{% endif %}" id="score-tabs-{{ job.id }}" aria-label="Scenario score comparison">
+  {% set active_scenario_id = active_scenario_id | default(job.top_passed_scenario_id) %}
+  <div class="score-compare-toggle" role="button" tabindex="0" aria-expanded="{{ 'true' if saved else 'false' }}">
+    <span>Scenario fit</span>
+    {% for js in job_scores %}
+      <input type="radio" id="score-tab-{{ job.id }}-{{ js.scenario_id }}" name="active_scenario_id" value="{{ js.scenario_id }}" class="score-tab-input" form="scenario-feedback-form-{{ job.id }}" {% if js.scenario_id == active_scenario_id %}checked{% endif %}>
+      <label for="score-tab-{{ job.id }}-{{ js.scenario_id }}" class="score-pill{% if js.relevance_score < js.scenario_gate_threshold %} score-pill-failed{% endif %}">
+        <span class="sr-only">{% if js.relevance_score >= js.scenario_gate_threshold %}Passed gate{% else %}Below gate threshold{% endif %}</span>
+        <span class="tag">{{ js.scenario_name }}</span>
+        <span class="score-badge score-fluid" style="{{ js.relevance_score | score_style }}">{{ "%.0f"|format(js.relevance_score * 100) }}%</span>
+      </label>
+    {% endfor %}
+  </div>
+  <div class="score-compare-body">
+    {% if saved %}<p class="save-confirmation" aria-live="polite">All feedback saved.</p>{% endif %}
+    <p class="score-compare-note"><strong>How well does this job match your search criteria?</strong> Tuning this helps showing you only relevant new jobs.</p>
+    <form id="scenario-feedback-form-{{ job.id }}" class="scenario-feedback-form" hx-post="/jobs/{{ job.id }}/scenario-feedback"
           hx-target="#score-tabs-{{ job.id }}" hx-swap="outerHTML">
-      <div class="score-tabs">
-        {% for js in job_scores %}
-          <input type="radio" id="score-tab-{{ job.id }}-{{ js.scenario_id }}" name="score-tab-{{ job.id }}" class="score-tab-input" {% if js.scenario_id == job.top_passed_scenario_id %}checked{% endif %}>
-          <label for="score-tab-{{ job.id }}-{{ js.scenario_id }}" class="score-tab-card{% if js.relevance_score < js.scenario_gate_threshold %} score-pill-failed{% endif %}">
-            <span class="sr-only">{% if js.relevance_score >= js.scenario_gate_threshold %}Passed gate{% else %}Below gate threshold{% endif %}</span>
-            <span class="tag">{{ js.scenario_name }}</span>
-          </label>
-          {% include "jobs/_score_tab_panel.html" %}
-        {% endfor %}
-      </div>
-      <button type="submit" class="btn btn-primary">Save all feedback</button>
+      {% for js in job_scores %}
+        {% include "jobs/_score_tab_panel.html" %}
+      {% endfor %}
+      <button type="submit" class="btn btn-primary">Send collected feedback for this job</button>
     </form>
-  </details>
+  </div>
 </section>

@@ -254,6 +254,7 @@ def job_scenario_feedback(
     scenario_id: list[int] = Form(...),
     note: list[str] = Form(...),
     direction: list[str] = Form(...),
+    active_scenario_id: int | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for sid, n, d in zip(scenario_id, note, direction):
@@ -261,7 +262,14 @@ def job_scenario_feedback(
     job = q.get_job(conn, job_id)
     job_scores = q.get_job_scores(conn, job_id)
     return templates.TemplateResponse(
-        request, "jobs/_score_tabs.html", {"job": job, "job_scores": job_scores, "saved": True}
+        request,
+        "jobs/_score_tabs.html",
+        {
+            "job": job,
+            "job_scores": job_scores,
+            "saved": True,
+            "active_scenario_id": active_scenario_id or job["top_passed_scenario_id"],
+        },
     )
 
 
