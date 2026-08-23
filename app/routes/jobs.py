@@ -181,8 +181,16 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
+    filter_ctx = _filter_context(request)
+    if filter_ctx:
+        stale_badge = _stale_badge(
+            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
+            filter_ctx.get("filter_source_id"),
+        )
+        if stale_badge:
+            job["stale_badge"] = stale_badge
     context = {"job": job, "scenarios": scenarios, "job_scores": job_scores}
-    context.update(_filter_context(request))
+    context.update(filter_ctx)
     if _is_detail_page_request(request):
         context["is_detail_page"] = True
     return templates.TemplateResponse(request, "jobs/_feedback.html", context)
@@ -193,8 +201,16 @@ def job_collapse(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     job = q.get_job(conn, job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
+    filter_ctx = _filter_context(request)
+    if filter_ctx:
+        stale_badge = _stale_badge(
+            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
+            filter_ctx.get("filter_source_id"),
+        )
+        if stale_badge:
+            job["stale_badge"] = stale_badge
     context = {"job": job}
-    context.update(_filter_context(request))
+    context.update(filter_ctx)
     if _is_detail_page_request(request):
         context["is_detail_page"] = True
     return templates.TemplateResponse(request, "jobs/_row.html", context)
@@ -456,6 +472,10 @@ def job_bulk_feedback(
     jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, source_id))
     matched_ids = {j["id"] for j in jobs}
 
+    # Jobs just acted on that no longer match the current filter get a stale
+    # badge instead of vanishing — merged back into the same sort position
+    # they'd otherwise occupy, so a bulk action updates rows in place just
+    # like a single-job action does, rather than banishing them to the end.
     stale_jobs = []
     for job_id in job_ids:
         if job_id in matched_ids:
@@ -469,6 +489,12 @@ def job_bulk_feedback(
         job["stale_badge"] = badge
         stale_jobs.append(job)
     stale_jobs = _enrich_jobs(conn, stale_jobs)
+    jobs = sorted(
+        jobs + stale_jobs,
+        key=lambda j: (j["fit_score"] if j["fit_score"] is not None else float("-inf"), j["fetched_at"] or ""),
+        reverse=True,
+    )
+    stale_jobs = []
 
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)

@@ -369,7 +369,7 @@ def mark_job_gate_override(conn: sqlite3.Connection, job_id: int) -> None:
 
 def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
     conn.execute(
-        "UPDATE jobs SET status = ?, feedback_note = ? WHERE id = ?",
+        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_handled_at = NULL WHERE id = ?",
         (status, note, job_id),
     )
     conn.commit()

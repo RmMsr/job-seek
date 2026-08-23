@@ -431,6 +431,26 @@ def test_job_collapse_returns_row_view(client, conn):
     assert f'id="job-{jid}"' in resp.text
 
 
+def test_job_collapse_of_moved_job_keeps_stale_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", None)
+    resp = client.get(f"/jobs/{jid}/collapse?status=&content_type=")
+    assert resp.status_code == 200
+    assert "Moved to Accepted" in resp.text
+    assert f'href="/jobs?status=accepted#job-{jid}"' in resp.text
+
+
+def test_job_expand_of_moved_job_shows_stale_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", None)
+    resp = client.get(f"/jobs/{jid}/expand?status=&content_type=")
+    assert resp.status_code == 200
+    assert "Moved to Accepted" in resp.text
+    assert f'href="/jobs?status=accepted#job-{jid}"' in resp.text
+    # Still the full expanded panel, not the short row.
+    assert "feedback-form" in resp.text
+
+
 def test_job_delete_confirm_renders_confirm_panel(client, conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "trash", None)
@@ -984,6 +1004,35 @@ def test_job_bulk_feedback_leaves_moved_job_as_stale_row(client, conn):
     assert "No jobs found" not in resp.text
 
 
+def test_job_bulk_feedback_keeps_moved_job_in_its_original_sort_position(client, conn):
+    # Three jobs in fit-score order (high to low): A, B, C. Bulk-accepting the
+    # middle one (B) must not banish it to the end of the list — it should
+    # still land between A and C, exactly where a single-job action would
+    # have left it in place.
+    sid, jid_a, scenario_id = _seed(conn)  # fit_score 0.8, gate-passing relevance 0.9
+    jid_b = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Job B", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid_b, simplified_content="clean", content_type="job_posting", summary="ok")
+    q.upsert_job_score(conn, jid_b, scenario_id, 0.9, "ok", "hashb")  # gate-passing relevance
+    q.update_job_fit(conn, jid_b, 0.6, "ok fit", 0.6, "ok", "phashb")
+    q.mark_job_evaluation_complete(conn, jid_b)
+    jid_c = q.insert_job(conn, source_id=sid, url="http://finn.no/job/3", title="Job C", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid_c, simplified_content="clean", content_type="job_posting", summary="ok")
+    q.upsert_job_score(conn, jid_c, scenario_id, 0.9, "ok", "hashc")  # gate-passing relevance
+    q.update_job_fit(conn, jid_c, 0.4, "ok fit", 0.4, "ok", "phashc")
+    q.mark_job_evaluation_complete(conn, jid_c)
+
+    resp = client.post(
+        "/jobs/bulk-feedback",
+        data={"job_ids": [jid_b], "status": "accepted", "status_filter": "", "content_type_filter": ""},
+    )
+    assert resp.status_code == 200
+    pos_a = resp.text.index(f'id="job-{jid_a}"')
+    pos_b = resp.text.index(f'id="job-{jid_b}"')
+    pos_c = resp.text.index(f'id="job-{jid_c}"')
+    assert pos_a < pos_b < pos_c
+    assert "Moved to Accepted" in resp.text
+
+
 def test_job_bulk_feedback_shows_no_jobs_found_when_nothing_matches_or_moved(client, conn):
     # job_ids references a nonexistent job, so nothing lands in either jobs or stale_jobs.
     resp = client.post(
@@ -1189,7 +1238,17 @@ def test_job_list_has_persistent_bulk_form_shell(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML">' in resp.text
-    assert '<input type="hidden" name="status_filter" value="new">' in resp.text
+    # The default "New" view has no explicit status filter (it's the
+    # gate-passed default), so the hidden field must carry that same
+    # unfiltered semantics — not a literal "new" status, which would apply
+    # gate-agnostic filtering and diverge from what's actually shown.
+    assert '<input type="hidden" name="status_filter" value="">' in resp.text
+
+
+def test_job_list_bulk_form_shell_carries_explicit_filter(client, conn):
+    resp = client.get("/jobs?status=accepted")
+    assert resp.status_code == 200
+    assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
 
 
 def test_job_list_bulk_bar_has_actions_and_no_scenario_select(client, conn):

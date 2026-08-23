@@ -213,8 +213,11 @@
     .job-link-icon:hover { background: var(--ground); color: var(--accent); }
     .job-hook { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
 
-    .job-row-expanded { display: block; padding: 1rem 1.1rem; }
-    .job-detail-header { cursor: pointer; }
+    .job-row-expanded { display: block; padding: 0 1.1rem 1rem; }
+    /* The header reclaims the article's top padding as its own so the
+       clickable (collapse) area covers that whitespace too, instead of
+       leaving an inert gap above it. */
+    .job-detail-header { cursor: pointer; margin: 0 -1.1rem; padding: 1rem 1.1rem 0; }
     .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 1.6rem; }
     .job-detail-title { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; margin: 0; flex: 1 1 auto; min-width: 0; }
     .job-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.35rem; font-size: 0.9rem; color: var(--text-secondary); }
@@ -356,6 +359,24 @@
     .status-bar-progress-track { display: inline-block; flex: none; width: 80px; height: 6px; border-radius: 3px;
       background: #495057; overflow: hidden; }
     .status-bar-progress-fill { display: block; height: 100%; background: #0d6efd; }
+
+    /* Contains horizontal overflow to the table itself instead of letting a
+       wide table push the whole page wider than the viewport, which on
+       narrow screens also breaks the nav's position:sticky. */
+    .responsive-table-wrap { overflow-x: auto; }
+
+    @media (max-width: 600px) {
+      /* Let the title/headline text wrap around the select checkbox and
+         link icon instead of always starting on its own line below the
+         header. Floats (rather than flex siblings) only narrow the lines
+         that overlap their height — a long wrapped title reclaims full
+         width once past them, instead of staying narrowed for every line. */
+      .job-row-content { display: block; }
+      .job-select-wrap { position: static; float: right; margin: 0 0 0.3rem 0.5rem; }
+      .job-row-header { display: block; padding-right: 0; }
+      .job-row-header .job-link-icon { float: right; margin: 0 0 0.3rem 0.5rem; }
+      .job-row-header .job-company, .job-row-header .job-age { margin-right: 0.6rem; }
+    }
   </style>
 </head>
 <body>

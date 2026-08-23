@@ -1,4 +1,5 @@
 from __future__ import annotations
+import html as html_lib
 import sqlite3
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -114,6 +115,7 @@ def _task_scenarios_refine_all(conn, client, model, config, params):
     scenarios = q.get_scenarios(conn)
     yield f"Refining criteria for {len(scenarios)} scenario(s)"
     html_chunks = []
+    scenarios_with_proposals = []
     for idx, scenario in enumerate(scenarios, start=1):
         label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
         yield label + "Requesting criteria proposals from LLM"
@@ -123,12 +125,20 @@ def _task_scenarios_refine_all(conn, client, model, config, params):
         proposals = propose_criteria(client, model, scenario, existing, notes)
         resolved = _resolve_proposals(proposals, existing)
         yield label + f"Received {len(resolved)} proposal(s)"
+        if resolved:
+            scenarios_with_proposals.append(scenario)
         html = templates.get_template("scenarios/_proposals.html").render(
             request=None, proposals=resolved, scenario_id=scenario["id"], feedback_anchor=anchor,
         )
         html_chunks.append(f'<div id="proposals-area-{scenario["id"]}" style="margin-top:0.75rem; width:100%;">{html}</div>')
     yield f"Refined criteria proposals for {len(scenarios)} scenario(s)"
-    return {"notices": [], "html_chunks": html_chunks}
+    notices = []
+    if scenarios_with_proposals:
+        links = ", ".join(
+            f'<a href="#proposals-area-{s["id"]}">{html_lib.escape(s["name"])}</a>' for s in scenarios_with_proposals
+        )
+        notices.append({"level": "info", "html": f"<p>New suggestions for: {links}</p>"})
+    return {"notices": notices, "html_chunks": html_chunks}
 
 
 @register_task_kind("scenario_refine_one")

@@ -22,6 +22,15 @@
       {% if job.company %}<span>{{ job.company }}</span>{% endif %}
       <a href="{{ job.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">&#8599; original</a>
     </div>
+    {% if job.stale_badge %}
+      <p class="stale-note">
+        {% if job.stale_badge.href %}
+          <a href="{{ job.stale_badge.href }}" onclick="event.stopPropagation()">{{ job.stale_badge.label }} &rarr;</a>
+        {% else %}
+          <span>{{ job.stale_badge.label }}</span>
+        {% endif %}
+      </p>
+    {% endif %}
     {% if job.headline %}
       <p class="job-hook">{{ job.headline }}</p>
     {% endif %}
@@ -58,7 +67,7 @@
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
     {% if is_detail_page %}<input type="hidden" name="redirect" value="/jobs">{% endif %}
-    <label>Job note (optional):
+    <label><strong>Job note</strong> (optional, will also feed back into adjusting your profile):
       <textarea name="note" placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
     </label>
     <div class="actions" role="group" aria-label="Decision">

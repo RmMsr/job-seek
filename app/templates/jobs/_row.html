@@ -5,14 +5,14 @@
   hx-swap="outerHTML transition:true"
   hx-trigger="click, keyup[key=='Enter']">
   <div class="job-row-score">{% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}</div>
-  {% if not is_detail_page %}
-  <label class="job-select-wrap">
-    <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
-      id="job-select-{{ job.id }}" hx-preserve="true"
-      aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
-  </label>
-  {% endif %}
   <div class="job-row-content">
+    {% if not is_detail_page %}
+    <label class="job-select-wrap">
+      <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
+        id="job-select-{{ job.id }}" hx-preserve="true"
+        aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
+    </label>
+    {% endif %}
     <div class="job-row-header">
       <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
       {% if job.company %}<span class="job-company">{{ job.company }}</span>{% endif %}
@@ -22,7 +22,7 @@
     {% if job.stale_badge %}
       <p class="stale-note">
         {% if job.stale_badge.href %}
-          <a href="{{ job.stale_badge.href }}">{{ job.stale_badge.label }} &rarr;</a>
+          <a href="{{ job.stale_badge.href }}" onclick="event.stopPropagation()">{{ job.stale_badge.label }} &rarr;</a>
         {% else %}
           <span>{{ job.stale_badge.label }}</span>
         {% endif %}

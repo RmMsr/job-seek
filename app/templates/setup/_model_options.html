@@ -11,5 +11,23 @@
   <option value="{{ m }}"></option>
   {% endfor %}
 </datalist>
-<p>{{ models|length }} model(s) loaded — start typing in the Model field to pick one.</p>
+<p style="margin:0.4rem 0 0.3rem;">{{ models|length }} model(s) loaded — click one to pick it:</p>
+<div class="model-option-list" style="display:flex; flex-wrap:wrap; gap:0.35rem; max-height:12rem; overflow-y:auto;">
+  {% for m in models %}
+  <button type="button" class="tag" style="cursor:pointer; border:none;" data-model="{{ m }}">{{ m }}</button>
+  {% endfor %}
+</div>
+<script>
+(function () {
+  document.querySelectorAll("#model-options-container .model-option-list").forEach(function (list) {
+    list.addEventListener("click", function (evt) {
+      var btn = evt.target.closest("[data-model]");
+      if (!btn) return;
+      var field = document.getElementById("model");
+      field.value = btn.getAttribute("data-model");
+      field.dispatchEvent(new Event("input"));
+    });
+  });
+})();
+</script>
 {% endif %}
