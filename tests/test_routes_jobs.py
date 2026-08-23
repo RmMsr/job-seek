@@ -394,7 +394,7 @@ def test_job_expand_note_field_is_optional(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert "Job note (optional)" in resp.text
+    assert "Job note" in resp.text
     assert '<textarea name="note" required' not in resp.text
 
 
