@@ -455,6 +455,7 @@ def get_jobs(
     content_type: str | None = None,
     gate_status: str | None = None,
     source_id: int | None = None,
+    scenario_id: int | None = None,
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -466,6 +467,14 @@ def get_jobs(
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
+    if scenario_id is not None:
+        clauses.append(
+            """EXISTS (
+                SELECT 1 FROM job_scores js JOIN scenarios s ON s.id = js.scenario_id
+                WHERE js.job_id = jobs.id AND js.scenario_id = ? AND js.relevance_score >= s.gate_threshold
+            )"""
+        )
+        params.append(scenario_id)
     if gate_status == "passed":
         clauses.append(_GATE_PASSED_CLAUSE)
     elif gate_status == "failed":

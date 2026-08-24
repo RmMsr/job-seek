@@ -43,10 +43,16 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
 
 
 def _get_filtered_jobs(
-    conn: sqlite3.Connection, status: str | None, content_type: str | None, source_id: int | None = None
+    conn: sqlite3.Connection,
+    status: str | None,
+    content_type: str | None,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
 ) -> list[dict]:
     if source_id is not None:
         return q.get_jobs(conn, source_id=source_id)
+    if scenario_id is not None:
+        return q.get_jobs(conn, scenario_id=scenario_id)
     if status == "not_relevant":
         return q.get_jobs(conn, status="new", content_type="job_posting", gate_status="failed")
     if status is None and content_type is None:
@@ -60,13 +66,16 @@ def _filter_context(request: Request) -> dict:
     has_status = "status" in request.query_params
     has_content_type = "content_type" in request.query_params
     has_source_id = "source_id" in request.query_params
-    if not (has_status or has_content_type or has_source_id):
+    has_scenario_id = "scenario_id" in request.query_params
+    if not (has_status or has_content_type or has_source_id or has_scenario_id):
         return {}
     source_id_param = request.query_params.get("source_id") or None
+    scenario_id_param = request.query_params.get("scenario_id") or None
     return {
         "filter_status": request.query_params.get("status") or None,
         "filter_content_type": request.query_params.get("content_type") or None,
         "filter_source_id": int(source_id_param) if source_id_param else None,
+        "filter_scenario_id": int(scenario_id_param) if scenario_id_param else None,
     }
 
 
@@ -75,9 +84,14 @@ def _is_detail_page_request(request: Request) -> bool:
 
 
 def _stale_badge(
-    conn: sqlite3.Connection, job: dict, status: str | None, content_type: str | None, source_id: int | None = None
+    conn: sqlite3.Connection,
+    job: dict,
+    status: str | None,
+    content_type: str | None,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
 ) -> dict | None:
-    filtered_ids = {j["id"] for j in _get_filtered_jobs(conn, status, content_type, source_id)}
+    filtered_ids = {j["id"] for j in _get_filtered_jobs(conn, status, content_type, source_id, scenario_id)}
     if job["id"] in filtered_ids:
         return None
     anchor = f"#job-{job['id']}"
@@ -114,7 +128,7 @@ def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id:
     if filter_ctx:
         stale_badge = _stale_badge(
             conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"),
+            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
         )
 
     if stale_badge:
@@ -131,18 +145,27 @@ def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id:
 
 
 def _content_context(
-    conn: sqlite3.Connection, status: str | None, content_type: str | None, source_id: int | None = None
+    conn: sqlite3.Connection,
+    status: str | None,
+    content_type: str | None,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
 ) -> dict:
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type, source_id))
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type, source_id, scenario_id))
     counts = q.get_job_counts(conn)
     scenarios = q.get_scenarios(conn)
-    effective_status = status if (status is not None or content_type is not None or source_id is not None) else "new"
+    effective_status = (
+        status if (status is not None or content_type is not None or source_id is not None or scenario_id is not None)
+        else "new"
+    )
     filter_source = q.get_source(conn, source_id) if source_id is not None else None
+    filter_scenario = q.get_scenario(conn, scenario_id) if scenario_id is not None else None
     return {
         "jobs": jobs, "stale_jobs": [], "counts": counts, "scenarios": scenarios,
         "status": effective_status, "content_type": content_type,
         "filter_status": status, "filter_content_type": content_type,
         "filter_source_id": source_id, "filter_source": filter_source,
+        "filter_scenario_id": scenario_id, "filter_scenario": filter_scenario,
     }
 
 
@@ -152,10 +175,11 @@ def job_list(
     status: str | None = None,
     content_type: str | None = None,
     source_id: int | None = None,
+    scenario_id: int | None = None,
     conn: sqlite3.Connection = Depends(get_db),
 ):
     return templates.TemplateResponse(
-        request, "jobs/list.html", _content_context(conn, status, content_type, source_id)
+        request, "jobs/list.html", _content_context(conn, status, content_type, source_id, scenario_id)
     )
 
 
@@ -185,7 +209,7 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     if filter_ctx:
         stale_badge = _stale_badge(
             conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"),
+            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
         )
         if stale_badge:
             job["stale_badge"] = stale_badge
@@ -205,7 +229,7 @@ def job_collapse(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     if filter_ctx:
         stale_badge = _stale_badge(
             conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"),
+            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
         )
         if stale_badge:
             job["stale_badge"] = stale_badge
@@ -460,6 +484,7 @@ def job_bulk_feedback(
     status_filter: str | None = Form(None),
     content_type_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
+    scenario_id_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -468,8 +493,10 @@ def job_bulk_feedback(
     status_filter = status_filter or None
     content_type_filter = content_type_filter or None
     source_id_filter = source_id_filter or None
+    scenario_id_filter = scenario_id_filter or None
     source_id = int(source_id_filter) if source_id_filter else None
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, source_id))
+    scenario_id = int(scenario_id_filter) if scenario_id_filter else None
+    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, source_id, scenario_id))
     matched_ids = {j["id"] for j in jobs}
 
     # Jobs just acted on that no longer match the current filter get a stale
@@ -483,7 +510,7 @@ def job_bulk_feedback(
         job = q.get_job(conn, job_id)
         if not job:
             continue
-        badge = _stale_badge(conn, job, status_filter, content_type_filter, source_id)
+        badge = _stale_badge(conn, job, status_filter, content_type_filter, source_id, scenario_id)
         if not badge:
             continue
         job["stale_badge"] = badge
@@ -500,10 +527,11 @@ def job_bulk_feedback(
     scenarios = q.get_scenarios(conn)
     effective_status = (
         status_filter
-        if (status_filter is not None or content_type_filter is not None or source_id is not None)
+        if (status_filter is not None or content_type_filter is not None or source_id is not None or scenario_id is not None)
         else "new"
     )
     filter_source = q.get_source(conn, source_id) if source_id is not None else None
+    filter_scenario = q.get_scenario(conn, scenario_id) if scenario_id is not None else None
     return templates.TemplateResponse(
         request, "jobs/_content.html",
         {
@@ -511,6 +539,7 @@ def job_bulk_feedback(
             "status": effective_status, "content_type": content_type_filter,
             "filter_status": status_filter, "filter_content_type": content_type_filter,
             "filter_source_id": source_id, "filter_source": filter_source,
+            "filter_scenario_id": scenario_id, "filter_scenario": filter_scenario,
         },
     )
 
@@ -531,15 +560,18 @@ def job_bulk_delete(
     status_filter: str | None = Form(None),
     content_type_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
+    scenario_id_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
     status_filter = status_filter or None
     content_type_filter = content_type_filter or None
     source_id_filter = source_id_filter or None
+    scenario_id_filter = scenario_id_filter or None
     source_id = int(source_id_filter) if source_id_filter else None
+    scenario_id = int(scenario_id_filter) if scenario_id_filter else None
     return templates.TemplateResponse(
-        request, "jobs/_content.html", _content_context(conn, status_filter, content_type_filter, source_id)
+        request, "jobs/_content.html", _content_context(conn, status_filter, content_type_filter, source_id, scenario_id)
     )
 
 

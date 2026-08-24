@@ -5,14 +5,14 @@
     <input type="hidden" id="listing-fetcher-type" value="{{ fetcher_type }}">
     <label for="listing-name" style="font-size:0.9em; color:#495057;">Name:</label>
     <input type="text" id="listing-name" value="{{ default_name }}" class="text-input" style="flex:1; min-width:160px;">
-    <button type="button" class="btn"
+    <a href="/jobs" class="btn btn-subtle">Cancel</a>
+    <button type="button" class="btn btn-primary"
       data-progress-url="/jobs/add-listing-source{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
       data-progress-body-url="#listing-url"
       data-progress-body-name="#listing-name"
       data-progress-body-fetcher_type="#listing-fetcher-type"
       data-progress-target="#jobs-content"
       data-progress-display="#listing-confirm-progress">Keep as source &amp; fetch</button>
-    <a href="/jobs" class="btn">Cancel</a>
   </div>
   <span id="listing-confirm-progress" class="reset-progress" aria-live="polite"></span>
 </form>

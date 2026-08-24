@@ -1,6 +1,7 @@
-<form id="add-source-panel" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-top:0.75rem;">
-  <input type="url" id="add-source-url" name="url" placeholder="Paste a listing page URL…" required class="text-input" style="flex:1; min-width:200px;">
-  <button type="button" class="btn"
+<form id="add-source-panel" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+  <input type="url" id="add-source-url" name="url" placeholder="Paste a listing page URL…" required style="flex:1; min-width:200px;">
+  <button type="button" class="btn btn-subtle add-panel-cancel">Cancel</button>
+  <button type="button" class="btn btn-primary"
     data-progress-url="/sources/detect"
     data-progress-body-url="#add-source-url"
     data-progress-target="#add-source-panel"

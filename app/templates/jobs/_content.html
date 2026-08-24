@@ -4,6 +4,11 @@
       <span>All jobs from {{ filter_source.name }} ({{ jobs | length }})</span>
       <a href="/jobs">Clear filter</a>
     </div>
+  {% elif filter_scenario_id %}
+    <div class="filter-links">
+      <span>All jobs matching {{ filter_scenario.name }} ({{ jobs | length }})</span>
+      <a href="/jobs">Clear filter</a>
+    </div>
   {% else %}
     <div class="filter-links">
       <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}
@@ -36,7 +41,7 @@
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
       <button type="button" class="btn"
-        data-progress-url="/jobs/bulk-reevaluate{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
+        data-progress-url="/jobs/bulk-reevaluate{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
         data-progress-jobs
         data-progress-oob="1"
         data-progress-display="#bulk-reevaluate-progress"
@@ -44,7 +49,7 @@
         Re-evaluate
       </button>
       <button type="button" class="btn btn-reset"
-        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
+        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
         data-progress-jobs
         data-progress-oob="1"
         data-progress-display="#bulk-reset-progress"

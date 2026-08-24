@@ -6,11 +6,15 @@
   <input type="hidden" name="status_filter" value="{{ filter_status or '' }}">
   <input type="hidden" name="content_type_filter" value="{{ filter_content_type or '' }}">
   <input type="hidden" name="source_id_filter" value="{{ filter_source_id or '' }}">
+  <input type="hidden" name="scenario_id_filter" value="{{ filter_scenario_id or '' }}">
 </form>
-<form class="add-job-by-url" style="margin-bottom:1rem;">
+{% from "_add_panel.html" import add_panel %}
+{% call add_panel("Add job") %}
+<form class="add-job-by-url">
   <div style="display:flex; gap:0.5rem; align-items:center;">
-    <input type="url" id="add-job-url" name="url" placeholder="Paste a job posting URL…" required class="text-input" style="flex:1; min-width:200px;">
-    <button type="button" class="btn"
+    <input type="url" id="add-job-url" name="url" placeholder="Paste a job posting URL…" required style="flex:1; min-width:200px;">
+    <button type="button" class="btn btn-subtle add-panel-cancel">Cancel</button>
+    <button type="button" class="btn btn-primary"
       data-progress-url="/jobs/add-by-url"
       data-progress-body-url="#add-job-url"
       data-progress-target="#jobs-content"
@@ -18,6 +22,7 @@
   </div>
   <span id="add-job-progress" class="reset-progress" aria-live="polite"></span>
 </form>
+{% endcall %}
 <div id="jobs-content">
   {% include "jobs/_content.html" %}
 </div>

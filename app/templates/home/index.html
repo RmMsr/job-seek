@@ -21,6 +21,7 @@
     <span>Last fetch: {{ last_fetch_at | time_ago if last_fetch_at else "never" }}</span>
   </div>
   {% else %}
+  <h2>Onboarding</h2>
   <ul class="checklist">
     {% for item in checklist %}
     <li class="{{ 'done' if item.done else 'todo' }}">

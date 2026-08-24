@@ -439,7 +439,7 @@ def test_detect_source_confirm_panel_has_cancel_link(conn):
     with patch("app.routes.sources.fetch_url_html") as mock_fetch:
         fetched = _run_detect(conn, _SLACK_URL)
     mock_fetch.assert_not_called()
-    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
+    assert '<a href="/sources" class="btn btn-subtle">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock
@@ -449,7 +449,7 @@ def test_detect_source_mismatch_panel_has_cancel_link(conn):
     )
     with patch("app.routes.sources.detect_listing", return_value=_NOT_A_LISTING):
         fetched = _run_detect(conn, "https://example.com/job/1")
-    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
+    assert '<a href="/sources" class="btn btn-subtle">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 @respx.mock

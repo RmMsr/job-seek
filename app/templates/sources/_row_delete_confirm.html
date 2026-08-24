@@ -8,14 +8,14 @@
         {% if job_count %}<a href="/jobs?source_id={{ source.id }}">View these jobs</a> first if you want to check.{% endif %}
       </p>
       <div style="display:flex; gap:0.5rem;">
-        <button type="button" class="btn" style="font-size:0.85em; padding:3px 10px;"
-          hx-delete="/sources/{{ source.id }}"
-          hx-target="#source-row-{{ source.id }}"
-          hx-swap="outerHTML">Confirm delete</button>
-        <button type="button" class="btn" style="font-size:0.85em; padding:3px 10px;"
+        <button type="button" class="btn btn-subtle" style="font-size:0.85em; padding:3px 10px;"
           hx-get="/sources/{{ source.id }}"
           hx-target="#source-row-{{ source.id }}"
           hx-swap="outerHTML">Cancel</button>
+        <button type="button" class="btn btn-delete" style="font-size:0.85em; padding:3px 10px;"
+          hx-delete="/sources/{{ source.id }}"
+          hx-target="#source-row-{{ source.id }}"
+          hx-swap="outerHTML">Confirm delete</button>
       </div>
     </div>
   </td>

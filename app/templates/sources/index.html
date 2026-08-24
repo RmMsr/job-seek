@@ -3,10 +3,9 @@
 {% block content %}
 {% include "setup/_subnav.html" %}
 <h1>Sources</h1>
+{% from "_add_panel.html" import add_panel %}
+{% call add_panel("Add source") %}
+{% include "sources/_add_form.html" %}
+{% endcall %}
 {% include "sources/_table.html" %}
-
-<details id="add-source-toggle" style="margin-top:1.5rem;">
-  <summary class="btn" style="cursor:pointer; display:inline-block;">+ Add source</summary>
-  {% include "sources/_add_form.html" %}
-</details>
 {% endblock %}

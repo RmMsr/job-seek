@@ -3,6 +3,7 @@
 <input type="hidden" id="detect-name" value="{{ name }}">
 <input type="hidden" id="detect-fetcher-type" value="generic_listing">
 <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="/sources" class="btn btn-subtle">Cancel</a>
   <button type="button" class="btn"
     data-progress-url="/jobs/add-by-url"
     data-progress-body-url="#detect-url"
@@ -14,6 +15,5 @@
     data-progress-body-fetcher_type="#detect-fetcher-type"
     data-progress-oob
     data-progress-display="#detect-mismatch-progress">Add as source anyway</button>
-  <a href="/sources" class="btn">Cancel</a>
 </div>
 <span id="detect-mismatch-progress" class="reset-progress" aria-live="polite"></span>

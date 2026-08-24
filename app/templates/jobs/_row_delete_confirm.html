@@ -2,14 +2,14 @@
   <div class="delete-confirm" style="display:flex; flex-direction:column; gap:0.5rem; padding:0.75rem 1rem; background:#fff5f5; border:1px solid #f5c2c7; border-radius:6px;">
     <p style="margin:0; font-size:0.9em; color:#495057;">Delete this job? This cannot be undone.</p>
     <div class="actions" role="group" aria-label="Confirm delete" style="display:flex; gap:0.5rem;">
+      <button type="button" class="btn btn-subtle" style="font-size:0.85em; padding:3px 10px;"
+        hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
+        hx-target="#job-{{ job.id }}"
+        hx-swap="outerHTML">Cancel</button>
       <button type="button" class="btn btn-delete" style="font-size:0.85em; padding:3px 10px;"
         hx-delete="/jobs/{{ job.id }}"
         hx-target="#job-{{ job.id }}"
         hx-swap="outerHTML">Confirm delete</button>
-      <button type="button" class="btn" style="font-size:0.85em; padding:3px 10px;"
-        hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% endif %}{% endif %}"
-        hx-target="#job-{{ job.id }}"
-        hx-swap="outerHTML">Cancel</button>
     </div>
   </div>
 </article>

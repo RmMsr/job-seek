@@ -2,54 +2,69 @@
 {% block title %}Scenarios — Job Seek{% endblock %}
 {% block content %}
 <h1>Scenarios</h1>
-<form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem;">
+{% from "_add_panel.html" import add_panel %}
+{% set scenario_toolbar_extra %}
+{% if scenarios %}
+<button class="btn" data-progress-url="/scenarios/refine" data-progress-oob="1">Get suggestions for all scenarios</button>
+<button class="btn" data-progress-url="/scenarios/reevaluate">Re-evaluate everything</button>
+{% endif %}
+{% endset %}
+{% call add_panel("Add scenario", extra=scenario_toolbar_extra) %}
+<form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
   <input type="text" name="name" placeholder="Scenario name" required>
   <input type="text" name="description" placeholder="Description (optional)" style="flex:1;">
-  <button type="submit" class="btn">Create</button>
+  <button type="button" class="btn btn-subtle add-panel-cancel">Cancel</button>
+  <button type="submit" class="btn btn-primary">Create</button>
 </form>
+{% endcall %}
 
 {% if scenarios %}
-<div style="margin-bottom:1.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
-  <button class="btn" data-progress-url="/scenarios/refine" data-progress-oob="1">Get suggestions for all scenarios</button>
-  <button class="btn" data-progress-url="/scenarios/reevaluate">Re-evaluate everything</button>
-</div>
-{% endif %}
-
-{% for scenario in scenarios %}
-<div style="border:1px solid #dee2e6; border-radius:6px; padding:1rem; margin-bottom:1rem;">
-  {% include "scenarios/_header.html" %}
-
-  <h4 style="margin:0.75rem 0 0.4rem;">Criteria</h4>
-  {% with criteria=criteria_by_scenario[scenario.id], scenario_id=scenario.id %}
-  {% include "scenarios/_criteria.html" %}
-  {% endwith %}
-
-  <div style="margin-top:0.75rem; border:1px solid #dee2e6; border-radius:6px; padding:0.75rem;">
-    <h4 style="margin:0 0 0.5rem;">Feedback &amp; Refinement</h4>
-    {% set fc = feedback_counts_by_scenario[scenario.id] %}
-    {% set verdict = feedback_verdict_by_scenario[scenario.id] %}
-    <p style="margin:0 0 0.5rem;">
-      <span class="score-badge {{ verdict.css_class }}">{{ verdict.label }}</span>
-    </p>
-    <p style="margin:0 0 0.75rem; font-size:0.85em; color:#666;">
-      {{ fc.unhandled_higher }} vote{{ 's' if fc.unhandled_higher != 1 else '' }} said "too strict"
-      · {{ fc.unhandled_lower }} vote{{ 's' if fc.unhandled_lower != 1 else '' }} said "too loose"
-      — pending, will be used in the next refine
-    </p>
-    {% if fc.handled_higher or fc.handled_lower %}
-    <p style="margin:0 0 0.75rem; font-size:0.85em; color:#666;">
-      Also applied earlier (last 30 days): {{ fc.handled_higher }} too strict, {{ fc.handled_lower }} too loose
-    </p>
-    {% endif %}
-    <button class="btn"
-      data-progress-url="/scenarios/{{ scenario.id }}/refine"
-      data-progress-target="#proposals-area-{{ scenario.id }}">
-      Refine criteria from feedback
-    </button>
-    <div id="proposals-area-{{ scenario.id }}" style="margin-top:0.75rem;"></div>
+<div class="scenario-tabs">
+  <div class="scenario-tab-nav" role="tablist">
+    {% for scenario in scenarios %}
+    <input type="radio" id="scenario-tab-{{ scenario.id }}" name="scenario_tab" value="{{ scenario.id }}"
+      class="scenario-tab-input" {% if loop.first %}checked{% endif %}>
+    <label for="scenario-tab-{{ scenario.id }}" class="scenario-tab-link">{{ scenario.name }}</label>
+    {% endfor %}
   </div>
+
+  {% for scenario in scenarios %}
+  <div class="scenario-tab-panel{% if loop.first %} scenario-tab-panel-active{% endif %}" data-scenario-id="{{ scenario.id }}">
+    {% include "scenarios/_header.html" %}
+
+    <h4 style="margin:0.75rem 0 0.4rem;">Criteria</h4>
+    {% with criteria=criteria_by_scenario[scenario.id], scenario_id=scenario.id %}
+    {% include "scenarios/_criteria.html" %}
+    {% endwith %}
+
+    <div class="scenario-feedback-block">
+      <h4 style="margin:0 0 0.5rem;">Feedback &amp; Refinement</h4>
+      {% set fc = feedback_counts_by_scenario[scenario.id] %}
+      {% set verdict = feedback_verdict_by_scenario[scenario.id] %}
+      <p style="margin:0 0 0.5rem;">
+        <span class="score-badge {{ verdict.css_class }}">{{ verdict.label }}</span>
+      </p>
+      <p style="margin:0 0 0.75rem; font-size:0.85em; color:#666;">
+        {{ fc.unhandled_higher }} vote{{ 's' if fc.unhandled_higher != 1 else '' }} said "too strict"
+        · {{ fc.unhandled_lower }} vote{{ 's' if fc.unhandled_lower != 1 else '' }} said "too loose"
+        — pending, will be used in the next refine
+      </p>
+      {% if fc.handled_higher or fc.handled_lower %}
+      <p style="margin:0 0 0.75rem; font-size:0.85em; color:#666;">
+        Also applied earlier (last 30 days): {{ fc.handled_higher }} too strict, {{ fc.handled_lower }} too loose
+      </p>
+      {% endif %}
+      <button class="btn"
+        data-progress-url="/scenarios/{{ scenario.id }}/refine"
+        data-progress-target="#proposals-area-{{ scenario.id }}">
+        Refine criteria from feedback
+      </button>
+      <div id="proposals-area-{{ scenario.id }}" style="margin-top:0.75rem;"></div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 {% else %}
 <p>No scenarios yet. Create one above.</p>
-{% endfor %}
+{% endif %}
 {% endblock %}

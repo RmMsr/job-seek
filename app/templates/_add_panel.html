@@ -1,0 +1,13 @@
+{% macro add_panel(label, extra="") %}
+<div class="add-panel">
+  <div class="add-panel-toolbar">
+    <button type="button" class="btn add-panel-trigger">+ {{ label }}</button>
+    {{ extra | safe }}
+  </div>
+  <div class="add-panel-body">
+    <div class="add-panel-body-inner">
+      {{ caller() }}
+    </div>
+  </div>
+</div>
+{% endmacro %}

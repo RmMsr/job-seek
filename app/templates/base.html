@@ -282,7 +282,8 @@
     .bulk-clear-x { position: absolute; top: 0.4rem; right: 0.5rem; padding: 0 6px; line-height: 1.4;
       border: none; border-radius: 4px; background: transparent; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; }
     .bulk-clear-x:hover { color: var(--text-primary); background: var(--ground); }
-    .btn, select, .text-input {
+    .btn, select, .text-input,
+    input[type="text"], input[type="url"], input[type="number"], input[type="email"], input[type="search"] {
       padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); box-sizing: border-box;
       font: inherit; background: var(--surface); color: var(--text-primary);
     }
@@ -295,10 +296,10 @@
     .btn-accept:hover { filter: brightness(1.08); }
     .btn-reject { background: var(--alert); border-color: var(--alert); color: #fff; font-weight: 600; }
     .btn-reject:hover { filter: brightness(1.08); }
-    .btn-trash { background: var(--neutral-strong); border-color: var(--neutral-strong); color: #fff; font-weight: 600; }
-    .btn-trash:hover { filter: brightness(1.08); }
     .btn-delete { background: var(--alert); color: #fff; border-color: var(--alert); font-weight: 600; }
     .btn-delete:hover { filter: brightness(1.08); }
+    .btn-subtle { background: none; border-color: transparent; color: var(--text-muted); }
+    .btn-subtle:hover { color: var(--text-primary); border-color: var(--border); background: var(--ground); }
     .job-advanced { display: inline-flex; align-items: center; gap: 0.5rem; }
     .feedback-form + .job-advanced { margin-top: 0.5rem; }
     .job-advanced summary { cursor: pointer; color: var(--text-muted); font-size: 0.85em; user-select: none; }
@@ -308,6 +309,7 @@
     .feedback-form textarea { width: 100%; min-height: 60px; }
     .feedback-form .actions { margin-top: 0.75rem; }
     textarea, input, select { font-family: inherit; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; }
+    textarea { padding: 0.75rem; }
     textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
     .reset-progress { grid-column: 1 / -1; display: block; width: 100%; color: var(--text-muted); font-size: 0.85em; }
     .reset-progress:empty { display: none; }
@@ -331,6 +333,36 @@
     .checklist li.todo a { color: var(--accent); font-weight: 600; }
     .actionable-block { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
       margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+
+    .scenario-name-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    .scenario-name-row h2 { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.3rem; }
+    .threshold-block { margin-top: 0.75rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); max-width: 420px; }
+    .threshold-heading { margin: 0 0 0.3rem; font-size: 0.95rem; }
+    .threshold-desc { margin: 0 0 0.6rem; font-size: 0.85em; color: var(--text-secondary); }
+    .threshold-slider-row { display: flex; align-items: center; gap: 0.75rem; }
+    .threshold-slider { flex: 1; accent-color: var(--accent); }
+    .threshold-readout { font-weight: 600; min-width: 3em; text-align: right; }
+
+    .scenario-tab-nav { display: flex; gap: 1.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+    .scenario-tab-input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .scenario-tab-link { cursor: pointer; padding: 0.4rem 0; color: var(--text-secondary); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .scenario-tab-link:hover { color: var(--accent); }
+    .scenario-tab-input:checked + .scenario-tab-link { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
+    .scenario-tab-link.has-new-suggestions::after {
+      content: ""; display: inline-block; width: 0.4em; height: 0.4em; margin-left: 0.4em;
+      border-radius: 50%; background: var(--accent); vertical-align: middle;
+    }
+    .scenario-tab-panel { display: none; }
+    .scenario-tab-panel-active { display: block; }
+
+    .scenario-feedback-block { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; }
+    .scenario-feedback-block-target-highlight { animation: target-highlight 2.5s ease-out; }
+
+    .add-panel { margin-bottom: 1.5rem; }
+    .add-panel-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .add-panel-body { display: grid; grid-template-rows: 0fr; overflow: hidden; transition: grid-template-rows 0.25s ease; }
+    .add-panel-open .add-panel-body { grid-template-rows: 1fr; }
+    .add-panel-body-inner { overflow: hidden; min-height: 0; padding-top: 0.75rem; }
     .how-it-works ol { padding-left: 1.25rem; }
     .how-it-works li { margin-bottom: 0.5rem; }
     .how-it-works li ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
@@ -443,6 +475,47 @@
         });
       }
 
+      function flashHighlight(el, className, onComplete) {
+        if (!el) return;
+        el.classList.remove(className);
+        void el.offsetWidth;
+        el.classList.add(className);
+        el.addEventListener("animationend", function () {
+          el.classList.remove(className);
+          if (onComplete) onComplete();
+        }, { once: true });
+      }
+
+      // The refine-all notice links to #proposals-area-<id> for every scenario
+      // that got new proposals — reuse that instead of threading scenario ids
+      // through the task result separately.
+      function scenarioIdsFromNotices(notices) {
+        var ids = [];
+        (notices || []).forEach(function (n) {
+          var re = /href="#proposals-area-(\d+)"/g;
+          var m;
+          while ((m = re.exec(n.html))) ids.push(m[1]);
+        });
+        return ids;
+      }
+
+      function highlightAffectedScenarios(ids) {
+        ids.forEach(function (id) {
+          var link = document.querySelector('label[for="scenario-tab-' + id + '"]');
+          if (link) link.classList.add("has-new-suggestions");
+          var block = document.getElementById("proposals-area-" + id);
+          if (block) block = block.closest(".scenario-feedback-block") || block;
+          // The flash animation only actually plays on the currently visible
+          // (active) tab's panel — display:none panels never start a CSS
+          // animation, so this callback only fires there. That's the signal
+          // the user has already seen it; clear its dot. Inactive tabs keep
+          // theirs until the tab-switch listener below clears it.
+          flashHighlight(block, "scenario-feedback-block-target-highlight", function () {
+            if (link) link.classList.remove("has-new-suggestions");
+          });
+        });
+      }
+
       var resumePage = document.getElementById("resume-page");
       var resumeInboxItemId = resumePage ? resumePage.getAttribute("data-inbox-item-id") : null;
 
@@ -466,11 +539,15 @@
         }
         if (w.oobMode) {
           chunks.forEach(applyOob);
+          highlightAffectedScenarios(scenarioIdsFromNotices(result.notices));
         } else if (w.targetSelector && chunks.length) {
           var target = document.querySelector(w.targetSelector);
           if (target) {
             target.innerHTML = chunks[chunks.length - 1];
             if (window.htmx) window.htmx.process(target);
+            if (target.id.indexOf("proposals-area-") === 0) {
+              flashHighlight(target.closest(".scenario-feedback-block") || target, "scenario-feedback-block-target-highlight");
+            }
           }
         } else if (!w.oobMode && !chunks.length) {
           location.reload();
@@ -813,6 +890,42 @@ document.body.addEventListener('click', function (e) {
   if (scenarioForm && window.htmx) {
     htmx.trigger(scenarioForm, 'submit');
   }
+});
+  </script>
+  <script>
+document.body.addEventListener('input', function (e) {
+  var slider = e.target.closest('.threshold-slider');
+  if (!slider) return;
+  var readout = slider.parentElement.querySelector('.threshold-readout');
+  if (readout) readout.textContent = Math.round(slider.value * 100) + '%';
+});
+  </script>
+  <script>
+document.body.addEventListener('change', function (e) {
+  var input = e.target.closest('.scenario-tab-input');
+  if (!input) return;
+  var tabs = input.closest('.scenario-tabs');
+  if (!tabs) return;
+  tabs.querySelectorAll('.scenario-tab-panel').forEach(function (p) {
+    p.classList.toggle('scenario-tab-panel-active', p.dataset.scenarioId === input.value);
+  });
+  var label = tabs.querySelector('label[for="' + input.id + '"]');
+  if (label) label.classList.remove('has-new-suggestions');
+});
+  </script>
+  <script>
+document.body.addEventListener('click', function (e) {
+  var trigger = e.target.closest('.add-panel-trigger');
+  if (trigger) {
+    trigger.closest('.add-panel').classList.toggle('add-panel-open');
+    return;
+  }
+  var cancel = e.target.closest('.add-panel-cancel');
+  if (!cancel) return;
+  var panel = cancel.closest('.add-panel');
+  panel.classList.remove('add-panel-open');
+  var form = panel.querySelector('form');
+  if (form) form.reset();
 });
   </script>
   <script>

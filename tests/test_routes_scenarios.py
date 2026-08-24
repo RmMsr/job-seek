@@ -72,7 +72,8 @@ def test_scenario_header_shows_gate_threshold(client, conn):
     sid = q.insert_scenario(conn, "ai_expert", "fallback")
     resp = client.get(f"/scenarios/{sid}")
     assert resp.status_code == 200
-    assert "gate: 70%" in resp.text
+    assert "Job match threshold" in resp.text
+    assert '<output class="threshold-readout">70%</output>' in resp.text
 
 
 def test_cancel_scenario_edit_returns_display_header(client, conn):

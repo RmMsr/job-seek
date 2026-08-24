@@ -1,11 +1,20 @@
 <div id="scenario-header-{{ scenario.id }}">
-  <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-    <strong>{{ scenario.name }}</strong>
-    <span class="tag" title="Jobs need at least this raw gate score to appear in your list">gate: {{ "%.0f"|format(scenario.gate_threshold * 100) }}%</span>
-    <button class="btn" style="font-size:0.85em; padding:3px 10px;"
-      hx-get="/scenarios/{{ scenario.id }}/edit"
-      hx-target="#scenario-header-{{ scenario.id }}"
-      hx-swap="outerHTML">Edit</button>
+  <div class="scenario-name-row">
+    <h2>{{ scenario.name }}</h2>
+    <a href="/jobs?scenario_id={{ scenario.id }}" class="btn" style="font-size:0.85em; padding:3px 10px;">View matching jobs</a>
   </div>
-  {% if scenario.description %}<div style="color:#555; margin:0.4rem 0 0.75rem;">{{ scenario.description | markdown }}</div>{% endif %}
+  {% if scenario.description %}<div style="color:var(--text-secondary); margin:0.4rem 0 0.75rem;">{{ scenario.description | markdown }}</div>{% endif %}
+  <div class="threshold-block">
+    <h4 class="threshold-heading">Job match threshold</h4>
+    <p class="threshold-desc">How well does a job need to align with the criteria to belong in this scenario?</p>
+    <div class="threshold-slider-row">
+      <input type="range" class="threshold-slider" min="0" max="1" step="0.05"
+        value="{{ scenario.gate_threshold }}" disabled aria-label="Job match threshold (use Edit to change)">
+      <output class="threshold-readout">{{ "%.0f"|format(scenario.gate_threshold * 100) }}%</output>
+    </div>
+  </div>
+  <button class="btn" style="font-size:0.85em; padding:3px 10px; margin-top:0.75rem;"
+    hx-get="/scenarios/{{ scenario.id }}/edit"
+    hx-target="#scenario-header-{{ scenario.id }}"
+    hx-swap="outerHTML">Edit</button>
 </div>

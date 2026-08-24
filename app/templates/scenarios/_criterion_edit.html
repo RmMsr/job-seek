@@ -9,10 +9,10 @@
       <option value="avoid" {% if c.weight == "avoid" %}selected{% endif %}>avoid</option>
     </select>
     <input type="text" name="text" value="{{ c.text }}" required style="flex:1; min-width:200px;">
-    <button type="submit" class="btn">Save</button>
-    <button type="button" class="btn"
+    <button type="button" class="btn btn-subtle"
       hx-get="/criteria/{{ c.id }}"
       hx-target="#criterion-{{ c.id }}"
       hx-swap="outerHTML">Cancel</button>
+    <button type="submit" class="btn btn-primary">Save</button>
   </form>
 </li>
