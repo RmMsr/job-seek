@@ -9,7 +9,7 @@
   <input type="hidden" name="scenario_id_filter" value="{{ filter_scenario_id or '' }}">
 </form>
 {% from "_add_panel.html" import add_panel %}
-{% call add_panel("Add job") %}
+{% call add_panel("Add") %}
 <form class="add-job-by-url">
   <div style="display:flex; gap:0.5rem; align-items:center;">
     <input type="url" id="add-job-url" name="url" placeholder="Paste a job posting URL…" required style="flex:1; min-width:200px;">

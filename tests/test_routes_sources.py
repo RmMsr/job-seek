@@ -621,7 +621,7 @@ def test_confirm_source_slack_shows_needs_login(conn):
 def test_sources_page_has_add_source_unfold(client, conn):
     resp = client.get("/sources")
     assert resp.status_code == 200
-    assert "+ Add source" in resp.text
+    assert "+ Add" in resp.text
     assert 'data-progress-url="/sources/detect"' in resp.text
     assert 'id="add-source-panel"' in resp.text
 

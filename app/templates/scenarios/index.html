@@ -9,7 +9,7 @@
 <button class="btn" data-progress-url="/scenarios/reevaluate">Re-evaluate everything</button>
 {% endif %}
 {% endset %}
-{% call add_panel("Add scenario", extra=scenario_toolbar_extra) %}
+{% call add_panel("Add", extra=scenario_toolbar_extra) %}
 <form method="post" action="/scenarios" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
   <input type="text" name="name" placeholder="Scenario name" required>
   <input type="text" name="description" placeholder="Description (optional)" style="flex:1;">

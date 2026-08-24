@@ -1,4 +1,4 @@
-# job-seek: Find best job matches for you
+# job-seek: Find the best job that matches YOU
 
 You need:
 
@@ -21,9 +21,11 @@ Daily workflow:
 4. Apply (not part of the app yet)
 5. Review generated improvement proposals for work scenario filters and your profile
 
+![Job seek screenshot](media/screen-01.png)
+
 ## Setup
 
-To run the job-seek webserver you can start it as a container or directly from Python.
+To run the job-seek webserver you can start it as a container or directly from Python. As an LLM local models like gemma4 work really well.
 
 ### As Container
 
