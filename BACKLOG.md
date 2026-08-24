@@ -2,12 +2,10 @@
 
 Known gaps, not yet scheduled.
 
-- ux: folding a job note that has been moved into another view, removed the link to the new location.
-- ux: changing the job note or scenario note should re-enable the job for the feedback processing.
-- ux: if the job headline could flow around the link/checkbox it would save some space on smaller screens.
-- ux: on small screens the fetch page takes unnecessary much space vertically. also the navigation does not stick.
-- ux: when Get suggestions finds something there should be a note pointing to the specific scenario. on multiple scenarios, there can be multiple notes
-- ux: The start typing to select the detected model is a strange interface. lets have a simple input, but it can be fed by a list that appears after the model detection
+- ux: Header "Onboarding" on start page
+- ux: Lets organize the scenarios with a tab selector so every scenario gets its own page and can drop a border. the edit forms cancel/save get on a new line
+- ux: Give all textareas the same padding as the profile input
+- ux: Unified appearance of add source, job and scenario action. Add a Add action button below the header (1, position) with plus sign that reveals (animated) a full width input form with cancel/save actions.
 - fetch: **`generic_listing` has no pagination.** Sopra Steria and Tieto both cap
   at exactly 10 postings (their page-1 size) — later pages are never fetched.
 - fetch: **`generic_listing` doesn't escalate to Playwright when it should.**

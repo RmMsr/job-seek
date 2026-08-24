@@ -28,29 +28,47 @@ from app.db import schema, queries
 
 PROFILE_CONTENT = """Mid-career backend engineer with full-stack capabilities.
 
-**Background:**
+## Background
+
 Strong foundation in Python, SQL, distributed systems. 5–8 years experience building APIs, optimizing databases, and deploying production systems. Recent work: API design, database optimization, deployment automation.
 
-**Skills:**
-- Backend: Python, SQL, distributed systems, API design
-- Frontend: React, Vue (some production experience)
-- DevOps: Docker, Kubernetes basics, CI/CD pipelines
+## Skills
 
-**What I value:**
+Backend
+- Python
+- SQL
+- distributed systems
+- API design
+
+Frontend
+- React
+- Vue (some production experience)
+
+DevOps
+- Docker
+- Kubernetes basics
+- CI/CD pipelines (JetBrains)
+
+## What I value
+
 - Clear code and sustainable pace
 - Learning from teammates
 - Mentorship opportunities (both giving and receiving)
 - Transparent culture, autonomy in technical decisions
 - Remote-friendly or based in Norway/EU
 
-**What I'm open to:**
+## What I'm open to
+
 - Full-stack roles (but prefer backend depth)
 - Startups with strong founders and product-market clarity
 - Established companies with strong engineering culture
 - Leadership roles (tech lead, EM) at scale
 
-**Geography:**
-Based in Norway. Open to EU relocation for the right opportunity.
+
+### Geography
+
+- Based in Norway
+- Open to EU relocation for the right opportunity
 """
 
 SCENARIOS_AND_CRITERIA = [
