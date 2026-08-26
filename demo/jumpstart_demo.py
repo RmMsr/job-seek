@@ -6,9 +6,10 @@ This script seeds a fresh job-seek.db with:
 - Profile (mid-career backend/fullstack generalist)
 - 4 scenarios with realistic criteria
 - 9 real Norwegian job sources (Finn.no, Kode24, DNB, Telenor, Accenture, etc.)
+- One fabricated "Dream Job" hand-scored at 99%, for screenshots
 
-Does NOT fetch or evaluate jobs—user does that manually via the UI.
-Idempotent: safe to re-run (scenarios/sources won't duplicate if already present).
+Does NOT fetch or evaluate real jobs—user does that manually via the UI.
+Idempotent: safe to re-run (scenarios/sources/dream job won't duplicate if already present).
 
 Usage:
     python demo/jumpstart_demo.py [--db /path/to/job-seek.db]
@@ -18,12 +19,14 @@ Default database: ./job-seek.db
 
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.db import schema, queries
+from app.scenario_version import compute_profile_hash, compute_version_hash
 
 
 PROFILE_CONTENT = """Mid-career backend engineer with full-stack capabilities.
@@ -181,6 +184,51 @@ SOURCES = [
     },
 ]
 
+# A fabricated posting, hand-scored at 99%, so a fresh demo has one
+# obviously-glowing entry to screenshot. Targets "Founding Engineer -
+# Maritim" since its scenario description already calls it the dream role.
+DREAM_JOB_SOURCE = {
+    "name": "Dream Job (demo)",
+    "url": "https://dreamjob.demo.invalid/careers",
+    "fetcher_type": "manual",
+}
+
+DREAM_JOB = {
+    "url": "https://dreamjob.demo.invalid/careers/dream-job",
+    "title": "Dream Job",
+    "company": "Fjordlight Robotics",
+    "headline": "Founding engineer, CTO track, greenfield digital-twin platform — remote-first, internationally distributed crew.",
+    "summary": (
+        "Fjordlight Robotics is building a digital-twin platform for autonomous maritime "
+        "vessels. Series A, 14 people, and looking for a founding engineer to take the "
+        "CTO track: greenfield architecture, meaningful equity, and a small international "
+        "team that already trusts you with the hard calls."
+    ),
+    "raw_text": (
+        "Dream Job — Founding Engineer (CTO track)\n"
+        "Fjordlight Robotics — remote-first, international team\n\n"
+        "We're a Series A startup (14 people) building a digital-twin simulation platform "
+        "for autonomous maritime vessels. We're looking for a founding engineer to help "
+        "shape the architecture from the ground up and grow into the CTO role as we scale.\n\n"
+        "What you'd own:\n"
+        "- Greenfield architecture for our simulation and telemetry stack\n"
+        "- Technical direction as we go from 14 to 40 people\n"
+        "- A founding team with deep maritime and robotics credibility\n\n"
+        "What we offer:\n"
+        "- Meaningful equity (co-founder-level)\n"
+        "- Full architectural freedom — no legacy to untangle\n"
+        "- A distributed, English-speaking team across Norway and the EU\n\n"
+        "---\n"
+        "This is a fantasy demo posting seeded by jumpstart_demo.py — not a real listing. "
+        "It exists so a fresh demo has one obviously top-scoring job to screenshot."
+    ),
+    "target_scenario": "Founding Engineer - Maritim",
+    "score_reasoning": (
+        "Hand-set to 99% — this is a fabricated demo posting seeded by jumpstart_demo.py "
+        "for screenshots, not a real evaluation."
+    ),
+}
+
 
 def main():
     import argparse
@@ -252,10 +300,68 @@ def main():
                     fetcher_type=source_def["fetcher_type"],
                 )
 
+        # 4. Dream Job — fabricated, hand-scored at 99%, for screenshots
+        if queries.get_job_by_url(conn, DREAM_JOB["url"]):
+            print("  → Dream Job (already exists)")
+        else:
+            print("  → Dream Job (fantasy 99% match, for screenshots)")
+
+            demo_source = queries.get_source_by_url(conn, DREAM_JOB_SOURCE["url"])
+            demo_source_id = demo_source["id"] if demo_source else queries.insert_source(
+                conn,
+                name=DREAM_JOB_SOURCE["name"],
+                url=DREAM_JOB_SOURCE["url"],
+                fetcher_type=DREAM_JOB_SOURCE["fetcher_type"],
+            )
+
+            job_id = queries.insert_job(
+                conn,
+                source_id=demo_source_id,
+                url=DREAM_JOB["url"],
+                title=DREAM_JOB["title"],
+                company=DREAM_JOB["company"],
+                raw_text=DREAM_JOB["raw_text"],
+                published_at=datetime.now(timezone.utc).isoformat(),
+            )
+            queries.update_job_pipeline(
+                conn,
+                job_id,
+                simplified_content=DREAM_JOB["raw_text"],
+                content_type="job_posting",
+                summary=DREAM_JOB["summary"],
+                headline=DREAM_JOB["headline"],
+            )
+
+            profile_hash = compute_profile_hash(queries.get_profile(conn))
+            queries.update_job_fit(
+                conn,
+                job_id,
+                interest_score=0.99,
+                interest_reasoning=DREAM_JOB["score_reasoning"],
+                attainability_score=0.99,
+                attainability_reasoning=DREAM_JOB["score_reasoning"],
+                profile_version_hash=profile_hash,
+            )
+
+            target_scenario = next(
+                s for s in queries.get_scenarios(conn) if s["name"] == DREAM_JOB["target_scenario"]
+            )
+            target_criteria = queries.get_criteria(conn, target_scenario["id"])
+            queries.upsert_job_score(
+                conn,
+                job_id,
+                target_scenario["id"],
+                0.99,
+                DREAM_JOB["score_reasoning"],
+                compute_version_hash(target_scenario, target_criteria),
+            )
+            queries.mark_job_evaluation_complete(conn, job_id)
+
         print("\n✓ Demo database seeded successfully!")
         print(f"  Profile: 1 entry")
         print(f"  Scenarios: {len(SCENARIOS_AND_CRITERIA)}")
         print(f"  Sources: {len(SOURCES)}")
+        print(f"  Dream Job: 1 fantasy entry at 99% match")
         print(f"\nNext steps:")
         print(f"  1. Start the dev server: uv run uvicorn app.main:app --port 8000")
         print(f"  2. Open http://localhost:8000 in your browser")

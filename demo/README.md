@@ -14,9 +14,9 @@ uv run --project /path/to/job-seek python /path/to/job-seek/demo/qa_fetch_source
 
 ## `jumpstart_demo.py` — Demo Database Bootstrap
 
-Seeds `job-seek.db` with a demo profile, 4 scenarios (with criteria), and 9 real Norwegian job sources. Does not fetch or fabricate jobs — run a fetch afterwards (via the UI or `qa_fetch_sources.py`) to populate real postings.
+Seeds `job-seek.db` with a demo profile, 4 scenarios (with criteria), 9 real Norwegian job sources, and one fabricated "Dream Job" hand-scored at 99% match (for screenshots). Does not fetch or fabricate real jobs — run a fetch afterwards (via the UI or `qa_fetch_sources.py`) to populate real postings.
 
-Safe to re-run: scenarios/sources are skipped if already present by name/URL, and an existing profile is never overwritten.
+Safe to re-run: scenarios/sources/dream job are skipped if already present by name/URL, and an existing profile is never overwritten.
 
 ```bash
 python demo/jumpstart_demo.py [--db /path/to/job-seek.db]
