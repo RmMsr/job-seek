@@ -78,6 +78,7 @@ def task_resume(task_id: int, request: Request, conn: sqlite3.Connection = Depen
     return templates.TemplateResponse(
         request, "tasks/resume.html", {
             "resume_html": task["result"]["resume_html"],
+            "action_message": task["result"].get("action_message"),
             "inbox_item_id": inbox_item["id"] if inbox_item else None,
         }
     )

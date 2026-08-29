@@ -11,6 +11,7 @@ from app.fetchers.content import extract_page_title, FetchError
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.generate_source_name import generate_source_name
 from app.fetchers.listing_detect import detect_listing_page
+from app.url_rewrite import suggest_rewrite, suggest_source_name
 from app.pipeline import run_fetch
 from app.task_engine import register_task_kind
 from app.template_env import templates
@@ -104,7 +105,22 @@ def _task_source_detect(conn, client, model, config, params):
         q.resolve_source_prompts_for_url(conn, url)
         return {"notices": [already_tracked], "html_chunks": []}
 
-    default_name = urlsplit(url).netloc
+    if not params.get("skip_rewrite"):
+        suggestion = suggest_rewrite(url)
+        if suggestion is not None:
+            panel = templates.get_template("_rewrite_panel.html").render(
+                request=None, original_url=url, suggested_url=suggestion.url,
+                reason=suggestion.reason, detect_url="/sources/detect", cancel_url="/sources",
+            )
+            q.resolve_source_prompts_for_url(conn, url)
+            return {
+                "notices": [], "html_chunks": [panel],
+                "needs_action": True,
+                "action_message": "LinkedIn search URL — a fetchable alternative was suggested",
+                "resume_html": panel,
+            }
+
+    default_name = suggest_source_name(url) or urlsplit(url).netloc
     fetcher_type = classify_known_source(url)
     if fetcher_type is None:
         yield "Checking the page..."
@@ -175,8 +191,12 @@ def _task_source_confirm(conn, client, model, config, params):
 
 
 @router.post("/sources/detect")
-def detect_source(url: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
-    task = q.enqueue_task(conn, kind="source_detect", params={"url": url})
+def detect_source(
+    url: str = Form(...),
+    skip_rewrite: bool = Form(False),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    task = q.enqueue_task(conn, kind="source_detect", params={"url": url, "skip_rewrite": skip_rewrite})
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 

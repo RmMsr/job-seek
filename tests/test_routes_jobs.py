@@ -1646,9 +1646,10 @@ def _listing(job_links, html="<html><body>listing</body></html>"):
     return ListingDetection(html, True, list(job_links), False)
 
 
-def _run_add_by_url(conn, url, filter_ctx=None, status=None, content_type=None):
+def _run_add_by_url(conn, url, filter_ctx=None, status=None, content_type=None, skip_rewrite=False):
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
-        "url": url, "status": status, "content_type": content_type, "filter_ctx": filter_ctx or {},
+        "url": url, "status": status, "content_type": content_type,
+        "filter_ctx": filter_ctx or {}, "skip_rewrite": skip_rewrite,
     })
     execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
     return q.get_task(conn, task["id"])
@@ -1668,6 +1669,34 @@ def test_add_by_url_enqueues_task(client, conn):
     task = q.get_task(conn, resp.json()["task_id"])
     assert task["kind"] == "job_add_by_url"
     assert task["params"]["url"] == "https://example.com/job/1"
+
+
+_LI_SEARCH = "https://www.linkedin.com/jobs/search-results/?keywords=robotics+norge&currentJobId=1&origin=x"
+
+
+def test_add_by_url_linkedin_search_suggests_rewrite(conn):
+    with patch("app.routes.jobs.detect_listing_page") as mock_detect:
+        fetched = _run_add_by_url(conn, _LI_SEARCH)
+    mock_detect.assert_not_called()
+    result = fetched["result"]
+    assert result["needs_action"] is True
+    html = result["html_chunks"][0]
+    assert "jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=robotics+norge&amp;start=0" in html
+    assert 'data-progress-url="/jobs/add-by-url"' in html
+
+
+def test_add_by_url_skip_rewrite_proceeds_to_detection(conn):
+    with patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()), \
+         patch("app.routes.jobs.extract_text_or_raise", return_value="Some job posting text."), \
+         patch("app.routes.jobs.run_add_job", return_value=iter(())):
+        fetched = _run_add_by_url(conn, _LI_SEARCH, skip_rewrite=True)
+    assert fetched["result"].get("needs_action") is None
+
+
+def test_add_by_url_endpoint_forwards_skip_rewrite(client, conn):
+    resp = client.post("/jobs/add-by-url", data={"url": _LI_SEARCH, "skip_rewrite": "1"})
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["params"]["skip_rewrite"] is True
 
 
 @respx.mock

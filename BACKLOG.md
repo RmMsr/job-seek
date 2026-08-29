@@ -13,3 +13,6 @@ Known gaps, not yet scheduled.
 - ux: Link via the name column from fetch page to souces with highlight on target page
 - ux: the task detail page needs to be reorganised. What does the title mean. The form needs structure
 - ux: A single job task like reevaluate should link back the the job on the status and on the task details page
+- feature: unify the /sources/detect and /jobs/add-by-url add flows — shared
+  detection pipeline, panels, and confirm task. Deferred from the LinkedIn
+  URL-rewrite change; do it if the duplication starts to bite.

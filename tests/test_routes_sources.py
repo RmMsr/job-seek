@@ -638,3 +638,40 @@ def test_edit_form_includes_generic_listing_option(client, conn):
     resp = client.get(f"/sources/{sid}/edit")
     assert resp.status_code == 200
     assert '<option value="generic_listing" selected>generic_listing</option>' in resp.text
+
+
+_LI_SEARCH = "https://www.linkedin.com/jobs/search-results/?keywords=robotics+norge&currentJobId=1&origin=x"
+
+
+def test_detect_source_linkedin_search_suggests_rewrite(conn):
+    with patch("app.routes.sources.detect_listing_page") as mock_detect:
+        fetched = _run_detect(conn, _LI_SEARCH)
+    mock_detect.assert_not_called()
+    result = fetched["result"]
+    assert result["needs_action"] is True
+    html = result["html_chunks"][0]
+    assert "jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=robotics+norge&amp;start=0" in html
+    assert 'data-progress-url="/sources/detect"' in html
+    assert "Use suggested URL" in html and "Add original anyway" in html
+
+
+def test_detect_source_skip_rewrite_proceeds_to_detection(conn):
+    task = q.enqueue_task(conn, kind="source_detect", params={"url": _LI_SEARCH, "skip_rewrite": True})
+    with patch("app.routes.sources.detect_listing_page", return_value=_not_listing()):
+        execute_task(conn, MagicMock(), MagicMock(), MagicMock(), task)
+    result = q.get_task(conn, task["id"])["result"]
+    assert "not a listing" in result["html_chunks"][0].lower() or "single job" in result["html_chunks"][0].lower()
+
+
+def test_detect_endpoint_forwards_skip_rewrite(client, conn):
+    resp = client.post("/sources/detect", data={"url": _LI_SEARCH, "skip_rewrite": "1"})
+    task = q.get_task(conn, resp.json()["task_id"])
+    assert task["params"]["skip_rewrite"] is True
+
+
+def test_detect_source_guest_url_gets_a_linkedin_name_not_the_host(conn):
+    guest = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=robotics+norge&start=0"
+    with patch("app.routes.sources.detect_listing_page", return_value=_listing()):
+        fetched = _run_detect(conn, guest)
+    html = fetched["result"]["html_chunks"][0]
+    assert 'value="linkedin/robotics-norge"' in html

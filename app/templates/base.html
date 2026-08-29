@@ -532,6 +532,16 @@
         }
         var result = task.result || {};
         (result.notices || []).forEach(function (n) { showNotice(n.html, n.level); });
+        // A needs-action panel that renders outside its own add-panel (e.g. the
+        // Jobs "Add" panel drops its result into #jobs-content) would otherwise
+        // leave the now-stale input form open above it. Collapse it.
+        if (result.needs_action) {
+          var addPanel = w.el.closest(".add-panel");
+          var landing = w.targetSelector && document.querySelector(w.targetSelector);
+          if (addPanel && (!landing || !addPanel.contains(landing))) {
+            addPanel.classList.remove("add-panel-open");
+          }
+        }
         var chunks = result.html_chunks || [];
         for (var k = 0; k < w.bodyFieldNames.length; k++) {
           var clearFieldEl = document.querySelector(w.el.getAttribute("data-progress-body-" + w.bodyFieldNames[k]));

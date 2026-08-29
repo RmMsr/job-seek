@@ -1,9 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Resume — Job Seek{% endblock %}
+{% block title %}Action needed — Job Seek{% endblock %}
 {% block content %}
-<h1>Resume</h1>
-<div id="resume-page" {% if inbox_item_id %}data-inbox-item-id="{{ inbox_item_id }}"{% endif %}>
+<h1>Action needed</h1>
+{% if action_message %}
+<p style="margin-top:-0.5rem; color:var(--text-secondary);">{{ action_message }}</p>
+{% endif %}
+<div id="resume-page" style="margin-top:1.25rem;"
+     {% if inbox_item_id %}data-inbox-item-id="{{ inbox_item_id }}"{% endif %}>
   {{ resume_html | safe }}
 </div>
-<p><a href="/">Back to Start</a></p>
+<p style="margin-top:1.5rem;"><a href="/">Back to Start</a></p>
 {% endblock %}

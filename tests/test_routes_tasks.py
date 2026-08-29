@@ -131,3 +131,15 @@ def test_task_resume_404_without_resume_html(client, conn):
     q.complete_task(conn, task["id"], {})
     resp = client.get(f"/tasks/{task['id']}/resume")
     assert resp.status_code == 404
+
+
+def test_task_resume_shows_action_message_and_heading(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {
+        "resume_html": "<p>confirm me</p>",
+        "action_message": "New source detected: Careers Page",
+    })
+    resp = client.get(f"/tasks/{task['id']}/resume")
+    assert "<h1>Action needed</h1>" in resp.text
+    assert "New source detected: Careers Page" in resp.text
+    assert "<h1>Resume</h1>" not in resp.text

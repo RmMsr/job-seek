@@ -1,0 +1,28 @@
+<div id="rewrite-panel"
+     style="display:flex; flex-direction:column; gap:1rem; max-width:640px;
+            padding:1rem 1.25rem; border:1px solid var(--border); border-radius:8px;
+            background:var(--surface);">
+  <p style="margin:0; line-height:1.5;">{{ reason }}</p>
+  <div style="display:flex; flex-direction:column; gap:0.3rem;">
+    <span style="font-size:0.8em; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted);">Suggested source</span>
+    <code style="font-size:0.85em; overflow-wrap:anywhere; color:var(--text-secondary);">{{ suggested_url }}</code>
+  </div>
+  <input type="hidden" id="rw-suggested" value="{{ suggested_url }}">
+  <input type="hidden" id="rw-original" value="{{ original_url }}">
+  <input type="hidden" id="rw-skip" value="1">
+  <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+    <a href="{{ cancel_url }}" class="btn btn-subtle">Cancel</a>
+    <button type="button" class="btn btn-subtle"
+      data-progress-url="{{ detect_url }}"
+      data-progress-body-url="#rw-original"
+      data-progress-body-skip_rewrite="#rw-skip"
+      data-progress-target="#rewrite-panel"
+      data-progress-display="#rewrite-progress">Add original anyway</button>
+    <button type="button" class="btn btn-primary"
+      data-progress-url="{{ detect_url }}"
+      data-progress-body-url="#rw-suggested"
+      data-progress-target="#rewrite-panel"
+      data-progress-display="#rewrite-progress">Use suggested URL</button>
+  </div>
+  <span id="rewrite-progress" class="reset-progress" aria-live="polite"></span>
+</div>

@@ -10,6 +10,7 @@ from app.fetchers.content import (
     FetchError, NoContentError, extract_text_or_raise, extract_page_title,
 )
 from app.fetchers.listing_detect import detect_listing_page
+from app.url_rewrite import suggest_rewrite, suggest_source_name
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.generate_source_name import generate_source_name
 from app.routes.sources import check_already_tracked_notice_data
@@ -612,6 +613,19 @@ def _task_job_add_by_url(conn, client, model, config, params):
         if already_tracked is not None:
             notices.append(already_tracked)
         else:
+            if not params.get("skip_rewrite"):
+                suggestion = suggest_rewrite(url)
+                if suggestion is not None:
+                    panel = templates.get_template("_rewrite_panel.html").render(
+                        request=None, original_url=url, suggested_url=suggestion.url,
+                        reason=suggestion.reason, detect_url="/jobs/add-by-url", cancel_url="/jobs",
+                    )
+                    html_chunks.append(panel)
+                    q.resolve_source_prompts_for_url(conn, url)
+                    result["needs_action"] = True
+                    result["action_message"] = "LinkedIn search URL — a fetchable alternative was suggested"
+                    result["resume_html"] = panel
+                    return result
             try:
                 detection = detect_listing_page(client, model, url)
             except FetchError as exc:
@@ -626,7 +640,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
                 html = detection.html
                 if detection.is_listing and len(detection.job_links) >= 2:
                     domain = urlsplit(url).netloc
-                    default_name = domain
+                    default_name = suggest_source_name(url) or domain
                     page_title = extract_page_title(html)
                     if page_title:
                         generated_name = generate_source_name(client, model, domain, page_title)
@@ -755,12 +769,18 @@ def _task_job_add_listing_source(conn, client, model, config, params):
 
 
 @router.post("/jobs/add-by-url")
-def job_add_by_url(request: Request, url: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+def job_add_by_url(
+    request: Request,
+    url: str = Form(...),
+    skip_rewrite: bool = Form(False),
+    conn: sqlite3.Connection = Depends(get_db),
+):
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
         "url": url,
         "status": request.query_params.get("status") or None,
         "content_type": request.query_params.get("content_type") or None,
         "filter_ctx": _filter_context(request),
+        "skip_rewrite": skip_rewrite,
     })
     return {"task_id": task["id"], "already_active": task["already_active"]}
 

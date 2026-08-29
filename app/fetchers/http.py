@@ -1,7 +1,13 @@
 from __future__ import annotations
+import logging
+from urllib.parse import urlsplit
 import httpx
 from bs4 import BeautifulSoup
 from app.fetchers.base import Fetcher, RawJob
+
+logger = logging.getLogger("job_seek")
+
+_RATE_LIMIT_STATUS = {429, 999}  # 999 = LinkedIn bot-block
 
 
 class HttpFetcher:
@@ -12,6 +18,12 @@ class HttpFetcher:
         try:
             resp = httpx.get(self._source["url"], timeout=30, follow_redirects=True)
             if resp.status_code != 200:
+                if resp.status_code in _RATE_LIMIT_STATUS:
+                    logger.warning(
+                        "HTTP %s fetching %s from %s — rate-limited or bot-blocked",
+                        resp.status_code, self._source["url"],
+                        urlsplit(self._source["url"]).netloc,
+                    )
                 return []
             return self._parse(resp.text)
         except Exception:
