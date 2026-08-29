@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 import httpx
 from bs4 import BeautifulSoup
 from app.fetchers.base import Fetcher, RawJob
+from app.url_rewrite import linkedin_guest_posting_url
 
 logger = logging.getLogger("job_seek")
 
@@ -16,7 +17,8 @@ class HttpFetcher:
 
     def fetch(self) -> list[RawJob]:
         try:
-            resp = httpx.get(self._source["url"], timeout=30, follow_redirects=True)
+            fetch_url = linkedin_guest_posting_url(self._source["url"]) or self._source["url"]
+            resp = httpx.get(fetch_url, timeout=30, follow_redirects=True)
             if resp.status_code != 200:
                 if resp.status_code in _RATE_LIMIT_STATUS:
                     logger.warning(

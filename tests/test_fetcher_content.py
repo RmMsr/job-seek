@@ -94,3 +94,14 @@ def test_extract_page_title_returns_none_when_neither_present():
 def test_extract_page_title_returns_none_for_blank_title():
     html = "<html><head><title>   </title></head><body></body></html>"
     assert extract_page_title(html) is None
+
+
+@respx.mock
+def test_fetch_url_html_rewrites_linkedin_view_url_to_guest_endpoint():
+    guest = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4421669844"
+    route = respx.get(guest).mock(return_value=httpx.Response(200, text="<p>posting</p>"))
+    body = fetch_url_html(
+        "https://fr.linkedin.com/jobs/view/ml-engineer-at-acme-4421669844?position=1"
+    )
+    assert route.called
+    assert body == "<p>posting</p>"

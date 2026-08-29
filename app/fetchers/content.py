@@ -1,6 +1,7 @@
 from __future__ import annotations
 import httpx
 from bs4 import BeautifulSoup
+from app.url_rewrite import linkedin_guest_posting_url
 
 MIN_CONTENT_LENGTH = 200  # below this, treat as no real content (e.g. a JS-only page's noscript shell)
 
@@ -27,8 +28,9 @@ def has_enough_text(text: str) -> bool:
 
 
 def fetch_url_html(url: str) -> str:
+    fetch_url = linkedin_guest_posting_url(url) or url
     try:
-        resp = httpx.get(url, timeout=30, follow_redirects=True)
+        resp = httpx.get(fetch_url, timeout=30, follow_redirects=True)
     except httpx.HTTPError as exc:
         raise FetchError(str(exc)) from exc
     if resp.status_code != 200:

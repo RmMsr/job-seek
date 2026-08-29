@@ -179,3 +179,28 @@ def test_summarize_lead_falls_back_to_original_message_on_api_error():
     original = "Posted by U123:\n\noriginal message"
     result = summarize(client, "llama3.2", original, content_type="lead")
     assert result == ("", "", original)
+
+
+def test_summarize_non_slack_lead_gets_ai_summary_not_raw_body():
+    response = '{"title": "ML Engineer - Paris @ Acme", "headline": "H", "summary": "**Role:** ML Engineer"}'
+    client = _mock_client(response)
+    title, headline, summary = summarize(
+        client, "llama3.2", "a wall of scraped page chrome",
+        content_type="lead", raw_passthrough=False,
+    )
+    assert title == "ML Engineer - Paris @ Acme"
+    assert summary == "**Role:** ML Engineer"
+
+
+def test_summarize_non_slack_lead_uses_job_posting_prompt():
+    client = _mock_client('{"title": "T", "headline": "H", "summary": "S"}')
+    summarize(client, "llama3.2", "content", content_type="lead", raw_passthrough=False)
+    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "job posting" in system.lower()
+
+
+def test_summarize_non_slack_lead_empty_summary_on_api_error():
+    client = MagicMock()
+    client.chat.completions.create.side_effect = Exception("boom")
+    result = summarize(client, "llama3.2", "raw", content_type="lead", raw_passthrough=False)
+    assert result == ("", "", "")

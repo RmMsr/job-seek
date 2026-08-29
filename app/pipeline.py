@@ -70,7 +70,9 @@ def _ingest_posting(
     yield _progress(f"{progress_prefix}Classified as {content_type}: {url}")
 
     if content_type in ("job_posting", "lead"):
-        ai_title, headline, job_summary = summarize(client, model, simplified, content_type=content_type)
+        ai_title, headline, job_summary = summarize(
+            client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
+        )
         q.update_job_pipeline(
             conn, job_id,
             simplified_content=simplified,

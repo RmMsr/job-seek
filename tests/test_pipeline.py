@@ -130,11 +130,11 @@ def test_run_fetch_new_job_stored(conn, source):
     assert jobs[0]["content_type"] == "job_posting"
 
 
-def test_run_fetch_lead_uses_organization_focused_summary(conn, source):
-    raw_jobs = [RawJob(url="http://example.com/job/1", title="fallback", company="", raw_text="anyone know if Acme is hiring?")]
+def test_run_fetch_non_slack_lead_gets_ai_summary(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="fallback", company="", raw_text="scraped page chrome")]
     client = _mock_client(
-        classify_resp='{"type": "lead", "reason": "vague mention, no full posting"}',
-        summarize_resp='{"organizations": ["Acme", "Globex"], "headline": "A couple of leads"}',
+        classify_resp='{"type": "lead", "reason": "thin page, no full posting"}',
+        summarize_resp='{"title": "ML Engineer - Paris @ Acme", "headline": "A lead", "summary": "AI summary body"}',
         evaluate_resp='{"score": 0.5, "reasoning": "Some relevance"}',
     )
 
@@ -144,9 +144,30 @@ def test_run_fetch_lead_uses_organization_focused_summary(conn, source):
 
     job = q.get_jobs(conn)[0]
     assert job["content_type"] == "lead"
+    # A non-Slack lead is summarised like a posting — never the raw scrape.
+    assert job["summary"] == "AI summary body"
+    assert job["title"] == "ML Engineer - Paris @ Acme"
+
+
+def test_run_fetch_slack_lead_retains_raw_message(conn):
+    q.insert_scenario(conn, "Remote ML", "")
+    q.upsert_profile(conn, "I am an ML engineer.")
+    sid = q.insert_source(conn, "Community", "https://community.slack.com", "slack")
+    slack_source = q.get_source(conn, sid)
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="anyone know if Acme is hiring?")]
+    client = _mock_client(
+        classify_resp='{"type": "lead", "reason": "vague mention"}',
+        summarize_resp='{"organizations": ["Acme", "Globex"], "headline": "A couple of leads"}',
+        evaluate_resp='{"score": 0.5, "reasoning": "Some relevance"}',
+    )
+
+    with patch("app.pipeline.SlackFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(slack_source, conn, client, "llama3.2", "browser-profile"))
+
+    job = q.get_jobs(conn)[0]
+    assert job["content_type"] == "lead"
     assert job["title"] == "Acme, Globex"
-    # Leads retain the original message verbatim as their summary rather
-    # than an AI-compressed rewrite.
     assert job["summary"] == "anyone know if Acme is hiring?"
 
 

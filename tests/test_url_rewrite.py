@@ -1,5 +1,8 @@
 import pytest
 from app.url_rewrite import suggest_rewrite, suggest_source_name, RewriteSuggestion
+from app.url_rewrite import linkedin_guest_posting_url
+
+_GUEST_POSTING = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/"
 
 _LOGGED_IN = (
     "https://www.linkedin.com/jobs/search-results/"
@@ -33,13 +36,25 @@ def test_suggest_source_name_none_for_other_urls():
     assert suggest_source_name("not a url") is None
 
 
-def test_location_param_is_carried_when_present():
+def test_location_and_geoid_params_are_carried_when_present():
     s = suggest_rewrite(
         "https://www.linkedin.com/jobs/search?keywords=data+engineer&location=Norway&geoId=123"
     )
     assert s.url == (
         "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-        "?keywords=data+engineer&location=Norway&start=0"
+        "?keywords=data+engineer&location=Norway&geoId=123&start=0"
+    )
+
+
+def test_geoid_param_is_carried_without_location():
+    # geoId is what actually pins the guest endpoint's results to a country;
+    # a location-less search that carries geoId must keep it.
+    s = suggest_rewrite(
+        "https://www.linkedin.com/jobs/search-results/?keywords=physical+ai+norway&geoId=103819153"
+    )
+    assert s.url == (
+        "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+        "?keywords=physical+ai+norway&geoId=103819153&start=0"
     )
 
 
@@ -68,3 +83,35 @@ def test_non_linkedin_url_does_not_match():
 def test_non_http_input_returns_none():
     assert suggest_rewrite("mailto:jobs@example.com") is None
     assert suggest_rewrite("not a url") is None
+
+
+def test_guest_posting_url_from_slug_and_id():
+    assert linkedin_guest_posting_url(
+        "https://fr.linkedin.com/jobs/view/senior-ml-engineer-x-f-m-at-doctolib-4421669844"
+        "?position=1&pageNum=0&refId=abc"
+    ) == _GUEST_POSTING + "4421669844"
+
+
+def test_guest_posting_url_from_bare_id():
+    assert linkedin_guest_posting_url(
+        "https://www.linkedin.com/jobs/view/4421669844"
+    ) == _GUEST_POSTING + "4421669844"
+
+
+def test_guest_posting_url_from_current_job_id():
+    assert linkedin_guest_posting_url(
+        "https://www.linkedin.com/jobs/search-results/?currentJobId=4435382222&keywords=x"
+    ) == _GUEST_POSTING + "4435382222"
+
+
+def test_guest_posting_url_none_for_non_linkedin():
+    assert linkedin_guest_posting_url("https://example.com/jobs/view/some-job-123") is None
+
+
+def test_guest_posting_url_none_without_id():
+    assert linkedin_guest_posting_url("https://www.linkedin.com/jobs/view/") is None
+    assert linkedin_guest_posting_url("https://www.linkedin.com/jobs/search?keywords=ai") is None
+
+
+def test_guest_posting_url_none_for_already_guest_url():
+    assert linkedin_guest_posting_url(_GUEST_POSTING + "4421669844") is None

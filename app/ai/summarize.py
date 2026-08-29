@@ -55,13 +55,18 @@ def summarize(
     model: str,
     simplified_content: str,
     content_type: str = "job_posting",
+    raw_passthrough: bool = True,
 ) -> tuple[str, str, str]:
-    is_lead = content_type == "lead"
+    # A "lead" keeps its source text verbatim as the summary only when that text
+    # is a short human message worth preserving (Slack). For scraped web leads
+    # (raw_passthrough=False) the lead is summarised like a posting, so the job
+    # body is never a dump of page chrome.
+    raw_lead = content_type == "lead" and raw_passthrough
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": _LEAD_SYSTEM if is_lead else _SYSTEM},
+                {"role": "system", "content": _LEAD_SYSTEM if raw_lead else _SYSTEM},
                 {"role": "user", "content": simplified_content[:6000]},
             ],
             temperature=0.3,
@@ -72,7 +77,7 @@ def summarize(
             extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         )
         data = json.loads(extract_json(resp.choices[0].message.content))
-        if is_lead:
+        if raw_lead:
             # Leads are short/vague by nature, so the retained original message
             # (already including its author, see SlackFetcher) is more useful
             # than an AI-compressed rewrite — only title/headline come from AI.
@@ -85,4 +90,4 @@ def summarize(
             summary = f"{summary}\n\n**Original posting:** [{source_link}]({source_link})"
         return title, data.get("headline", ""), summary
     except Exception:
-        return "", "", simplified_content if is_lead else ""
+        return "", "", simplified_content if raw_lead else ""
