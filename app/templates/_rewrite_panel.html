@@ -16,12 +16,14 @@
       data-progress-url="{{ detect_url }}"
       data-progress-body-url="#rw-original"
       data-progress-body-skip_rewrite="#rw-skip"
-      data-progress-target="#rewrite-panel"
+      data-progress-target="{{ target }}"
+      {% if action_target %}data-progress-action-target="{{ action_target }}"{% endif %}
       data-progress-display="#rewrite-progress">Add original anyway</button>
     <button type="button" class="btn btn-primary"
       data-progress-url="{{ detect_url }}"
       data-progress-body-url="#rw-suggested"
-      data-progress-target="#rewrite-panel"
+      data-progress-target="{{ target }}"
+      {% if action_target %}data-progress-action-target="{{ action_target }}"{% endif %}
       data-progress-display="#rewrite-progress">Use suggested URL</button>
   </div>
   <span id="rewrite-progress" class="reset-progress" aria-live="polite"></span>

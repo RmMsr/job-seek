@@ -794,6 +794,12 @@ def resolve_inbox_item(conn: sqlite3.Connection, item_id: int) -> None:
     conn.commit()
 
 
+def get_inbox_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
+    return _row_to_dict(
+        conn.execute("SELECT * FROM inbox_items WHERE id = ?", (item_id,)).fetchone()
+    )
+
+
 def get_inbox_item_by_task_id(conn: sqlite3.Connection, task_id: int) -> dict | None:
     return _row_to_dict(
         conn.execute("SELECT * FROM inbox_items WHERE task_id = ?", (task_id,)).fetchone()

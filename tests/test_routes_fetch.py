@@ -46,6 +46,13 @@ def test_fetch_panel_has_view_all_jobs_link_per_source(client, conn):
     assert f'href="/jobs?source_id={sid}"' in resp.text
 
 
+def test_fetch_table_links_source_name_to_sources_page(client, conn):
+    src_id = q.insert_source(conn, "Acme Board", "https://acme.example/jobs", "generic_listing")
+    html = client.get("/fetch").text
+    assert f'href="/sources#source-row-{src_id}"' in html
+    assert "Acme Board" in html
+
+
 def test_fetch_panel_row_has_source_row_class_for_hash_highlight(client, conn):
     sid = _seed(conn)
     resp = client.get("/fetch")

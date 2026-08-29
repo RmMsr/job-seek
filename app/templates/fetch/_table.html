@@ -23,7 +23,7 @@
       {% set stats = stats_by_source.get(source.id) %}
       <tr id="fetch-row-{{ source.id }}" class="source-row">
         <td style="padding:0.5rem;">
-          <strong>{{ source.name }}</strong>
+          <a href="/sources#source-row-{{ source.id }}"><strong>{{ source.name }}</strong></a>
         </td>
         <td style="padding:0.5rem;">
           <span style="white-space:nowrap;">{% if stats and stats.last_success_at %}{{ stats.last_success_at }}{% else %}—{% endif %}</span>

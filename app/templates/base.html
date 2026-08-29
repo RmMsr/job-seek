@@ -319,10 +319,11 @@
     .filter-bar a.active { font-weight: 600; color: var(--text-primary); text-decoration: underline; text-decoration-color: var(--accent); }
     .select-all { display: flex; align-items: center; gap: 0.4rem; color: var(--text-secondary); white-space: nowrap; }
     .select-all input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
-    body:has(input[name="job_ids"]:checked) { padding-bottom: 11rem; }
-    .bulk-bar { display: none; position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    body:has(input[name="job_ids"]:checked) { padding-bottom: calc(var(--status-bar-h, 0px) + var(--bulk-bar-h, 9rem) + 4rem); }
+    .bulk-bar { display: none; position: fixed; bottom: var(--status-bar-h, 0px); left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 880px; box-sizing: border-box; z-index: 10;
-      background: var(--surface); border-top: 2px solid var(--accent); box-shadow: 0 -2px 12px rgba(0,0,0,0.08); padding: 0.75rem 1rem; }
+      background: var(--surface); border-top: 2px solid var(--accent); box-shadow: 0 -2px 12px rgba(0,0,0,0.08); padding: 0.75rem 1rem;
+      transition: bottom 0.15s ease; }
     #jobs-content:has(input[name="job_ids"]:checked) .bulk-bar { display: grid; }
     .config-banner { background: var(--alert-tint); color: var(--alert); border: 2px solid var(--alert); border-radius: 8px;
       padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 1.05rem; }
@@ -331,6 +332,8 @@
     .checklist li { padding: 0.4rem 0; }
     .checklist li.done a { color: var(--success-strong); font-weight: 600; }
     .checklist li.todo a { color: var(--accent); font-weight: 600; }
+    #tasks-list li { display: flex; align-items: center; gap: 0.5rem; }
+    #tasks-list li input[type="checkbox"] { flex: none; margin: 0; }
     .actionable-block { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
       margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 
@@ -368,8 +371,9 @@
     .how-it-works li ol { list-style-type: lower-alpha; margin-top: 0.5rem; }
     .how-it-works li ol li { color: var(--text-secondary); }
     #notice-stack:empty { display: none; }
-    #notice-stack { position: fixed; bottom: 3rem; left: 50%; transform: translateX(-50%);
-      width: 100%; max-width: 960px; box-sizing: border-box; padding: 0 1rem; z-index: 25; }
+    #notice-stack { position: fixed; bottom: calc(3rem + var(--status-bar-h, 0px) + var(--bulk-bar-h, 0px)); left: 50%; transform: translateX(-50%);
+      width: 100%; max-width: 960px; box-sizing: border-box; padding: 0 1rem; z-index: 25;
+      transition: bottom 0.15s ease; }
     .notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
       padding: 0.6rem 0.9rem; margin-bottom: 0.75rem; border-radius: 6px;
       border: 1px solid var(--border); background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -386,8 +390,12 @@
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;
       display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
       background: #212529; color: #f8f9fa; font-size: 0.85em;
-      padding: 0.5rem 1rem; border-radius: 6px 6px 0 0; box-shadow: 0 -2px 8px rgba(0,0,0,0.15); }
+      padding: 0.5rem 1rem; border-radius: 6px 6px 0 0; box-shadow: 0 -2px 8px rgba(0,0,0,0.15);
+      transition: bottom 0.15s ease; }
     #status-bar a { color: #9ec5fe; }
+    .status-bar-dismiss { margin-left: auto; background: none; border: none; color: inherit;
+      opacity: 0.6; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.15rem; }
+    .status-bar-dismiss:hover { opacity: 1; }
     .status-bar-progress-track { display: inline-block; flex: none; width: 80px; height: 6px; border-radius: 3px;
       background: #495057; overflow: hidden; }
     .status-bar-progress-fill { display: block; height: 100%; background: #0d6efd; }
@@ -532,12 +540,15 @@
         }
         var result = task.result || {};
         (result.notices || []).forEach(function (n) { showNotice(n.html, n.level); });
+        // Where the result actually lands: a `needs_action` panel goes to the
+        // action target when one is set, everything else to the primary target.
+        var landingSelector = (result.needs_action && w.actionTarget) ? w.actionTarget : w.targetSelector;
         // A needs-action panel that renders outside its own add-panel (e.g. the
-        // Jobs "Add" panel drops its result into #jobs-content) would otherwise
-        // leave the now-stale input form open above it. Collapse it.
+        // Jobs "Add" panel drops its confirm step into #jobs-add-result) would
+        // otherwise leave the now-stale input form open above it. Collapse it.
         if (result.needs_action) {
           var addPanel = w.el.closest(".add-panel");
-          var landing = w.targetSelector && document.querySelector(w.targetSelector);
+          var landing = landingSelector && document.querySelector(landingSelector);
           if (addPanel && (!landing || !addPanel.contains(landing))) {
             addPanel.classList.remove("add-panel-open");
           }
@@ -551,13 +562,18 @@
           chunks.forEach(applyOob);
           highlightAffectedScenarios(scenarioIdsFromNotices(result.notices));
         } else if (w.targetSelector && chunks.length) {
-          var target = document.querySelector(w.targetSelector);
+          var target = document.querySelector(landingSelector);
           if (target) {
             target.innerHTML = chunks[chunks.length - 1];
             if (window.htmx) window.htmx.process(target);
             if (target.id.indexOf("proposals-area-") === 0) {
               flashHighlight(target.closest(".scenario-feedback-block") || target, "scenario-feedback-block-target-highlight");
             }
+          }
+          // Terminal result: drop any stale confirm panel left in the action target.
+          if (w.actionTarget && !result.needs_action) {
+            var staleAction = document.querySelector(w.actionTarget);
+            if (staleAction && staleAction !== target) staleAction.innerHTML = "";
           }
         } else if (!w.oobMode && !chunks.length) {
           location.reload();
@@ -622,6 +638,11 @@
 
         var url = el.getAttribute("data-progress-url");
         var targetSelector = el.getAttribute("data-progress-target");
+        // Optional secondary container for `needs_action` panels, so a confirm
+        // step lands here instead of overwriting the primary target (e.g. the
+        // Jobs list). A terminal result still swaps the primary target and this
+        // container gets cleared.
+        var actionTarget = el.getAttribute("data-progress-action-target");
         var oobMode = el.hasAttribute("data-progress-oob");
         var body = null;
         if (el.hasAttribute("data-progress-jobs")) {
@@ -659,16 +680,19 @@
           }
           if (data.task_ids) {
             showNotice(
-              "<p>" + escapeHtml(startLabel) + ": started (" + data.task_ids.length + " source" +
+              "<p>" + escapeHtml("New task: " + startLabel) + " (" + data.task_ids.length + " source" +
               (data.task_ids.length === 1 ? "" : "s") + ")</p>", "info"
             );
             pollBatch(data.task_ids, el);
             return;
           }
-          var statusText = data.already_active ? ": already in progress" : ": started";
-          showNotice("<p>" + escapeHtml(startLabel) + statusText + "</p>", "info");
+          var noticeText = data.already_active
+            ? "Already running: " + startLabel
+            : "New task: " + startLabel;
+          showNotice("<p>" + escapeHtml(noticeText) + "</p>", "info");
           watched[data.task_id] = {
-            el: el, targetSelector: targetSelector, oobMode: oobMode, bodyFieldNames: bodyFieldNames,
+            el: el, targetSelector: targetSelector, actionTarget: actionTarget,
+            oobMode: oobMode, bodyFieldNames: bodyFieldNames,
           };
           pollWatched(data.task_id);
         }).catch(function (err) {
@@ -690,10 +714,17 @@
         btn.click();
       });
 
+      var dismissedSignature = null;
+
       function renderStatusBar(data) {
         var bar = document.getElementById("status-bar");
         if (!bar) return;
         var tasks = data.tasks || [];
+        var signature = tasks.map(function (t) { return t.id; }).join(",");
+        if (signature && signature === dismissedSignature && !data.inbox_count) {
+          bar.innerHTML = "";
+          return;
+        }
         var current = tasks.find(function (t) { return t.status === "running"; }) || tasks[0];
         var parts = [];
         if (current) {
@@ -712,13 +743,26 @@
             parts.push('<span>' + escapeHtml(statusWord) + '</span>');
           }
           parts.push('<a href="/tasks/' + current.id + '/log">details</a>');
+          if (current.link) parts.push('<a href="' + escapeHtml(current.link) + '">view job</a>');
           if (queuedCount > 0) parts.push('<span>+' + queuedCount + ' queued</span>');
         }
         if (data.inbox_count) {
           parts.push('<a href="/">' + data.inbox_count + ' need attention</a>');
         }
+        if (parts.length) {
+          parts.push('<button type="button" class="status-bar-dismiss" aria-label="Dismiss" data-status-signature="' +
+            escapeHtml(signature) + '">×</button>');
+        }
         bar.innerHTML = parts.join("");
       }
+
+      document.body.addEventListener("click", function (evt) {
+        var dismiss = evt.target.closest(".status-bar-dismiss");
+        if (!dismiss) return;
+        dismissedSignature = dismiss.getAttribute("data-status-signature") || "";
+        var bar = document.getElementById("status-bar");
+        if (bar) bar.innerHTML = "";
+      });
 
       function pollAmbient() {
         fetch("/tasks/active").then(function (r) { return r.json(); }).then(function (data) {
@@ -745,12 +789,36 @@
           sa.indeterminate = checkedCount > 0 && checkedCount < all.length;
         });
       }
+      // The two fixed bottom bars stack: #status-bar pinned to the viewport
+      // bottom, .bulk-bar lifted to sit on top of it. Both heights are published
+      // as CSS vars so the bulk bar, the notice stack and the page's bottom
+      // padding can offset around whichever bars are visible. A hidden bar is
+      // display:none so its rect height is 0. (offsetParent is unreliable here —
+      // null for position:fixed elements in Chrome even when visible.)
+      function syncBottomBars() {
+        var sb = document.getElementById("status-bar");
+        var bb = document.querySelector(".bulk-bar");
+        document.body.style.setProperty("--status-bar-h", (sb ? sb.getBoundingClientRect().height : 0) + "px");
+        document.body.style.setProperty("--bulk-bar-h", (bb ? bb.getBoundingClientRect().height : 0) + "px");
+      }
+      var bottomBarObserver = new ResizeObserver(syncBottomBars);
+      function observeBottomBars() {
+        var sb = document.getElementById("status-bar");
+        var bb = document.querySelector(".bulk-bar");
+        if (sb) bottomBarObserver.observe(sb);
+        if (bb) bottomBarObserver.observe(bb);
+        syncBottomBars();
+      }
+      window.addEventListener("resize", syncBottomBars);
+      document.body.addEventListener("htmx:afterSwap", observeBottomBars);
+      observeBottomBars();
       function updateCount() {
         var checked = document.querySelectorAll('input[name="job_ids"]:checked');
         document.querySelectorAll(".bulk-count").forEach(function (el) {
           el.textContent = checked.length + " selected";
         });
         syncSelectAll();
+        syncBottomBars();
       }
       document.body.addEventListener("change", function (evt) {
         if (evt.target.name === "job_ids") updateCount();
@@ -927,7 +995,10 @@ document.body.addEventListener('change', function (e) {
 document.body.addEventListener('click', function (e) {
   var trigger = e.target.closest('.add-panel-trigger');
   if (trigger) {
-    trigger.closest('.add-panel').classList.toggle('add-panel-open');
+    var panel = trigger.closest('.add-panel');
+    panel.classList.toggle('add-panel-open');
+    var sib = panel.nextElementSibling;
+    if (sib && sib.hasAttribute('data-add-result')) sib.innerHTML = '';
     return;
   }
   var cancel = e.target.closest('.add-panel-cancel');

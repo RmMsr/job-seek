@@ -91,6 +91,17 @@ def _sources_context(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _post_confirm_chunks(conn: sqlite3.Connection) -> list[str]:
+    """The OOB chunk set every source_confirm outcome ends with: refreshed table,
+    a fresh empty add form, and an emptied result container so the confirm panel
+    disappears once the source is in."""
+    return [
+        templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn)),
+        templates.get_template("sources/_add_form.html").render(request=None),
+        '<div id="sources-add-result"></div>',
+    ]
+
+
 @router.get("/sources", response_class=HTMLResponse)
 def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     context = {**_sources_context(conn), "app_version": get_app_version(), "build_date": get_build_date()}
@@ -111,6 +122,7 @@ def _task_source_detect(conn, client, model, config, params):
             panel = templates.get_template("_rewrite_panel.html").render(
                 request=None, original_url=url, suggested_url=suggestion.url,
                 reason=suggestion.reason, detect_url="/sources/detect", cancel_url="/sources",
+                target="#sources-add-result",
             )
             q.resolve_source_prompts_for_url(conn, url)
             return {
@@ -162,9 +174,7 @@ def _task_source_confirm(conn, client, model, config, params):
     q.resolve_source_prompts_for_url(conn, url)
     already_tracked = check_already_tracked_notice_data(conn, url)
     if already_tracked is not None:
-        table = templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn))
-        add_form = templates.get_template("sources/_add_form.html").render(request=None)
-        return {"notices": [already_tracked], "html_chunks": [table, add_form]}
+        return {"notices": [already_tracked], "html_chunks": _post_confirm_chunks(conn)}
 
     source_id = q.insert_source(conn, name, url, fetcher_type)
     source = q.get_source(conn, source_id)
@@ -185,9 +195,7 @@ def _task_source_confirm(conn, client, model, config, params):
             ),
         })
 
-    table = templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn))
-    add_form = templates.get_template("sources/_add_form.html").render(request=None)
-    return {"notices": notices, "html_chunks": [table, add_form]}
+    return {"notices": notices, "html_chunks": _post_confirm_chunks(conn)}
 
 
 @router.post("/sources/detect")

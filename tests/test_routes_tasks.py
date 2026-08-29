@@ -90,6 +90,7 @@ def test_task_log_page_renders_lines_and_status(client, conn):
     q.append_task_log(conn, task["id"], "second line")
     resp = client.get(f"/tasks/{task['id']}/log")
     assert resp.status_code == 200
+    assert "<h1>Task: fetch source</h1>" in resp.text
     assert "first line" in resp.text
     assert "second line" in resp.text
     assert "queued" in resp.text
@@ -131,6 +132,32 @@ def test_task_resume_404_without_resume_html(client, conn):
     q.complete_task(conn, task["id"], {})
     resp = client.get(f"/tasks/{task['id']}/resume")
     assert resp.status_code == 404
+
+
+def test_task_detail_includes_job_link_for_single_job_kinds(client, conn):
+    src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    job_id = q.insert_job(conn, source_id=src_id, url="https://e.com/j", title="J", company="", raw_text="")
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": {}})
+    resp = client.get(f"/tasks/{task['id']}")
+    assert resp.json()["link"] == f"/jobs/{job_id}"
+
+
+def resp_link(client, task_id):
+    return client.get(f"/tasks/{task_id}").json().get("link")
+
+
+def test_task_detail_no_link_for_fetch_source(client, conn):
+    src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": src_id})
+    assert resp_link(client, task["id"]) is None
+
+
+def test_task_log_page_shows_job_backlink(client, conn):
+    src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    job_id = q.insert_job(conn, source_id=src_id, url="https://e.com/j", title="J", company="", raw_text="")
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": job_id, "filter_ctx": {}})
+    html = client.get(f"/tasks/{task['id']}/log").text
+    assert f'href="/jobs/{job_id}"' in html
 
 
 def test_task_resume_shows_action_message_and_heading(client, conn):

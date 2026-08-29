@@ -1,0 +1,13 @@
+{% if done %}
+<li class="task-completed">
+  <input type="checkbox" checked disabled>
+  {{ item.message }}
+</li>
+{% else %}
+<li id="inbox-item-{{ item.id }}">
+  <input type="checkbox" hx-post="/inbox/{{ item.id }}/resolve"
+    hx-target="#inbox-item-{{ item.id }}" hx-swap="outerHTML"
+    aria-label="Mark done">
+  <a href="{{ item.link }}">{{ item.message }}</a>
+</li>
+{% endif %}

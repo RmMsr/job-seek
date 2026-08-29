@@ -669,6 +669,39 @@ def test_detect_endpoint_forwards_skip_rewrite(client, conn):
     assert task["params"]["skip_rewrite"] is True
 
 
+def test_add_form_targets_dedicated_result_container(client, conn):
+    html = client.get("/sources").text
+    assert 'id="sources-add-result"' in html
+    assert 'data-progress-target="#sources-add-result"' in html
+    assert 'data-progress-target="#add-source-panel"' not in html
+
+
+def test_detect_confirm_panel_has_flex_wrapper(conn):
+    with patch("app.routes.sources.detect_listing_page") as mock_fetch:
+        fetched = _run_detect(conn, _SLACK_URL)
+        mock_fetch.assert_not_called()
+    html = fetched["result"]["html_chunks"][0]
+    assert 'id="detect-confirm"' in html
+    assert "flex-wrap:wrap" in html
+
+
+def test_rewrite_panel_from_sources_targets_result_container(conn):
+    fetched = _run_detect(
+        conn,
+        "https://www.linkedin.com/jobs/search-results/?keywords=robotics&currentJobId=1",
+    )
+    panel = fetched["result"]["html_chunks"][0]
+    assert 'data-progress-target="#sources-add-result"' in panel
+    assert 'data-progress-target="#rewrite-panel"' not in panel
+
+
+def test_source_confirm_clears_result_container(conn):
+    q.insert_source(conn, "Existing", "https://careers.example.com/jobs", "generic_listing")
+    fetched = _run_confirm(conn, "https://careers.example.com/jobs", "Dup", "generic_listing")
+    chunks = fetched["result"]["html_chunks"]
+    assert any(c.strip() == '<div id="sources-add-result"></div>' for c in chunks)
+
+
 def test_detect_source_guest_url_gets_a_linkedin_name_not_the_host(conn):
     guest = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=robotics+norge&start=0"
     with patch("app.routes.sources.detect_listing_page", return_value=_listing()):

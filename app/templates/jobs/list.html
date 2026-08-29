@@ -18,11 +18,13 @@
       data-progress-url="/jobs/add-by-url"
       data-progress-body-url="#add-job-url"
       data-progress-target="#jobs-content"
+      data-progress-action-target="#jobs-add-result"
       data-progress-display="#add-job-progress">Add</button>
   </div>
   <span id="add-job-progress" class="reset-progress" aria-live="polite"></span>
 </form>
 {% endcall %}
+<div id="jobs-add-result" data-add-result></div>
 <div id="jobs-content">
   {% include "jobs/_content.html" %}
 </div>

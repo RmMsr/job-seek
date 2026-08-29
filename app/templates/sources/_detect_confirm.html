@@ -1,14 +1,16 @@
-<span style="margin:0;">Detected type: <strong>{{ fetcher_type }}</strong></span>
-<input type="hidden" id="detect-url" value="{{ url }}">
-<input type="hidden" id="detect-fetcher-type" value="{{ fetcher_type }}">
-<label for="detect-name" style="font-size:0.9em; color:#495057;">Name:</label>
-<input type="text" id="detect-name" value="{{ name }}" class="text-input" style="flex:1; min-width:160px;">
-<a href="/sources" class="btn btn-subtle">Cancel</a>
-<button type="button" class="btn btn-primary"
-  data-progress-url="/sources/detect/confirm"
-  data-progress-body-url="#detect-url"
-  data-progress-body-name="#detect-name"
-  data-progress-body-fetcher_type="#detect-fetcher-type"
-  data-progress-oob
-  data-progress-display="#detect-confirm-progress">Add source</button>
-<span id="detect-confirm-progress" class="reset-progress" aria-live="polite"></span>
+<div id="detect-confirm" style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+  <span style="margin:0;">Detected type: <strong>{{ fetcher_type }}</strong></span>
+  <input type="hidden" id="detect-url" value="{{ url }}">
+  <input type="hidden" id="detect-fetcher-type" value="{{ fetcher_type }}">
+  <label for="detect-name" style="font-size:0.9em; color:#495057;">Name:</label>
+  <input type="text" id="detect-name" value="{{ name }}" class="text-input" style="flex:1; min-width:160px;">
+  <a href="/sources" class="btn btn-subtle">Cancel</a>
+  <button type="button" class="btn btn-primary"
+    data-progress-url="/sources/detect/confirm"
+    data-progress-body-url="#detect-url"
+    data-progress-body-name="#detect-name"
+    data-progress-body-fetcher_type="#detect-fetcher-type"
+    data-progress-oob
+    data-progress-display="#detect-confirm-progress">Add source</button>
+  <span id="detect-confirm-progress" class="reset-progress" aria-live="polite"></span>
+</div>

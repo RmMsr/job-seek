@@ -619,6 +619,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
                     panel = templates.get_template("_rewrite_panel.html").render(
                         request=None, original_url=url, suggested_url=suggestion.url,
                         reason=suggestion.reason, detect_url="/jobs/add-by-url", cancel_url="/jobs",
+                        target="#jobs-content", action_target="#jobs-add-result",
                     )
                     html_chunks.append(panel)
                     q.resolve_source_prompts_for_url(conn, url)

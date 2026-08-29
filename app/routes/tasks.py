@@ -30,6 +30,17 @@ def _task_label(conn: sqlite3.Connection, task: dict) -> str:
     return task["kind"].replace("_", " ")
 
 
+_JOB_LINK_KINDS = {"job_reset", "job_pass_as_new", "job_reevaluate"}
+
+
+def _task_link(task: dict) -> str | None:
+    if task["kind"] in _JOB_LINK_KINDS:
+        job_id = task["params"].get("job_id")
+        if job_id is not None:
+            return f"/jobs/{job_id}"
+    return None
+
+
 def _task_summary(conn: sqlite3.Connection, task: dict, *, include_result: bool = False) -> dict:
     log = task["log"].strip()
     last_line = log.split("\n")[-1] if log else ""
@@ -38,6 +49,9 @@ def _task_summary(conn: sqlite3.Connection, task: dict, *, include_result: bool 
         "last_line": last_line, "error": task["error"],
         "progress": _progress_from_line(last_line),
     }
+    link = _task_link(task)
+    if link:
+        summary["link"] = link
     if include_result:
         summary["result"] = task["result"]
         summary["log"] = task["log"]
@@ -66,7 +80,9 @@ def task_log(task_id: int, request: Request, conn: sqlite3.Connection = Depends(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     lines = task["log"].strip().split("\n") if task["log"].strip() else []
-    return templates.TemplateResponse(request, "tasks/log.html", {"task": task, "lines": lines})
+    return templates.TemplateResponse(
+        request, "tasks/log.html", {"task": task, "lines": lines, "job_link": _task_link(task)}
+    )
 
 
 @router.get("/tasks/{task_id}/resume", response_class=HTMLResponse)

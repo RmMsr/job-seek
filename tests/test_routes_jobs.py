@@ -27,6 +27,12 @@ def test_job_list_returns_200(client, conn):
     assert "ML Eng" in resp.text
 
 
+def test_status_bar_has_dismiss_and_bulk_offset(client, conn):
+    html = client.get("/jobs").text
+    assert "--bulk-bar-h" in html
+    assert "status-bar-dismiss" in html
+
+
 def test_job_list_empty(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
@@ -512,6 +518,32 @@ def test_job_list_has_swappable_content_wrapper(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
     assert '<div id="jobs-content">' in resp.text
+
+
+def test_job_list_add_flow_uses_dedicated_result_container(client, conn):
+    resp = client.get("/jobs")
+    assert '<div id="jobs-add-result" data-add-result></div>' in resp.text
+    # the Add button keeps #jobs-content as its terminal target but routes the
+    # confirm/suggestion step to the result container so the list stays put
+    assert 'data-progress-target="#jobs-content"' in resp.text
+    assert 'data-progress-action-target="#jobs-add-result"' in resp.text
+
+
+def test_listing_confirm_panel_routes_confirm_to_content_and_clears_result(conn):
+    from app.template_env import templates
+    html = templates.get_template("jobs/_listing_confirm.html").render(
+        request=None, url="https://boards.example.com/jobs", fetcher_type="generic_listing",
+        link_count=5, domain="boards.example.com", default_name="Example Board",
+    )
+    assert 'data-progress-target="#jobs-content"' in html
+    assert 'data-progress-action-target="#jobs-add-result"' in html
+
+
+def test_add_by_url_rewrite_panel_targets_result_container(conn):
+    fetched = _run_add_by_url(conn, _LI_SEARCH)
+    html = fetched["result"]["html_chunks"][0]
+    assert 'data-progress-target="#jobs-content"' in html
+    assert 'data-progress-action-target="#jobs-add-result"' in html
 
 
 def test_job_list_row_has_bulk_select_checkbox(client, conn):

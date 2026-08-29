@@ -91,13 +91,25 @@ def test_home_shows_no_tasks_section_when_nothing_pending_or_resolved(client, co
     assert "Tasks" not in resp.text
 
 
-def test_home_shows_pending_task_with_dismiss_button(client, conn):
+def test_home_shows_pending_task_with_resolve_checkbox(client, conn):
     _use_test_db(conn)
     item_id = q.create_inbox_item(conn, kind="task_followup", message="please decide", link="/somewhere")
     resp = client.get("/")
     assert "please decide" in resp.text
     assert 'href="/somewhere"' in resp.text
     assert f'hx-post="/inbox/{item_id}/resolve"' in resp.text
+    assert 'type="checkbox"' in resp.text
+    assert "Dismiss</button>" not in resp.text
+
+
+def test_home_resolved_task_shows_checked_disabled_box(client, conn):
+    _use_test_db(conn)
+    item_id = q.create_inbox_item(conn, kind="task_followup", message="already handled", link="/x")
+    q.resolve_inbox_item(conn, item_id)
+    resp = client.get("/")
+    assert 'class="task-completed"' in resp.text
+    assert "disabled" in resp.text
+    assert "checked" in resp.text
 
 
 def test_home_shows_recently_resolved_task_struck_through(client, conn):
