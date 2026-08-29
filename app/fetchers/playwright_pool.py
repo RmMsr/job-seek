@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import queue
+import re
 import threading
 from playwright.sync_api import sync_playwright
 
@@ -9,6 +10,11 @@ logger = logging.getLogger("job_seek")
 DEFAULT_IDLE_TIMEOUT_SECONDS = 10.0
 DEFAULT_TIMEOUT_MS = 30000
 MAX_BROWSER_INSTANCES = 1  # single dedicated worker thread owns at most one browser at a time
+
+# Playwright's "the browser binary isn't downloaded" launch error — an operator
+# setup problem fixable with `playwright install`, distinct from a page that just
+# won't render.
+_BROWSER_MISSING_RE = re.compile(r"Executable doesn't exist|playwright install", re.IGNORECASE)
 
 
 class BrowserPool:
@@ -26,6 +32,9 @@ class BrowserPool:
         self._jobs: queue.Queue = queue.Queue()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        # Set when a launch fails for lack of the browser binary; cleared on the
+        # next successful launch. Read via browser_install_missing().
+        self.browser_missing = False
 
     def render(self, url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
         logger.info("Escalating to headless-browser render: %s", url)
@@ -62,15 +71,32 @@ class BrowserPool:
                 if browser is None:
                     pw = sync_playwright().start()
                     browser = pw.chromium.launch(headless=True)
+                    self.browser_missing = False
                     logger.info(
                         "Playwright browser pool: launched browser (active=1/%d)",
                         MAX_BROWSER_INSTANCES,
                     )
                 html = self._render_one(browser, url, timeout_ms)
                 result_q.put(("ok", html))
-            except Exception:
-                logger.exception("Playwright render failed for %s", url)
+            except Exception as exc:
+                if _BROWSER_MISSING_RE.search(str(exc)):
+                    self.browser_missing = True
+                    logger.warning(
+                        "Playwright browser is not installed — JavaScript-rendered pages "
+                        "cannot be fetched. Run `playwright install chromium` on the server. "
+                        "(while rendering %s)", url,
+                    )
+                else:
+                    logger.exception("Playwright render failed for %s", url)
                 result_q.put(("error", None))
+                if browser is None and pw is not None:
+                    # launch failed mid-init; drop the half-started Playwright so
+                    # the next job retries from a clean state
+                    try:
+                        pw.stop()
+                    except Exception:
+                        pass
+                    pw = None
 
     def _render_one(self, browser, url: str, timeout_ms: int) -> str:
         ctx = browser.new_context()
@@ -87,3 +113,9 @@ _pool = BrowserPool()
 
 def render_html(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
     return _pool.render(url, timeout_ms)
+
+
+def browser_install_missing() -> bool:
+    """True if a headless-browser launch has failed because the browser binary
+    is not installed. Cleared on the next successful launch."""
+    return _pool.browser_missing

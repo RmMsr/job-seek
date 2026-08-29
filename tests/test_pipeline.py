@@ -707,3 +707,40 @@ def test_run_reassess_fit_skips_already_current_profile_hash(conn, source):
 
     assert updated_count == 0
     assert "skipping 1 already current" in "".join(messages)
+
+
+def test_run_fetch_stores_canonical_job_urls(conn):
+    from app import pipeline
+
+    sid = q.insert_source(conn, "S", "https://ex.com", "generic_listing")
+    src = q.get_source(conn, sid)
+
+    class _F:
+        def fetch(self):
+            return [RawJob(url="https://ex.com/jobs/9?refId=abc&utm_source=x",
+                           title="", company="", raw_text="x" * 300)]
+
+    with patch.object(pipeline, "_make_fetcher", return_value=_F()), \
+         patch.object(pipeline, "_ingest_posting", return_value=iter(())):
+        _drain(pipeline.run_fetch(src, conn, MagicMock(), "m", "/tmp"))
+
+    assert q.get_all_job_urls(conn) == frozenset({"https://ex.com/jobs/9"})
+
+
+def test_run_fetch_dedups_against_canonical_known_url(conn):
+    from app import pipeline
+
+    sid = q.insert_source(conn, "S", "https://ex.com", "generic_listing")
+    src = q.get_source(conn, sid)
+    q.insert_job(conn, source_id=sid, url="https://ex.com/jobs/9", title="", company="", raw_text="x" * 300)
+
+    class _F:
+        def fetch(self):
+            return [RawJob(url="https://ex.com/jobs/9?trackingId=zzz",
+                           title="", company="", raw_text="x" * 300)]
+
+    with patch.object(pipeline, "_make_fetcher", return_value=_F()), \
+         patch.object(pipeline, "_ingest_posting", return_value=iter(())) as ingest:
+        _drain(pipeline.run_fetch(src, conn, MagicMock(), "m", "/tmp"))
+
+    ingest.assert_not_called()

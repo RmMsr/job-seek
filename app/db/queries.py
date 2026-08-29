@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import sqlite3
+from app.url_canon import canonicalize_url
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
@@ -201,7 +202,7 @@ def insert_job(
 
 def get_all_job_urls(conn: sqlite3.Connection) -> frozenset[str]:
     rows = conn.execute("SELECT url FROM jobs").fetchall()
-    return frozenset(r["url"] for r in rows)
+    return frozenset(canonicalize_url(r["url"]) for r in rows)
 
 
 def job_exists(conn: sqlite3.Connection, job_id: int) -> bool:
@@ -797,6 +798,36 @@ def get_inbox_item_by_task_id(conn: sqlite3.Connection, task_id: int) -> dict | 
     return _row_to_dict(
         conn.execute("SELECT * FROM inbox_items WHERE task_id = ?", (task_id,)).fetchone()
     )
+
+
+def resolve_source_prompts_for_url(conn: sqlite3.Connection, url: str) -> int:
+    """Resolve unresolved "new source / listing detected" follow-up items for
+    `url`. Called once that URL has been dealt with (source added, added as a
+    job, already tracked) or superseded by a fresh detect, so stale prompts and
+    duplicates don't pile up in the inbox. Returns the count resolved."""
+    rows = conn.execute(
+        """
+        SELECT ii.id AS id, t.params AS params
+        FROM inbox_items ii JOIN tasks t ON t.id = ii.task_id
+        WHERE ii.resolved_at IS NULL
+          AND ii.kind = 'task_followup'
+          AND t.kind IN ('source_detect', 'job_add_by_url')
+        """
+    ).fetchall()
+    ids = []
+    for row in rows:
+        try:
+            if json.loads(row["params"]).get("url") == url:
+                ids.append(row["id"])
+        except (ValueError, TypeError):
+            continue
+    for item_id in ids:
+        conn.execute(
+            "UPDATE inbox_items SET resolved_at = datetime('now') WHERE id = ?", (item_id,)
+        )
+    if ids:
+        conn.commit()
+    return len(ids)
 
 
 def get_fetch_run(conn: sqlite3.Connection, run_id: int) -> dict | None:

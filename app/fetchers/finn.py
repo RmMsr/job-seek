@@ -3,6 +3,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from playwright.sync_api import sync_playwright
 from app.fetchers.base import RawJob, is_recent
 from app.fetchers.http import HttpFetcher
+from app.url_canon import canonicalize_url
 
 MAX_AGE_DAYS = 30          # ads published before this many days ago are ignored
 MAX_LISTING_PAGES = 5      # hard cap on paginated listing pages walked per run
@@ -22,7 +23,10 @@ class FinnListingFetcher:
 
     def fetch(self) -> list[RawJob]:
         ads = self._discover_ads()
-        new_ads = [(url, pub) for url, pub in ads if url not in self._known_urls]
+        new_ads = [
+            (c, pub) for url, pub in ads
+            if (c := canonicalize_url(url)) not in self._known_urls
+        ]
         jobs: list[RawJob] = []
         for url, published_at in new_ads[:MAX_DETAIL_FETCHES]:
             for job in HttpFetcher({"url": url}).fetch():

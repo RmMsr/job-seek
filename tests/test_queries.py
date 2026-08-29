@@ -1370,3 +1370,26 @@ def test_get_fetch_run_returns_row(conn):
     q.complete_fetch_run(conn, run_id, jobs_found=1, jobs_new=1, auth_error=True)
     run = q.get_fetch_run(conn, run_id)
     assert run["auth_error"] == 1
+
+
+def test_resolve_source_prompts_for_url_resolves_only_matching_url(conn):
+    t1 = q.enqueue_task(conn, kind="source_detect", params={"url": "https://ex.com/a"})
+    i1 = q.create_inbox_item(conn, kind="task_followup", message="detected a", link="/x", task_id=t1["id"])
+    t2 = q.enqueue_task(conn, kind="source_detect", params={"url": "https://ex.com/b"})
+    i2 = q.create_inbox_item(conn, kind="task_followup", message="detected b", link="/x", task_id=t2["id"])
+    t3 = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://ex.com/a", "status": None})
+    i3 = q.create_inbox_item(conn, kind="task_followup", message="listing a", link="/x", task_id=t3["id"])
+
+    resolved = q.resolve_source_prompts_for_url(conn, "https://ex.com/a")
+
+    assert resolved == 2
+    open_ids = {i["id"] for i in q.get_unresolved_inbox_items(conn)}
+    assert open_ids == {i2}
+    assert i1 not in open_ids and i3 not in open_ids
+
+
+def test_resolve_source_prompts_for_url_ignores_other_inbox_kinds(conn):
+    t1 = q.enqueue_task(conn, kind="fetch_source", params={"url": "https://ex.com/a"})
+    other = q.create_inbox_item(conn, kind="browser_missing", message="x", link="/sources", task_id=t1["id"])
+    assert q.resolve_source_prompts_for_url(conn, "https://ex.com/a") == 0
+    assert other in {i["id"] for i in q.get_unresolved_inbox_items(conn)}

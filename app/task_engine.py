@@ -6,11 +6,34 @@ import openai
 from app.config import Config, load_config
 from app.deps import _open_db, get_ai_client, get_model
 from app.db import queries as q
+from app.fetchers.playwright_pool import browser_install_missing
 
 logger = logging.getLogger("job_seek")
 
 TaskKindFn = Callable[..., Generator[str, None, dict]]
 TASK_KINDS: dict[str, TaskKindFn] = {}
+
+_BROWSER_MISSING_INBOX_MESSAGE = (
+    "The headless browser needed to read JavaScript-rendered pages isn't installed. "
+    "Run `playwright install chromium` on the server, then re-run the fetch."
+)
+
+
+def _sync_browser_missing_inbox(conn) -> None:
+    """Keep a single unresolved 'browser_missing' inbox item in step with whether
+    the last headless-browser launch failed for lack of the binary. Runs after
+    every task so it appears once a render is actually attempted and clears
+    itself once the browser works again."""
+    open_item = conn.execute(
+        "SELECT id FROM inbox_items WHERE kind = 'browser_missing' AND resolved_at IS NULL"
+    ).fetchone()
+    if browser_install_missing():
+        if open_item is None:
+            q.create_inbox_item(
+                conn, kind="browser_missing", message=_BROWSER_MISSING_INBOX_MESSAGE, link="/sources",
+            )
+    elif open_item is not None:
+        q.resolve_inbox_item(conn, open_item["id"])
 
 
 def register_task_kind(kind: str) -> Callable[[TaskKindFn], TaskKindFn]:
@@ -40,6 +63,8 @@ def execute_task(
         logger.exception("Task %s (%s) failed", task["id"], task["kind"])
         q.fail_task(conn, task["id"], str(exc))
         return
+    finally:
+        _sync_browser_missing_inbox(conn)
     q.complete_task(conn, task["id"], result)
     if result.get("needs_action"):
         q.create_inbox_item(

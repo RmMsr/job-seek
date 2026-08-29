@@ -15,6 +15,7 @@ from app.fetchers.slack import SlackFetcher, SlackAuthRequired
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
 from app.scenario_version import compute_version_hash, compute_profile_hash
+from app.url_canon import canonicalize_url
 
 logger = logging.getLogger("job_seek")
 
@@ -126,13 +127,14 @@ def run_fetch(
         scenarios = q.get_scenarios(conn)
 
         for i, raw in enumerate(raw_jobs, start=1):
-            if q.url_exists(conn, raw.url):
-                yield _progress(f"[{i}/{jobs_found}] Skipping duplicate: {raw.url}")
+            raw_url = canonicalize_url(raw.url)
+            if q.url_exists(conn, raw_url):
+                yield _progress(f"[{i}/{jobs_found}] Skipping duplicate: {raw_url}")
                 continue
             job_id = q.insert_job(
                 conn,
                 source_id=source["id"],
-                url=raw.url,
+                url=raw_url,
                 title=raw.title,
                 company=raw.company,
                 raw_text=raw.raw_text,
@@ -142,7 +144,7 @@ def run_fetch(
             is_slack = source["fetcher_type"] == "slack"
             yield from _ingest_posting(
                 conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
-                url=raw.url, progress_prefix=f"[{i}/{jobs_found}] ",
+                url=raw_url, progress_prefix=f"[{i}/{jobs_found}] ",
             )
             if not q.job_exists(conn, job_id):
                 jobs_new -= 1
@@ -167,6 +169,7 @@ def run_add_job(
     url: str,
     raw_text: str,
 ) -> Generator[str, None, None]:
+    url = canonicalize_url(url)
     job_id = q.insert_job(conn, source_id=source_id, url=url, title="", company="", raw_text=raw_text)
     profile = q.get_profile(conn)
     scenarios = q.get_scenarios(conn)

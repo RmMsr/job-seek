@@ -512,6 +512,29 @@ def _migrate_jobs_add_evaluation_completed_at(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_canonicalize_urls(conn: sqlite3.Connection) -> None:
+    # Idempotent: canonicalizing an already-canonical URL is a no-op, so this
+    # runs on every startup. Collapses rows that canonicalize to the same URL,
+    # keeping the lowest id (child rows cascade-delete; FK enforcement is on).
+    from app.url_canon import canonicalize_url
+
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None:
+        return
+
+    by_canon: dict[str, list[int]] = {}
+    for job_id, url in conn.execute("SELECT id, url FROM jobs ORDER BY id"):
+        by_canon.setdefault(canonicalize_url(url), []).append(job_id)
+
+    for canon, ids in by_canon.items():
+        for drop in ids[1:]:
+            conn.execute("DELETE FROM jobs WHERE id = ?", (drop,))
+        conn.execute("UPDATE jobs SET url = ? WHERE id = ?", (canon, ids[0]))
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -532,3 +555,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_status_invalid_to_trash(conn)
     _migrate_fetch_runs_add_auth_error(conn)
     _migrate_jobs_add_evaluation_completed_at(conn)
+    _migrate_jobs_canonicalize_urls(conn)

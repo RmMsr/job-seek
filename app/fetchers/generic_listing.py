@@ -1,18 +1,17 @@
 from __future__ import annotations
 import logging
-import httpx
 import openai
-from app.fetchers.base import Fetcher, RawJob
-from app.fetchers.content import has_enough_content, has_enough_text, extract_text
+from app.fetchers.base import RawJob
+from app.fetchers.content import has_enough_content, has_enough_text, extract_text, FetchError
 from app.fetchers.http import HttpFetcher
-from app.fetchers.links import extract_links
+from app.fetchers.listing_detect import detect_listing_page
 from app.fetchers.playwright_pool import render_html
-from app.ai.detect_listing import detect_listing
+from app.url_canon import canonicalize_url
 
 logger = logging.getLogger("job_seek")
 
-MAX_DETAIL_FETCHES = 50  # cap on new posting detail pages fetched per run
-MAX_PLAYWRIGHT_FALLBACKS = 10  # cap on Playwright renders per run, bounds worst-case run time
+MAX_DETAIL_FETCHES = 50        # cap on new posting detail pages fetched per run
+MAX_PLAYWRIGHT_FALLBACKS = 10  # cap on detail-page Playwright renders per run
 
 
 class GenericListingFetcher:
@@ -30,29 +29,24 @@ class GenericListingFetcher:
 
     def fetch(self) -> list[RawJob]:
         try:
-            resp = httpx.get(self._source["url"], timeout=30, follow_redirects=True)
-            if resp.status_code != 200:
-                logger.warning(
-                    "generic_listing fetch for '%s' got HTTP %d from %s",
-                    self._source["name"], resp.status_code, self._source["url"],
-                )
-                return []
-            html = resp.text
+            detection = detect_listing_page(self._client, self._model, self._source["url"])
+        except FetchError as exc:
+            logger.warning(
+                "generic_listing: could not fetch listing page %s for '%s': %s",
+                self._source["url"], self._source["name"], exc,
+            )
+            return []
         except Exception:
             logger.exception(
-                "generic_listing fetch for '%s' failed to fetch listing page %s",
+                "generic_listing: detection failed for '%s' (%s)",
                 self._source["name"], self._source["url"],
             )
             return []
 
-        if not has_enough_content(html):
-            rendered = render_html(self._source["url"])
-            if rendered and has_enough_content(rendered):
-                html = rendered
-
-        links = extract_links(html, self._source["url"])
-        result = detect_listing(self._client, self._model, links, self._source["url"])
-        job_links = [href for href in result["job_links"] if href not in self._known_urls]
+        job_links = [
+            c for h in detection.job_links
+            if (c := canonicalize_url(h)) not in self._known_urls
+        ]
 
         jobs: list[RawJob] = []
         playwright_fallbacks_used = 0

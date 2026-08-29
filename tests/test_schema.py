@@ -937,3 +937,38 @@ def test_inbox_items_table_exists():
     )
     row = conn.execute("SELECT * FROM inbox_items").fetchone()
     assert row["resolved_at"] is None
+
+
+def test_migrate_canonicalizes_job_urls_and_collapses_collisions(conn):
+    from app.db.schema import _migrate_jobs_canonicalize_urls
+
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    sid = conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('S', 'https://ex.com', 'generic_listing')"
+    ).lastrowid
+    conn.execute("INSERT INTO scenarios (id, name, description) VALUES (1, 'S', '')")
+    # row 1: already canonical; row 2: same job with tracking params (higher id -> dropped)
+    conn.execute("INSERT INTO jobs (id, source_id, url, title, company, raw_text) "
+                 "VALUES (1, ?, 'https://ex.com/j/9', '', '', 'x')", (sid,))
+    conn.execute("INSERT INTO jobs (id, source_id, url, title, company, raw_text) "
+                 "VALUES (2, ?, 'https://ex.com/j/9?refId=abc', '', '', 'x')", (sid,))
+    # row 3: only needs rewriting, no collision
+    conn.execute("INSERT INTO jobs (id, source_id, url, title, company, raw_text) "
+                 "VALUES (3, ?, 'https://ex.com/j/7?utm_source=x', '', '', 'x')", (sid,))
+    conn.execute("INSERT INTO job_scores (job_id, scenario_id, relevance_score, score_reasoning, scenario_version_hash) "
+                 "VALUES (2, 1, 0.5, 'r', 'h')")  # child of the row that will be deleted
+    conn.commit()
+
+    _migrate_jobs_canonicalize_urls(conn)
+
+    rows = conn.execute("SELECT id, url FROM jobs ORDER BY id").fetchall()
+    assert [(r["id"], r["url"]) for r in rows] == [
+        (1, "https://ex.com/j/9"),
+        (3, "https://ex.com/j/7"),
+    ]
+    assert conn.execute("SELECT COUNT(*) FROM job_scores").fetchone()[0] == 0
+
+    # idempotent
+    _migrate_jobs_canonicalize_urls(conn)
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2

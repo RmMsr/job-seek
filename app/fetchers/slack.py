@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 import httpx
 from app.fetchers.base import RawJob, is_recent
+from app.url_canon import canonicalize_url
 
 logger = logging.getLogger("job_seek")
 
@@ -174,13 +175,15 @@ class SlackFetcher:
                     )
                     stop = True
                     break
-                if job.url in self._known_urls:
+                canon = canonicalize_url(job.url)
+                if canon in self._known_urls:
                     logger.info(
                         "Slack extract for '%s': skipping message already known "
                         "(published_at=%s, url=%s)",
                         self._source["name"], job.published_at, job.url,
                     )
                     continue
+                job.url = canon
                 jobs.append(job)
                 if len(jobs) >= self.MAX_NEW_MESSAGES:
                     logger.info(

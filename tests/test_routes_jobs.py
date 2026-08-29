@@ -4,6 +4,7 @@ import httpx
 import pytest
 import respx
 from app.db import queries as q
+from app.fetchers.listing_detect import ListingDetection
 from app.pipeline import FetchResult
 from app.task_engine import execute_task
 
@@ -1637,6 +1638,14 @@ def _fake_run_add_job_lead(conn, client, model, source_id, url, raw_text):
 _NOT_A_LISTING = {"is_listing": False, "job_links": []}
 
 
+def _not_listing(html=_JOB_POSTING_HTML):
+    return ListingDetection(html, False, [], False)
+
+
+def _listing(job_links, html="<html><body>listing</body></html>"):
+    return ListingDetection(html, True, list(job_links), False)
+
+
 def _run_add_by_url(conn, url, filter_ctx=None, status=None, content_type=None):
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
         "url": url, "status": status, "content_type": content_type, "filter_ctx": filter_ctx or {},
@@ -1663,11 +1672,8 @@ def test_add_by_url_enqueues_task(client, conn):
 
 @respx.mock
 def test_add_job_by_url_success_inserts_job_and_streams_progress(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     assert "Classified as job_posting" in fetched["log"]
     jobs = q.get_jobs(conn)
@@ -1703,11 +1709,8 @@ def _fake_run_add_job_irrelevant(conn, client, model, source_id, url, raw_text):
 
 @respx.mock
 def test_add_job_by_url_job_posting_passed_gate_shows_notice(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_passed_gate), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     job = q.get_job_by_url(conn, "http://example.com/job/1")
     assert fetched["result"]["notices"]
@@ -1716,11 +1719,8 @@ def test_add_job_by_url_job_posting_passed_gate_shows_notice(conn):
 
 @respx.mock
 def test_add_job_by_url_error_shows_persistent_notice(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_error), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     job = q.get_job_by_url(conn, "http://example.com/job/1")
     assert job["content_type"] == "error"
@@ -1731,11 +1731,8 @@ def test_add_job_by_url_error_shows_persistent_notice(conn):
 
 @respx.mock
 def test_add_job_by_url_irrelevant_shows_discarded_notice(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_irrelevant), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     assert q.get_job_by_url(conn, "http://example.com/job/1") is None
     assert fetched["result"]["notices"]
@@ -1744,11 +1741,8 @@ def test_add_job_by_url_irrelevant_shows_discarded_notice(conn):
 
 @respx.mock
 def test_add_job_by_url_lead_shows_persistent_notice_with_link(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job_lead), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     assert fetched["result"]["notices"]
     job = q.get_job_by_url(conn, "http://example.com/job/1")
@@ -1758,11 +1752,8 @@ def test_add_job_by_url_lead_shows_persistent_notice_with_link(conn):
 
 @respx.mock
 def test_add_job_by_url_stream_ends_with_single_html_chunk(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML)
-    )
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
-         patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING):
+         patch("app.routes.jobs.detect_listing_page", return_value=_not_listing()):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
     # Only one HTML chunk should come back — the target-mode swap in base.html's
     # polling JS uses only the *last* html_chunks entry as the replacement innerHTML, so a
@@ -1867,10 +1858,7 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(conn):
         "<noscript>You need to enable JavaScript to run this app.</noscript>"
         "</body></html>"
     )
-    respx.get("http://example.com/js-app").mock(return_value=httpx.Response(200, text=js_shell_html))
-
-    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
-         patch("app.routes.jobs.render_html", return_value=None):
+    with patch("app.routes.jobs.detect_listing_page", return_value=_not_listing(html=js_shell_html)):
         fetched = _run_add_by_url(conn, "http://example.com/js-app")
 
     notice = fetched["result"]["notices"][0]
@@ -1885,22 +1873,14 @@ def test_add_job_by_url_js_only_page_shows_no_content_notice(conn):
     assert jobs[0]["url"] == "http://example.com/js-app"
 
 
-@respx.mock
 def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(conn):
-    js_shell_html = (
-        "<html><body>"
-        "<h1>Trener Jobs</h1>"
-        "<noscript>You need to enable JavaScript to run this app.</noscript>"
-        "</body></html>"
-    )
-    respx.get("http://example.com/js-app").mock(return_value=httpx.Response(200, text=js_shell_html))
-
-    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
-         patch("app.routes.jobs.render_html", return_value=_JOB_POSTING_HTML) as mock_render, \
+    # The listing-detect helper's render escalation is exercised in
+    # tests/test_listing_detect.py; here we only check the job-add outcome when
+    # the helper hands back rich content.
+    with patch("app.routes.jobs.detect_listing_page", return_value=_not_listing(html=_JOB_POSTING_HTML)), \
          patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
         fetched = _run_add_by_url(conn, "http://example.com/js-app")
 
-    mock_render.assert_called_once_with("http://example.com/js-app")
     assert "Classified as job_posting" in fetched["log"]
     jobs = q.get_jobs(conn)
     assert len(jobs) == 1
@@ -1908,18 +1888,11 @@ def test_add_job_by_url_js_only_page_playwright_fallback_succeeds(conn):
     assert jobs[0]["url"] == "http://example.com/js-app"
 
 
-@respx.mock
 def test_add_job_by_url_thin_page_not_rendered_when_already_rich(conn):
-    # Plain HTML already clears the content threshold — render_html must not
-    # be called at all, since that's the whole point of trying cheap HTTP first.
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(200, text=_JOB_POSTING_HTML))
-
-    with patch("app.routes.jobs.detect_listing", return_value=_NOT_A_LISTING), \
-         patch("app.routes.jobs.render_html") as mock_render, \
+    with patch("app.routes.jobs.detect_listing_page", return_value=_not_listing(html=_JOB_POSTING_HTML)), \
          patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
-    mock_render.assert_not_called()
     assert fetched["status"] == "done"
 
 
@@ -1929,12 +1902,8 @@ _IS_A_LISTING = {
 }
 
 
-@respx.mock
 def test_add_job_by_url_listing_detected_shows_confirm_panel(conn):
-    respx.get("https://careers.example.com/jobs").mock(
-        return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
-    )
-    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(_IS_A_LISTING["job_links"])):
         fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
 
     html = fetched["result"]["html_chunks"][0]
@@ -1948,14 +1917,10 @@ def test_add_job_by_url_listing_detected_shows_confirm_panel(conn):
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []
 
 
-@respx.mock
 def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(conn):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=_JOB_POSTING_HTML.replace("</body>", "<a href='/apply'>Apply</a></body>"))
-    )
-    one_link_listing = {"is_listing": True, "job_links": ["http://example.com/job/1"]}
     with patch("app.routes.jobs.run_add_job", side_effect=_fake_run_add_job), \
-         patch("app.routes.jobs.detect_listing", return_value=one_link_listing):
+         patch("app.routes.jobs.detect_listing_page",
+               return_value=_listing(["http://example.com/job/1"], html=_JOB_POSTING_HTML)):
         fetched = _run_add_by_url(conn, "http://example.com/job/1")
 
     assert "Classified as job_posting" in fetched["log"]
@@ -1992,6 +1957,18 @@ def test_add_listing_source_creates_source_and_executes_fetch(conn):
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"]
     assert len(sources) == 1
     assert sources[0]["name"] == "careers.example.com"
+
+
+def test_add_listing_source_resolves_open_listing_detected_prompt(conn):
+    url = "https://careers.example.com/jobs"
+    job_links = ["https://careers.example.com/jobs/1", "https://careers.example.com/jobs/2"]
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(job_links)):
+        _run_add_by_url(conn, url)
+    assert [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"]
+
+    with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
+        _run_add_listing_source(conn, url, "careers.example.com", "generic_listing")
+    assert not [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"]
 
 
 def test_add_listing_source_rejects_url_already_tracked_as_source(conn):
@@ -2058,37 +2035,23 @@ def test_add_listing_source_rejects_invalid_fetcher_type(client, conn):
     assert q.get_sources(conn) == []
 
 
-@respx.mock
 def test_add_job_by_url_listing_confirm_panel_carries_detected_fetcher_type(conn):
-    respx.get("https://careers.example.com/jobs").mock(
-        return_value=httpx.Response(200, text="<html><body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
-    )
-    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING):
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(_IS_A_LISTING["job_links"])):
         fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
     assert 'id="listing-fetcher-type" value="generic_listing"' in fetched["result"]["html_chunks"][0]
 
 
-@respx.mock
 def test_add_job_by_url_listing_confirm_panel_detects_finn_no(conn):
-    respx.get("https://www.finn.no/job/search").mock(
-        return_value=httpx.Response(200, text="<html><body><a href='/job/1'>A</a><a href='/job/2'>B</a></body></html>")
-    )
-    finn_listing = {"is_listing": True, "job_links": ["https://www.finn.no/job/1", "https://www.finn.no/job/2"]}
-    with patch("app.routes.jobs.detect_listing", return_value=finn_listing):
+    finn_links = ["https://www.finn.no/job/1", "https://www.finn.no/job/2"]
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(finn_links)):
         fetched = _run_add_by_url(conn, "https://www.finn.no/job/search")
     assert 'id="listing-fetcher-type" value="finn_listing"' in fetched["result"]["html_chunks"][0]
 
 
-@respx.mock
 def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_title(conn):
-    respx.get("https://careers.example.com/jobs").mock(
-        return_value=httpx.Response(
-            200,
-            text="<html><head><title>Frontend Developer Jobs in Oslo | Careers</title></head>"
-                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
-        )
-    )
-    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
+    html = ("<html><head><title>Frontend Developer Jobs in Oslo | Careers</title></head>"
+            "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(_IS_A_LISTING["job_links"], html=html)), \
          patch("app.routes.jobs.generate_source_name", return_value="careers/frontend-oslo") as mock_gen:
         fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
     mock_gen.assert_called_once_with(
@@ -2097,16 +2060,10 @@ def test_add_job_by_url_listing_confirm_panel_uses_generated_name_when_page_has_
     assert 'id="listing-name" value="careers/frontend-oslo"' in fetched["result"]["html_chunks"][0]
 
 
-@respx.mock
 def test_add_job_by_url_listing_confirm_panel_falls_back_to_domain_when_name_generation_fails(conn):
-    respx.get("https://careers.example.com/jobs").mock(
-        return_value=httpx.Response(
-            200,
-            text="<html><head><title>Frontend Developer Jobs</title></head>"
-                 "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>",
-        )
-    )
-    with patch("app.routes.jobs.detect_listing", return_value=_IS_A_LISTING), \
+    html = ("<html><head><title>Frontend Developer Jobs</title></head>"
+            "<body><a href='/jobs/1'>A</a><a href='/jobs/2'>B</a></body></html>")
+    with patch("app.routes.jobs.detect_listing_page", return_value=_listing(_IS_A_LISTING["job_links"], html=html)), \
          patch("app.routes.jobs.generate_source_name", return_value=None):
         fetched = _run_add_by_url(conn, "https://careers.example.com/jobs")
     assert 'id="listing-name" value="careers.example.com"' in fetched["result"]["html_chunks"][0]

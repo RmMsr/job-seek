@@ -1,6 +1,7 @@
 import sqlite3
 import threading
 import time
+from unittest.mock import patch
 import pytest
 from app.db.schema import init_db
 from app.db import queries as q
@@ -40,6 +41,39 @@ def test_execute_task_runs_generator_and_stores_log_and_result(conn):
     assert fetched["log"] == "step one\nstep two\n"
     assert fetched["result"] == {"html_chunks": ["<p>done</p>"]}
     del te.TASK_KINDS["test_execute_success"]
+
+
+def test_execute_task_creates_one_browser_missing_inbox_item(conn):
+    @te.register_task_kind("test_browser_missing")
+    def fn(conn, client, model, config, params):
+        return {}
+        yield  # pragma: no cover
+
+    with patch("app.task_engine.browser_install_missing", return_value=True):
+        for _ in range(2):
+            task = q.enqueue_task(conn, kind="test_browser_missing", params={})
+            te.execute_task(conn, None, None, None, task)
+
+    items = [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "browser_missing"]
+    assert len(items) == 1
+    assert "playwright install" in items[0]["message"]
+    del te.TASK_KINDS["test_browser_missing"]
+
+
+def test_execute_task_resolves_browser_missing_inbox_when_recovered(conn):
+    q.create_inbox_item(conn, kind="browser_missing", message="stale", link="/sources")
+
+    @te.register_task_kind("test_browser_ok")
+    def fn(conn, client, model, config, params):
+        return {}
+        yield  # pragma: no cover
+
+    task = q.enqueue_task(conn, kind="test_browser_ok", params={})
+    with patch("app.task_engine.browser_install_missing", return_value=False):
+        te.execute_task(conn, None, None, None, task)
+
+    assert not [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "browser_missing"]
+    del te.TASK_KINDS["test_browser_ok"]
 
 
 def test_execute_task_marks_failed_on_exception(conn):

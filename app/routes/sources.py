@@ -7,12 +7,10 @@ from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.fetchers.slack import SlackFetcher
-from app.fetchers.links import extract_links
-from app.fetchers.content import has_enough_content, fetch_url_html, extract_page_title, FetchError
-from app.fetchers.playwright_pool import render_html
+from app.fetchers.content import extract_page_title, FetchError
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
-from app.ai.detect_listing import detect_listing
 from app.ai.generate_source_name import generate_source_name
+from app.fetchers.listing_detect import detect_listing_page
 from app.pipeline import run_fetch
 from app.task_engine import register_task_kind
 from app.template_env import templates
@@ -103,6 +101,7 @@ def _task_source_detect(conn, client, model, config, params):
     url = params["url"]
     already_tracked = check_already_tracked_notice_data(conn, url)
     if already_tracked is not None:
+        q.resolve_source_prompts_for_url(conn, url)
         return {"notices": [already_tracked], "html_chunks": []}
 
     default_name = urlsplit(url).netloc
@@ -110,22 +109,16 @@ def _task_source_detect(conn, client, model, config, params):
     if fetcher_type is None:
         yield "Checking the page..."
         try:
-            html = fetch_url_html(url)
+            detection = detect_listing_page(client, model, url)
         except FetchError:
             fetcher_type = "generic_listing"
         else:
-            if not has_enough_content(html):
-                rendered = render_html(url)
-                if rendered and has_enough_content(rendered):
-                    html = rendered
-            page_title = extract_page_title(html)
+            page_title = extract_page_title(detection.html)
             if page_title:
                 generated_name = generate_source_name(client, model, default_name, page_title)
                 if generated_name:
                     default_name = generated_name
-            links = extract_links(html, url)
-            detection = detect_listing(client, model, links, url)
-            if detection["is_listing"] and len(detection["job_links"]) >= 2:
+            if detection.is_listing and len(detection.job_links) >= 2:
                 fetcher_type = "generic_listing"
 
     if fetcher_type is not None:
@@ -136,6 +129,9 @@ def _task_source_detect(conn, client, model, config, params):
         panel = templates.get_template("sources/_detect_mismatch.html").render(
             request=None, url=url, name=default_name,
         )
+    # Clear any earlier prompt for this same URL — a re-detect supersedes it,
+    # and execute_task will create a fresh follow-up item for this run.
+    q.resolve_source_prompts_for_url(conn, url)
     return {
         "notices": [], "html_chunks": [panel],
         "needs_action": True,
@@ -147,6 +143,7 @@ def _task_source_detect(conn, client, model, config, params):
 @register_task_kind("source_confirm")
 def _task_source_confirm(conn, client, model, config, params):
     url, name, fetcher_type = params["url"], params["name"], params["fetcher_type"]
+    q.resolve_source_prompts_for_url(conn, url)
     already_tracked = check_already_tracked_notice_data(conn, url)
     if already_tracked is not None:
         table = templates.get_template("sources/_table.html").render(request=None, **_sources_context(conn))

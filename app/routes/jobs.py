@@ -6,12 +6,10 @@ from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
-from app.fetchers.links import extract_links
 from app.fetchers.content import (
-    has_enough_content, FetchError, NoContentError, fetch_url_html, extract_text_or_raise, extract_page_title,
+    FetchError, NoContentError, extract_text_or_raise, extract_page_title,
 )
-from app.fetchers.playwright_pool import render_html
-from app.ai.detect_listing import detect_listing
+from app.fetchers.listing_detect import detect_listing_page
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.generate_source_name import generate_source_name
 from app.routes.sources import check_already_tracked_notice_data
@@ -615,7 +613,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
             notices.append(already_tracked)
         else:
             try:
-                html = fetch_url_html(url)
+                detection = detect_listing_page(client, model, url)
             except FetchError as exc:
                 _insert_error_job(conn, url, f"Failed to fetch: {exc}")
                 notices.append({
@@ -625,13 +623,8 @@ def _task_job_add_by_url(conn, client, model, config, params):
                     ),
                 })
             else:
-                if not has_enough_content(html):
-                    rendered = render_html(url)
-                    if rendered and has_enough_content(rendered):
-                        html = rendered
-                links = extract_links(html, url)
-                detection = detect_listing(client, model, links, url)
-                if detection["is_listing"] and len(detection["job_links"]) >= 2:
+                html = detection.html
+                if detection.is_listing and len(detection.job_links) >= 2:
                     domain = urlsplit(url).netloc
                     default_name = domain
                     page_title = extract_page_title(html)
@@ -642,7 +635,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
                     panel_context = {
                         "request": None, "url": url,
                         "fetcher_type": classify_known_source(url) or "generic_listing",
-                        "link_count": len(detection["job_links"]), "domain": domain,
+                        "link_count": len(detection.job_links), "domain": domain,
                         "default_name": default_name,
                     }
                     panel_context.update(params.get("filter_ctx", {}))
@@ -705,6 +698,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
                                 ),
                             })
 
+    q.resolve_source_prompts_for_url(conn, url)
     html_chunks.append(
         templates.get_template("jobs/_content.html").render(
             request=None, **_content_context(conn, status, content_type)
@@ -720,6 +714,7 @@ def _task_job_add_listing_source(conn, client, model, config, params):
     content_type = params.get("content_type")
     notices = []
 
+    q.resolve_source_prompts_for_url(conn, url)
     already_tracked = check_already_tracked_notice_data(conn, url)
     if already_tracked is not None:
         notices.append(already_tracked)
