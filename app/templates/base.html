@@ -1050,6 +1050,9 @@ document.body.addEventListener('change', function (e) {
 document.addEventListener('click', function (e) {
   var permalink = e.target.closest("a.job-link-icon[data-permalink]");
   if (!permalink) return;
+  // Modified clicks (Ctrl/Cmd/Shift/Alt, middle button) keep their native
+  // behaviour — open in a new tab/window — instead of copying.
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
   var full = new URL(permalink.getAttribute("href"), window.location.origin).href;
