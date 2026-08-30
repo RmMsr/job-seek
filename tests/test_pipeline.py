@@ -277,6 +277,14 @@ def test_make_fetcher_dispatches_finn_listing(conn):
     assert isinstance(fetcher, FinnListingFetcher)
 
 
+def test_make_fetcher_builds_eawork_listing(conn):
+    from app.fetchers.eawork import EaworkListingFetcher
+
+    source = {"id": 1, "name": "80k", "url": "https://jobs.80000hours.org/", "fetcher_type": "eawork_listing"}
+    fetcher = _make_fetcher(source, "profile-dir", conn, client=None, model=None)
+    assert isinstance(fetcher, EaworkListingFetcher)
+
+
 def test_make_fetcher_finn_listing_passes_known_urls(conn):
     sid = q.insert_source(conn, "test", "http://example.com", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://known/1", title="T", company="C", raw_text="r")

@@ -972,3 +972,37 @@ def test_migrate_canonicalizes_job_urls_and_collapses_collisions(conn):
     # idempotent
     _migrate_jobs_canonicalize_urls(conn)
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
+def test_init_db_accepts_eawork_listing_fetcher_type(conn):
+    init_db(conn)
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) "
+        "VALUES ('80k', 'https://jobs.80000hours.org/', 'eawork_listing')"
+    )  # must not raise
+
+
+def test_init_db_flips_existing_80k_generic_row_to_eawork(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('slack', 'finn_listing', 'manual', 'generic_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            d_cookie TEXT NOT NULL DEFAULT ''
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES "
+        "('80k', 'https://jobs.80000hours.org/?refinementList%5Btags_area%5D%5B0%5D=Technical', 'generic_listing')"
+    )
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('other', 'https://x.test/', 'generic_listing')"
+    )
+    init_db(conn)
+    rows = dict(conn.execute("SELECT name, fetcher_type FROM sources").fetchall())
+    assert rows["80k"] == "eawork_listing"
+    assert rows["other"] == "generic_listing"

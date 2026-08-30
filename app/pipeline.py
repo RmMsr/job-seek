@@ -13,6 +13,7 @@ from app.ai.assess_fit import assess_fit
 from app.fetchers.base import RawJob
 from app.fetchers.slack import SlackFetcher, SlackAuthRequired
 from app.fetchers.finn import FinnListingFetcher
+from app.fetchers.eawork import EaworkListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
 from app.scenario_version import compute_version_hash, compute_profile_hash
 from app.url_canon import canonicalize_url
@@ -41,6 +42,8 @@ def _make_fetcher(
         return SlackFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "finn_listing":
         return FinnListingFetcher(source, known_urls=q.get_all_job_urls(conn))
+    if ft == "eawork_listing":
+        return EaworkListingFetcher(source, known_urls=q.get_all_job_urls(conn))
     if ft == "generic_listing":
         return GenericListingFetcher(source, client, model, known_urls=q.get_all_job_urls(conn))
     raise ValueError(f"Unsupported fetcher_type: {ft!r}")

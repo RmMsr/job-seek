@@ -1,3 +1,5 @@
+import pytest
+
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 
 
@@ -27,4 +29,22 @@ def test_classify_known_source_does_not_match_lookalike_host():
 
 
 def test_detectable_fetcher_types_constant():
-    assert DETECTABLE_FETCHER_TYPES == {"slack", "finn_listing", "generic_listing"}
+    assert DETECTABLE_FETCHER_TYPES == {
+        "slack",
+        "finn_listing",
+        "generic_listing",
+        "eawork_listing",
+    }
+
+
+@pytest.mark.parametrize("url", [
+    "https://jobs.80000hours.org/?refinementList%5Btags_area%5D%5B0%5D=Technical",
+    "https://eawork.org/",
+    "https://www.eawork.org/some/path",
+])
+def test_classify_known_source_recognizes_eawork(url):
+    assert classify_known_source(url) == "eawork_listing"
+
+
+def test_eawork_listing_is_detectable():
+    assert "eawork_listing" in DETECTABLE_FETCHER_TYPES
