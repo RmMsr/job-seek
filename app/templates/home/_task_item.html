@@ -2,6 +2,7 @@
 <li class="task-completed">
   <input type="checkbox" checked disabled>
   {{ item.message }}
+  <span class="task-age">{{ item.created_at | age }}</span>
 </li>
 {% else %}
 <li id="inbox-item-{{ item.id }}">
@@ -9,5 +10,6 @@
     hx-target="#inbox-item-{{ item.id }}" hx-swap="outerHTML"
     aria-label="Mark done">
   <a href="{{ item.link }}">{{ item.message }}</a>
+  <span class="task-age">{{ item.created_at | age }}</span>
 </li>
 {% endif %}

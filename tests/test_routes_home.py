@@ -128,3 +128,11 @@ def test_home_omits_resolved_task_older_than_24h(client, conn):
     conn.execute("UPDATE inbox_items SET resolved_at = datetime('now', '-25 hours') WHERE id = ?", (item_id,))
     resp = client.get("/")
     assert "a day-old completed item" not in resp.text
+
+
+def test_home_pending_task_shows_age(client, conn):
+    _use_test_db(conn)
+    q.create_inbox_item(conn, kind="task_followup", message="decide me", link="/x")
+    resp = client.get("/")
+    assert 'class="task-age"' in resp.text
+    assert "just now" in resp.text
