@@ -552,6 +552,30 @@
           showNotice("<p>" + escapeHtml(task.error || "Failed") + "</p>", "warning");
           return;
         }
+        // The standalone action-needed page has no in-page target to swap into.
+        // The action succeeded, so leave: clear the follow-up item and go back
+        // where we came from, reloaded.
+        if (resumePage) {
+          var leave = function () {
+            var dest = "/";
+            var ref = document.referrer;
+            if (ref) {
+              try {
+                var u = new URL(ref);
+                if (u.origin === window.location.origin && u.pathname !== window.location.pathname) {
+                  dest = ref;
+                }
+              } catch (e) {}
+            }
+            window.location.assign(dest);
+          };
+          if (resumeInboxItemId) {
+            fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" }).then(leave, leave);
+          } else {
+            leave();
+          }
+          return;
+        }
         var result = task.result || {};
         (result.notices || []).forEach(function (n) { showNotice(n.html, n.level); });
         // Where the result actually lands: a `needs_action` panel goes to the
@@ -596,9 +620,6 @@
         // attribute (e.g. profile/_editor.html's textarea-lock safety net)
         // sees the real post-swap DOM state, not a still-empty target.
         delete w.el.dataset.progressRunning;
-        if (resumeInboxItemId) {
-          fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" });
-        }
       }
 
       function pollWatched(taskId) {
