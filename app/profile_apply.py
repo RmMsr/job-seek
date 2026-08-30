@@ -14,7 +14,7 @@ def _find_bullet_line(lines: list[str], text: str) -> int | None:
 def _find_section_bounds(lines: list[str], section: str) -> tuple[int, int] | None:
     needle = section.strip().casefold()
     for i, line in enumerate(lines):
-        if line.startswith("## ") and line[3:].strip().casefold() == needle:
+        if line.startswith("#") and line.lstrip("#").strip().casefold() == needle:
             j = i + 1
             while j < len(lines) and not lines[j].startswith("#"):
                 j += 1
@@ -101,11 +101,20 @@ def apply_profile_proposals(profile_text: str, resolved: list[dict]) -> str:
                     insert_at = end
                     while insert_at > start + 1 and lines[insert_at - 1].strip() == "":
                         insert_at -= 1
+                if insert_at == start + 1:
+                    # Section has no content yet — keep a blank line between the
+                    # heading and the new bullet instead of gluing them.
+                    lines.insert(insert_at, "")
+                    insert_at += 1
                 lines.insert(insert_at, _format_bullet(r["text"]))
+                # Never leave the new bullet glued to the next section's heading.
+                if insert_at + 1 < len(lines) and lines[insert_at + 1].startswith("#"):
+                    lines.insert(insert_at + 1, "")
             else:
                 if lines and lines[-1].strip() != "":
                     lines.append("")
                 lines.append(f"## {r['section']}")
+                lines.append("")
                 lines.append(_format_bullet(r["text"]))
     result = "\n".join(lines)
     if profile_text.endswith("\n"):

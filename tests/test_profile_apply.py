@@ -143,6 +143,52 @@ def test_apply_add_inserts_before_trailing_blank_line_not_after():
     assert lines[go_idx + 3] == "## Methodologies"
 
 
+def test_apply_add_to_empty_non_final_section_keeps_blank_line_after_heading():
+    # An existing "## heading" whose section has no content yet — just a blank
+    # line before the next heading. The new bullet must not be glued directly
+    # onto the heading; a blank line stays between them (and one before the
+    # next section), matching the file's documented format.
+    profile = "## Alpha\n\n## Beta\n\n- z\n"
+    resolved = [{"action": "add", "section": "Alpha", "text": "NEW", "target": None}]
+    result = apply_profile_proposals(profile, resolved)
+    assert result == "## Alpha\n\n- NEW\n\n## Beta\n\n- z\n"
+
+
+def test_apply_add_to_empty_final_section_keeps_blank_line_after_heading():
+    profile = "## Beta\n\n- z\n\n## Alpha\n"
+    resolved = [{"action": "add", "section": "Alpha", "text": "NEW", "target": None}]
+    result = apply_profile_proposals(profile, resolved)
+    assert result == "## Beta\n\n- z\n\n## Alpha\n\n- NEW\n"
+
+
+def test_apply_add_new_section_keeps_blank_line_between_heading_and_bullet():
+    resolved = [{"action": "add", "section": "New Section", "text": "Something", "target": None}]
+    result = apply_profile_proposals(_PROFILE, resolved)
+    lines = result.splitlines()
+    new_idx = lines.index("## New Section")
+    assert lines[new_idx + 1] == ""
+    assert lines[new_idx + 2] == "- Something"
+
+
+def test_apply_add_finds_lower_level_heading_instead_of_duplicating_section():
+    # "### Sub" is a real heading — resolve it, don't append a duplicate
+    # "## Sub" section at the end of the file.
+    profile = "## Top\n\n- a\n\n### Sub\n\n- x\n"
+    resolved = [{"action": "add", "section": "Sub", "text": "y", "target": None}]
+    result = apply_profile_proposals(profile, resolved)
+    assert result == "## Top\n\n- a\n\n### Sub\n\n- x\n- y\n"
+
+
+def test_apply_add_after_prose_keeps_blank_line_before_next_heading():
+    # Appending after a bare prose line is intentional (no blank line above the
+    # new bullet), but the new bullet must not end up glued to the next
+    # section's heading — a blank line separates them.
+    profile = "## Alpha\n\nSome prose.\n## Beta\n\n- z\n"
+    resolved = [{"action": "add", "section": "Alpha", "text": "NEW", "target": None}]
+    result = apply_profile_proposals(profile, resolved)
+    assert result == "## Alpha\n\nSome prose.\n- NEW\n\n## Beta\n\n- z\n"
+
+
 def test_apply_add_strips_leading_dash_from_text_to_avoid_double_dash():
     resolved = [{"action": "add", "section": "Technologies", "text": "- Rust", "target": None}]
     result = apply_profile_proposals(_PROFILE, resolved)
@@ -163,7 +209,8 @@ def test_apply_add_creates_new_section_at_end():
     assert "## New Section" in result
     lines = result.splitlines()
     new_idx = lines.index("## New Section")
-    assert lines[new_idx + 1] == "- Something"
+    assert lines[new_idx + 1] == ""
+    assert lines[new_idx + 2] == "- Something"
 
 
 def test_apply_remove_deletes_matching_bullet():
