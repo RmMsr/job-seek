@@ -8,6 +8,6 @@ Base before implementation: 0c3a499
 - [x] Task 3: human task labels  (commits 32c248b..00204ad)
 - [x] Task 4: task log page reorg  (commits ef2bdab..a6bb3b7)
 - [x] Task 5: dismiss route + action-needed page structure  (commits 1e1a08c..e9c6bad)
-- [ ] Task 6: action-needed actions navigate away
+- [x] Task 6: action-needed actions navigate away  (commits e985569..6dbb373)
 - [ ] Task 7: restructure the four resume panels
 - [ ] Task 8: job-card permalink click-to-copy
