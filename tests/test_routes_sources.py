@@ -432,7 +432,7 @@ def test_detect_source_confirm_panel_has_name_label(conn):
     mock_fetch.assert_not_called()
     html = fetched["result"]["html_chunks"][0]
     assert '<label for="detect-name"' in html
-    assert ">Name:</label>" in html
+    assert ">Name</label>" in html
 
 
 def test_detect_source_confirm_panel_has_cancel_link(conn):
@@ -463,7 +463,8 @@ def test_detect_source_mismatch_panel_stacks_error_above_action_buttons(conn):
     with patch("app.routes.sources.detect_listing_page", return_value=_not_listing()):
         fetched = _run_detect(conn, "https://example.com/job/1")
     html = fetched["result"]["html_chunks"][0]
-    assert "flex-direction:column" in html
+    assert 'class="resume-panel"' in html
+    assert 'class="resume-panel-actions"' in html
     assert html.index("not a listing of multiple jobs") < html.index('data-progress-url="/jobs/add-by-url"')
 
 
@@ -676,13 +677,14 @@ def test_add_form_targets_dedicated_result_container(client, conn):
     assert 'data-progress-target="#add-source-panel"' not in html
 
 
-def test_detect_confirm_panel_has_flex_wrapper(conn):
+def test_detect_confirm_panel_uses_resume_panel_structure(conn):
     with patch("app.routes.sources.detect_listing_page") as mock_fetch:
         fetched = _run_detect(conn, _SLACK_URL)
         mock_fetch.assert_not_called()
     html = fetched["result"]["html_chunks"][0]
     assert 'id="detect-confirm"' in html
-    assert "flex-wrap:wrap" in html
+    assert 'class="resume-panel"' in html
+    assert 'class="resume-panel-actions"' in html
 
 
 def test_rewrite_panel_from_sources_targets_result_container(conn):

@@ -78,10 +78,32 @@ def test_tasks_active_falls_back_to_kind_when_source_missing(client, conn):
     assert resp.json()["tasks"][0]["label"] == "fetch source"
 
 
-def test_tasks_active_labels_other_kinds_by_name(client, conn):
+def test_task_label_job_reset_names_the_job(client, conn):
+    src = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    job_id = q.insert_job(conn, source_id=src, url="https://e.com/j", title="Backend Engineer", company="", raw_text="")
+    q.enqueue_task(conn, kind="job_reset", params={"job_id": job_id})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "Reset job: Backend Engineer"
+
+
+def test_task_label_job_reset_without_job_falls_back(client, conn):
     q.enqueue_task(conn, kind="job_reset", params={})
     resp = client.get("/tasks/active")
-    assert resp.json()["tasks"][0]["label"] == "job reset"
+    assert resp.json()["tasks"][0]["label"] == "Reset job"
+
+
+def test_task_label_add_listing_source_names_it(client, conn):
+    q.enqueue_task(conn, kind="job_add_listing_source",
+                   params={"url": "https://x.com", "name": "Example Board", "fetcher_type": "generic_listing"})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "Add listing source: Example Board"
+
+
+def test_task_label_source_confirm_names_it(client, conn):
+    q.enqueue_task(conn, kind="source_confirm",
+                   params={"url": "https://x.com", "name": "Careers X", "fetcher_type": "generic_listing"})
+    resp = client.get("/tasks/active")
+    assert resp.json()["tasks"][0]["label"] == "Add source: Careers X"
 
 
 def test_task_log_page_renders_lines_and_status(client, conn):
@@ -90,10 +112,19 @@ def test_task_log_page_renders_lines_and_status(client, conn):
     q.append_task_log(conn, task["id"], "second line")
     resp = client.get(f"/tasks/{task['id']}/log")
     assert resp.status_code == 200
-    assert "<h1>Task: fetch source</h1>" in resp.text
+    assert "<h1>fetch source</h1>" in resp.text
+    assert 'class="task-meta"' in resp.text
     assert "first line" in resp.text
     assert "second line" in resp.text
     assert "queued" in resp.text
+
+
+def test_task_log_page_title_names_the_job(client, conn):
+    src = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    job_id = q.insert_job(conn, source_id=src, url="https://e.com/j", title="Data Lead", company="", raw_text="")
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": {}})
+    resp = client.get(f"/tasks/{task['id']}/log")
+    assert "<h1>Re-evaluate job: Data Lead</h1>" in resp.text
 
 
 def test_task_log_page_404_for_missing(client, conn):
@@ -125,6 +156,32 @@ def test_task_resume_omits_inbox_item_id_when_absent(client, conn):
     # getAttribute() string argument) on every page — check for the actual
     # HTML attribute syntax, not just the substring.
     assert 'data-inbox-item-id="' not in resp.text
+
+
+def test_task_dismiss_resolves_inbox_item_and_redirects_to_start(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {"resume_html": "<p>x</p>"})
+    q.create_inbox_item(conn, kind="task_followup", message="x", link="/y", task_id=task["id"])
+    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+    assert q.count_unresolved_inbox_items(conn) == 0
+
+
+def test_task_dismiss_without_inbox_item_still_redirects(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+
+
+def test_task_resume_shows_age_and_dismiss_form(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
+    resp = client.get(f"/tasks/{task['id']}/resume")
+    assert f'action="/tasks/{task["id"]}/dismiss"' in resp.text
+    assert 'class="task-age"' in resp.text
+    assert ">Dismiss</button>" in resp.text
 
 
 def test_task_resume_404_without_resume_html(client, conn):

@@ -205,12 +205,18 @@
     dl.job-tags dt, dl.job-tags dd { margin:0; }
 
     .job-row-content { flex: 1 1 auto; min-width: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; }
-    .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 1.6rem; }
+    .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 0; }
     .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
     .job-company { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
     .job-age { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
-    .job-link-icon { text-decoration:none; font-size:0.85em; padding: 0.2rem 0.35rem; line-height: 1; border-radius: 4px; color: var(--text-muted); flex: none; }
+    .job-link-icon { position: absolute; top: 0.3rem; right: 0.5rem; z-index: 3;
+      display: inline-flex; align-items: center; height: 1.85rem;
+      text-decoration: none; font-size: 0.95rem; line-height: 1;
+      padding: 0 0.3rem; border-radius: 4px; color: var(--text-muted); }
+    .job-row-content:has(.job-select-wrap) .job-link-icon,
+    .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
     .job-link-icon:hover { background: var(--ground); color: var(--accent); }
+    .job-link-icon--copied { color: var(--accent); }
     .job-hook { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
 
     .job-row-expanded { display: block; padding: 0 1.1rem 1rem; }
@@ -218,7 +224,7 @@
        clickable (collapse) area covers that whitespace too, instead of
        leaving an inert gap above it. */
     .job-detail-header { cursor: pointer; margin: 0 -1.1rem; padding: 1rem 1.1rem 0; }
-    .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 1.6rem; }
+    .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 0; }
     .job-detail-title { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; margin: 0; flex: 1 1 auto; min-width: 0; }
     .job-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.35rem; font-size: 0.9rem; color: var(--text-secondary); }
     .job-detail-meta a { color: var(--text-secondary); }
@@ -362,6 +368,7 @@
     .scenario-feedback-block-target-highlight { animation: target-highlight 2.5s ease-out; }
 
     .add-panel { margin-bottom: 1.5rem; }
+    [data-add-result]:not(:empty) { margin-bottom: 1.5rem; }
     .add-panel-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .add-panel-body { display: grid; grid-template-rows: 0fr; overflow: hidden; transition: grid-template-rows 0.25s ease; }
     .add-panel-open .add-panel-body { grid-template-rows: 1fr; }
@@ -385,6 +392,28 @@
       line-height: 1; color: inherit; opacity: 0.6; padding: 0 0.15rem; }
     .notice-dismiss:hover { opacity: 1; }
     .task-completed { text-decoration: line-through; color: #888; }
+    .task-age { margin-left: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+    .task-meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; margin: 0 0 1.25rem; }
+    .task-meta dt { color: var(--text-muted); }
+    .task-meta dd { margin: 0; }
+    .task-log { background: var(--ground); border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.75rem 1rem; white-space: pre-wrap; overflow-x: auto; }
+    .resume-subtitle { margin: -0.5rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+    .resume-subtitle .task-age { margin-left: 0; }
+    .resume-message { color: var(--text-secondary); }
+    .resume-dismiss { margin-top: 1rem; }
+    .resume-panel { display: flex; flex-direction: column; gap: 1rem; max-width: 640px;
+      padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+    .resume-panel > p { margin: 0; line-height: 1.5; }
+    .resume-panel-field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .resume-panel-field > label { font-size: 0.85em; color: var(--text-secondary); }
+    .resume-panel-field input[type="text"], .resume-panel-field input[type="url"] { width: 100%; }
+    .resume-panel-note { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+    .resume-panel-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .resume-panel-warn { color: var(--alert); }
+    /* On the standalone action-needed page the panel's own inline Cancel link
+       is replaced by the page's Dismiss button. */
+    #resume-page a.btn-subtle { display: none; }
     #status-bar:empty { display: none; }
     #status-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;
@@ -413,8 +442,10 @@
          width once past them, instead of staying narrowed for every line. */
       .job-row-content { display: block; }
       .job-select-wrap { position: static; float: right; margin: 0 0 0.3rem 0.5rem; }
+      .job-link-icon { position: static; float: right; height: auto; margin: 0 0 0.3rem 0.3rem; padding: 0.2rem 0.3rem; }
+      .job-row-content:has(.job-select-wrap) .job-link-icon,
+      .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: auto; }
       .job-row-header { display: block; padding-right: 0; }
-      .job-row-header .job-link-icon { float: right; margin: 0 0 0.3rem 0.5rem; }
       .job-row-header .job-company, .job-row-header .job-age { margin-right: 0.6rem; }
     }
   </style>
@@ -538,6 +569,30 @@
           showNotice("<p>" + escapeHtml(task.error || "Failed") + "</p>", "warning");
           return;
         }
+        // The standalone action-needed page has no in-page target to swap into.
+        // The action succeeded, so leave: clear the follow-up item and go back
+        // where we came from, reloaded.
+        if (resumePage) {
+          var leave = function () {
+            var dest = "/";
+            var ref = document.referrer;
+            if (ref) {
+              try {
+                var u = new URL(ref);
+                if (u.origin === window.location.origin && u.pathname !== window.location.pathname) {
+                  dest = ref;
+                }
+              } catch (e) {}
+            }
+            window.location.assign(dest);
+          };
+          if (resumeInboxItemId) {
+            fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" }).then(leave, leave);
+          } else {
+            leave();
+          }
+          return;
+        }
         var result = task.result || {};
         (result.notices || []).forEach(function (n) { showNotice(n.html, n.level); });
         // Where the result actually lands: a `needs_action` panel goes to the
@@ -582,9 +637,6 @@
         // attribute (e.g. profile/_editor.html's textarea-lock safety net)
         // sees the real post-swap DOM state, not a still-empty target.
         delete w.el.dataset.progressRunning;
-        if (resumeInboxItemId) {
-          fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" });
-        }
       }
 
       function pollWatched(taskId) {
@@ -992,6 +1044,29 @@ document.body.addEventListener('change', function (e) {
 });
   </script>
   <script>
+// Capture phase: the permalink anchor carries an inline onclick="event.stopPropagation()"
+// (so a click doesn't also toggle the row), which would stop the event before it
+// bubbled to any delegated listener. Intercepting on the way down sidesteps that.
+document.addEventListener('click', function (e) {
+  var permalink = e.target.closest("a.job-link-icon[data-permalink]");
+  if (!permalink) return;
+  // Modified clicks (Ctrl/Cmd/Shift/Alt, middle button) keep their native
+  // behaviour — open in a new tab/window — instead of copying.
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var full = new URL(permalink.getAttribute("href"), window.location.origin).href;
+  var flash = function () {
+    permalink.classList.add("job-link-icon--copied");
+    setTimeout(function () { permalink.classList.remove("job-link-icon--copied"); }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(full).then(flash, function () { window.location.assign(full); });
+  } else {
+    window.location.assign(full);
+  }
+}, true);
+
 document.body.addEventListener('click', function (e) {
   var trigger = e.target.closest('.add-panel-trigger');
   if (trigger) {

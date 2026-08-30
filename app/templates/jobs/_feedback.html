@@ -7,6 +7,9 @@
       aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
   </label>
   {% endif %}
+  <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
+    title="Copy link to this job" aria-label="Copy link to this job"
+    onclick="event.stopPropagation()">&#128279;</a>
   <div class="job-detail-header" role="button" tabindex="0" style="cursor:pointer"
     hx-get="/jobs/{{ job.id }}/collapse{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
     hx-target="#job-{{ job.id }}"
@@ -15,7 +18,6 @@
     <div class="job-detail-title-row">
       <h2 class="job-detail-title">{{ job.title or "(no title)" }}</h2>
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
-      <a href="/jobs/{{ job.id }}" class="job-link-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
     </div>
     <div class="job-detail-meta">
       {% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}

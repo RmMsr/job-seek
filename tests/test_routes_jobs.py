@@ -1520,6 +1520,14 @@ def test_job_expand_has_permalink_icon(client, conn):
     assert f'href="/jobs/{jid}" class="job-link-icon"' in resp.text
 
 
+def test_job_row_permalink_is_absolute_positioned_copy_control(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/jobs")
+    assert f'href="/jobs/{jid}"' in resp.text
+    assert 'class="job-link-icon"' in resp.text
+    assert 'data-permalink' in resp.text
+
+
 def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
@@ -1972,7 +1980,7 @@ def test_add_job_by_url_listing_detected_shows_confirm_panel(conn):
     assert "careers.example.com" in html
     assert 'data-progress-url="/jobs/add-listing-source"' in html
     assert '<label for="listing-name"' in html
-    assert ">Name:</label>" in html
+    assert ">Name</label>" in html
     assert fetched["result"]["needs_action"] is True
     assert q.get_jobs(conn) == []
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []

@@ -2,12 +2,16 @@
 {% block title %}Action needed — Job Seek{% endblock %}
 {% block content %}
 <h1>Action needed</h1>
+<p class="resume-subtitle">{{ label }} &middot; <span class="task-age">{{ task.created_at | age }}</span></p>
 {% if action_message %}
-<p style="margin-top:-0.5rem; color:var(--text-secondary);">{{ action_message }}</p>
+<p class="resume-message">{{ action_message }}</p>
 {% endif %}
 <div id="resume-page" style="margin-top:1.25rem;"
      {% if inbox_item_id %}data-inbox-item-id="{{ inbox_item_id }}"{% endif %}>
   {{ resume_html | safe }}
 </div>
+<form method="post" action="/tasks/{{ task.id }}/dismiss" class="resume-dismiss">
+  <button type="submit" class="btn btn-subtle">Dismiss</button>
+</form>
 <p style="margin-top:1.5rem;"><a href="/">Back to Start</a></p>
 {% endblock %}

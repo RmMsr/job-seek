@@ -17,8 +17,10 @@
       <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
       {% if job.company %}<span class="job-company">{{ job.company }}</span>{% endif %}
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
-      <a href="/jobs/{{ job.id }}" class="job-link-icon" title="Direct link to this job" aria-label="Direct link to this job" onclick="event.stopPropagation()">&#128279;</a>
     </div>
+    <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
+      title="Copy link to this job" aria-label="Copy link to this job"
+      onclick="event.stopPropagation()">&#128279;</a>
     {% if job.stale_badge %}
       <p class="stale-note">
         {% if job.stale_badge.href %}

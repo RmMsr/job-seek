@@ -1,9 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Task log — Job Seek{% endblock %}
+{% block title %}{{ label }} — Job Seek{% endblock %}
 {% block content %}
-<h1>Task: {{ task.kind.replace('_', ' ') }}</h1>
-<p>Status: <strong id="task-log-status">{{ task.status }}</strong>{% if task.error %} — {{ task.error }}{% endif %}</p>
-<pre id="task-log-lines" style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:0.75rem 1rem; white-space:pre-wrap;">{% for line in lines %}{{ line }}
+<h1>{{ label }}</h1>
+<dl class="task-meta">
+  <dt>Status</dt>
+  <dd><strong id="task-log-status">{{ task.status }}</strong>{% if task.error %} — {{ task.error }}{% endif %}</dd>
+  <dt>Age</dt>
+  <dd>{{ task.created_at | age }}</dd>
+  {% if task.started_at %}<dt>Started</dt><dd>{{ task.started_at | age }}</dd>{% endif %}
+  {% if task.finished_at %}<dt>Finished</dt><dd>{{ task.finished_at | age }}</dd>{% endif %}
+</dl>
+<pre id="task-log-lines" class="task-log">{% for line in lines %}{{ line }}
 {% endfor %}</pre>
 {% if task.status in ("queued", "running") %}
 <script>
