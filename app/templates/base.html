@@ -392,6 +392,13 @@
     .task-meta dd { margin: 0; }
     .task-log { background: var(--ground); border: 1px solid var(--border); border-radius: 6px;
       padding: 0.75rem 1rem; white-space: pre-wrap; overflow-x: auto; }
+    .resume-subtitle { margin: -0.5rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+    .resume-subtitle .task-age { margin-left: 0; }
+    .resume-message { color: var(--text-secondary); }
+    .resume-dismiss { margin-top: 1rem; }
+    /* On the standalone action-needed page the panel's own inline Cancel link
+       is replaced by the page's Dismiss button. */
+    #resume-page a.btn-subtle { display: none; }
     #status-bar:empty { display: none; }
     #status-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;

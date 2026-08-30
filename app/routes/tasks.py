@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.template_env import templates
@@ -127,8 +127,18 @@ def task_resume(task_id: int, request: Request, conn: sqlite3.Connection = Depen
     inbox_item = q.get_inbox_item_by_task_id(conn, task_id)
     return templates.TemplateResponse(
         request, "tasks/resume.html", {
+            "task": task,
+            "label": _task_label(conn, task),
             "resume_html": task["result"]["resume_html"],
             "action_message": task["result"].get("action_message"),
             "inbox_item_id": inbox_item["id"] if inbox_item else None,
         }
     )
+
+
+@router.post("/tasks/{task_id}/dismiss")
+def task_dismiss(task_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    item = q.get_inbox_item_by_task_id(conn, task_id)
+    if item is not None and item["resolved_at"] is None:
+        q.resolve_inbox_item(conn, item["id"])
+    return RedirectResponse("/", status_code=303)

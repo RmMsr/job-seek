@@ -158,6 +158,32 @@ def test_task_resume_omits_inbox_item_id_when_absent(client, conn):
     assert 'data-inbox-item-id="' not in resp.text
 
 
+def test_task_dismiss_resolves_inbox_item_and_redirects_to_start(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {"resume_html": "<p>x</p>"})
+    q.create_inbox_item(conn, kind="task_followup", message="x", link="/y", task_id=task["id"])
+    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+    assert q.count_unresolved_inbox_items(conn) == 0
+
+
+def test_task_dismiss_without_inbox_item_still_redirects(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+
+
+def test_task_resume_shows_age_and_dismiss_form(client, conn):
+    task = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
+    resp = client.get(f"/tasks/{task['id']}/resume")
+    assert f'action="/tasks/{task["id"]}/dismiss"' in resp.text
+    assert 'class="task-age"' in resp.text
+    assert ">Dismiss</button>" in resp.text
+
+
 def test_task_resume_404_without_resume_html(client, conn):
     task = q.enqueue_task(conn, kind="fetch_source", params={})
     q.complete_task(conn, task["id"], {})
