@@ -9,6 +9,5 @@ Known gaps, not yet scheduled.
   (JS-driven pagination, not hyperlink pagers — needs Playwright click/scroll)
 - bug: Add profile entry is broken for adding an list item to a non final ## heading with newline
 - ux: the task detail page needs to be reorganised. What does the title mean. The form needs structure
-- feature: unify the /sources/detect and /jobs/add-by-url add flows — shared
-  detection pipeline, panels, and confirm task. Deferred from the LinkedIn
-  URL-rewrite change; do it if the duplication starts to bite.
+- ux: The permalink button of a job card should 1) stay in the same place folded and unfolded. 2) be in the top right corner, left of the checkbox if present. 3) copy the link to the clipboard on a normal click, with fallback to a normal link
+
