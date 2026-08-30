@@ -9,5 +9,5 @@ Base before implementation: 0c3a499
 - [x] Task 4: task log page reorg  (commits ef2bdab..a6bb3b7)
 - [x] Task 5: dismiss route + action-needed page structure  (commits 1e1a08c..e9c6bad)
 - [x] Task 6: action-needed actions navigate away  (commits e985569..6dbb373)
-- [ ] Task 7: restructure the four resume panels
+- [x] Task 7: restructure the four resume panels  (commits b738971..0c96d72)
 - [ ] Task 8: job-card permalink click-to-copy
