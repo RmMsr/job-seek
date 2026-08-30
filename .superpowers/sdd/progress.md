@@ -7,7 +7,7 @@ Base before implementation: 0c3a499
 - [x] Task 2: task age on start-page list  (commits 468563f..6dbf71a)
 - [x] Task 3: human task labels  (commits 32c248b..00204ad)
 - [x] Task 4: task log page reorg  (commits ef2bdab..a6bb3b7)
-- [ ] Task 5: dismiss route + action-needed page structure
+- [x] Task 5: dismiss route + action-needed page structure  (commits 1e1a08c..e9c6bad)
 - [ ] Task 6: action-needed actions navigate away
 - [ ] Task 7: restructure the four resume panels
 - [ ] Task 8: job-card permalink click-to-copy
