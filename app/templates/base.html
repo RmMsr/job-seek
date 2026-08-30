@@ -209,11 +209,12 @@
     .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
     .job-company { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
     .job-age { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
-    .job-link-icon { position: absolute; top: 0.35rem; right: 0.5rem; z-index: 3;
-      text-decoration: none; font-size: 0.85em; padding: 0.2rem 0.35rem; line-height: 1;
-      border-radius: 4px; color: var(--text-muted); }
+    .job-link-icon { position: absolute; top: 0.3rem; right: 0.5rem; z-index: 3;
+      display: inline-flex; align-items: center; height: 1.85rem;
+      text-decoration: none; font-size: 0.95rem; line-height: 1;
+      padding: 0 0.3rem; border-radius: 4px; color: var(--text-muted); }
     .job-row-content:has(.job-select-wrap) .job-link-icon,
-    .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.1rem; }
+    .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
     .job-link-icon:hover { background: var(--ground); color: var(--accent); }
     .job-link-icon--copied { color: var(--accent); }
     .job-hook { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
@@ -441,6 +442,9 @@
          width once past them, instead of staying narrowed for every line. */
       .job-row-content { display: block; }
       .job-select-wrap { position: static; float: right; margin: 0 0 0.3rem 0.5rem; }
+      .job-link-icon { position: static; float: right; height: auto; margin: 0 0 0.3rem 0.3rem; padding: 0.2rem 0.3rem; }
+      .job-row-content:has(.job-select-wrap) .job-link-icon,
+      .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: auto; }
       .job-row-header { display: block; padding-right: 0; }
       .job-row-header .job-company, .job-row-header .job-age { margin-right: 0.6rem; }
     }
@@ -1040,23 +1044,27 @@ document.body.addEventListener('change', function (e) {
 });
   </script>
   <script>
-document.body.addEventListener('click', function (e) {
+// Capture phase: the permalink anchor carries an inline onclick="event.stopPropagation()"
+// (so a click doesn't also toggle the row), which would stop the event before it
+// bubbled to any delegated listener. Intercepting on the way down sidesteps that.
+document.addEventListener('click', function (e) {
   var permalink = e.target.closest("a.job-link-icon[data-permalink]");
-  if (permalink) {
-    e.preventDefault();
-    e.stopPropagation();
-    var full = new URL(permalink.getAttribute("href"), window.location.origin).href;
-    var flash = function () {
-      permalink.classList.add("job-link-icon--copied");
-      setTimeout(function () { permalink.classList.remove("job-link-icon--copied"); }, 1200);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(full).then(flash, function () { window.location.assign(full); });
-    } else {
-      window.location.assign(full);
-    }
-    return;
+  if (!permalink) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var full = new URL(permalink.getAttribute("href"), window.location.origin).href;
+  var flash = function () {
+    permalink.classList.add("job-link-icon--copied");
+    setTimeout(function () { permalink.classList.remove("job-link-icon--copied"); }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(full).then(flash, function () { window.location.assign(full); });
+  } else {
+    window.location.assign(full);
   }
+}, true);
+
+document.body.addEventListener('click', function (e) {
   var trigger = e.target.closest('.add-panel-trigger');
   if (trigger) {
     var panel = trigger.closest('.add-panel');
