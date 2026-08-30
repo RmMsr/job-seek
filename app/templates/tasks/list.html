@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Tasks — Job Seek{% endblock %}
+{% block content %}
+<h1>Tasks</h1>
+<div class="filter-bar">
+  <div>
+    {% for s in ["all", "active", "done", "failed"] %}
+    <a href="/tasks?status={{ s }}" class="{{ 'active' if status == s else '' }}">{{ s|capitalize }}</a>
+    {% endfor %}
+  </div>
+</div>
+<div class="responsive-table-wrap">
+<table>
+  <thead><tr><th>Task</th><th>State</th><th>Age</th></tr></thead>
+  <tbody>
+  {% for it in items %}
+    <tr>
+      <td><a href="/tasks/{{ it.task.id }}">{{ it.pres.title }}</a></td>
+      <td><span class="task-li-icon icon-{{ it.state }}" aria-hidden="true">{{ it.state | status_icon }}</span> {{ it.state }}</td>
+      <td>{{ it.task.created_at | age }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p>
+  {% if page > 1 %}<a href="/tasks?status={{ status }}&page={{ page - 1 }}">← newer</a>{% endif %}
+  {% if has_next %}<a href="/tasks?status={{ status }}&page={{ page + 1 }}">older →</a>{% endif %}
+</p>
+{% endblock %}

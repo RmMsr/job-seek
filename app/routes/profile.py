@@ -88,4 +88,9 @@ async def accept_profile_proposals(
     ctx = _profile_context(conn)
     ctx["saved"] = True
     ctx["unapplied"] = unapplied
+    applied = len(resolved)
+    ctx["proposal_summary"] = (
+        f"✓ {applied} change{'s' if applied != 1 else ''} applied" if applied
+        else "✓ Reviewed — no changes"
+    )
     return templates.TemplateResponse(request, "profile/_editor.html", ctx)

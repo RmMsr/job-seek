@@ -1,5 +1,5 @@
 <div id="profile-editor">
-  {% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
+  {% if saved %}<div class="save-confirmation" aria-live="polite">{{ proposal_summary or "Saved." }}</div>{% endif %}
   <form method="post" action="/profile" id="profile-save-form">
     <label>Your skills, interests, and constraints (markdown supported):<br>
       <textarea name="content" style="width:100%; min-height:300px; font-family:monospace; box-sizing:border-box;">{{ content }}</textarea>

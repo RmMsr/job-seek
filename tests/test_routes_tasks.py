@@ -1,4 +1,115 @@
 from app.db import queries as q
+from app.routes.tasks import task_presentation, root_presentation
+
+
+def test_presentation_fetch_source(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    p = task_presentation(conn, t)
+    assert p["title"] == "Fetch: Cord"
+    assert "Cord" in p["goal"]
+    assert p["next_step"].startswith("Queued")
+
+
+def test_presentation_running_uses_progress(conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.claim_next_task(conn)
+    q.append_task_log(conn, t["id"], "[3/6] Classified as job_posting: http://x")
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "Step 3 of 6"
+
+
+def test_presentation_needs_action(conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "Confirm the detected source"})
+    q.set_task_needs_action(conn, t["id"])
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "Confirm the detected source"
+
+
+def test_presentation_source_detect_title_names_host(conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://careers.acme.io/jobs"})
+    assert task_presentation(conn, t)["title"] == "Add source: careers.acme.io"
+
+
+def test_presentation_done_results_link_for_add_by_url(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://e.com/j"})
+    q.complete_task(conn, t["id"], {"job_id": jid})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+
+
+def test_presentation_failed_shows_error(conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.fail_task(conn, t["id"], "Slack auth expired\nstacktrace line\nmore")
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "Slack auth expired"
+
+
+def test_root_presentation_fetch_all_aggregates(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.fail_task(conn, b["id"], "boom")
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["title"] == "Fetch all"
+    assert "2 sources" in p["next_step"]
+    assert "1" in p["next_step"] and "fail" in p["next_step"].lower()
+    assert p["status"] == "running"  # child a still queued
+    assert p["results"] == [{"label": "Fetch history", "href": "/fetch"}]
+
+
+def test_root_presentation_status_priority_needs_action(conn):
+    root = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.resolve_task(conn, root["id"])
+    child = q.enqueue_task(
+        conn, kind="source_confirm",
+        params={"url": "https://x.io", "name": "N", "fetcher_type": "generic_listing"},
+        parent_task_id=root["id"],
+    )
+    q.complete_task(conn, child["id"], {"needs_action": True, "action_message": "Confirm this listing"})
+    q.set_task_needs_action(conn, child["id"])
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "needs_action"
+    assert p["next_step"] == "Confirm this listing"
+
+
+def test_root_presentation_threads_child_action_link(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.resolve_task(conn, root["id"])
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 9}, parent_task_id=root["id"])
+    q.complete_task(conn, child["id"], {"needs_action": True, "action_message": "Reconnect Slack",
+                                       "action_link": "/sources#source-row-9"})
+    q.set_task_needs_action(conn, child["id"])
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "needs_action"
+    assert p["action_link"] == "/sources#source-row-9"
+    assert p["has_panel"] is False
+    assert p["needs_action_task_id"] == child["id"]
+    assert p["next_step"] == "Reconnect Slack"
+
+
+def test_root_presentation_failed_when_latest_step_failed(conn):
+    root = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.resolve_task(conn, root["id"])
+    child = q.enqueue_task(conn, kind="source_confirm",
+                           params={"url": "https://x.io", "name": "N", "fetcher_type": "generic_listing"},
+                           parent_task_id=root["id"])
+    q.fail_task(conn, child["id"], "network down\ntrace")
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "failed"
+    assert p["next_step"] == "network down"
+
+
+def test_results_names_the_source(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 2})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert {"label": "Jobs from Cord", "href": f"/jobs?source_id={sid}"} in p["results"]
 
 
 def test_tasks_active_lists_queued_and_running(client, conn):
@@ -19,25 +130,30 @@ def test_tasks_active_excludes_done(client, conn):
     assert resp.json()["tasks"] == []
 
 
-def test_task_detail_includes_result(client, conn):
+def test_state_endpoint_includes_result(client, conn):
     task = q.enqueue_task(conn, kind="fetch_source", params={})
     q.complete_task(conn, task["id"], {"html_chunks": ["<p>x</p>"]})
-    resp = client.get(f"/tasks/{task['id']}")
+    resp = client.get(f"/tasks/{task['id']}/state")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "done"
     assert data["result"] == {"html_chunks": ["<p>x</p>"]}
 
 
-def test_task_detail_includes_full_log(client, conn):
+def test_state_endpoint_includes_full_log(client, conn):
     task = q.enqueue_task(conn, kind="fetch_source", params={})
     q.append_task_log(conn, task["id"], "line one")
     q.append_task_log(conn, task["id"], "line two")
-    resp = client.get(f"/tasks/{task['id']}")
+    resp = client.get(f"/tasks/{task['id']}/state")
     assert resp.json()["log"] == "line one\nline two\n"
 
 
-def test_task_detail_404_for_missing(client, conn):
+def test_state_endpoint_404_for_missing(client, conn):
+    resp = client.get("/tasks/999/state")
+    assert resp.status_code == 404
+
+
+def test_detail_page_404_for_missing(client, conn):
     resp = client.get("/tasks/999")
     assert resp.status_code == 404
 
@@ -106,124 +222,234 @@ def test_task_label_source_confirm_names_it(client, conn):
     assert resp.json()["tasks"][0]["label"] == "Add source: Careers X"
 
 
-def test_task_log_page_renders_lines_and_status(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.append_task_log(conn, task["id"], "first line")
-    q.append_task_log(conn, task["id"], "second line")
-    resp = client.get(f"/tasks/{task['id']}/log")
-    assert resp.status_code == 200
-    assert "<h1>fetch source</h1>" in resp.text
-    assert 'class="task-meta"' in resp.text
-    assert "first line" in resp.text
-    assert "second line" in resp.text
-    assert "queued" in resp.text
-
-
-def test_task_log_page_title_names_the_job(client, conn):
-    src = q.insert_source(conn, "S", "https://e.com", "generic_listing")
-    job_id = q.insert_job(conn, source_id=src, url="https://e.com/j", title="Data Lead", company="", raw_text="")
-    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": {}})
-    resp = client.get(f"/tasks/{task['id']}/log")
-    assert "<h1>Re-evaluate job: Data Lead</h1>" in resp.text
-
-
-def test_task_log_page_404_for_missing(client, conn):
-    resp = client.get("/tasks/999/log")
-    assert resp.status_code == 404
-
-
-def test_task_resume_renders_resume_html(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    assert resp.status_code == 200
-    assert "confirm me" in resp.text
-
-
-def test_task_resume_includes_inbox_item_id_when_present(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
-    q.create_inbox_item(conn, kind="task_followup", message="x", link="/y", task_id=task["id"])
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    assert f'data-inbox-item-id="{q.get_inbox_item_by_task_id(conn, task["id"])["id"]}"' in resp.text
-
-
-def test_task_resume_omits_inbox_item_id_when_absent(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    # "data-inbox-item-id" itself also appears inside base.html's JS (as a
-    # getAttribute() string argument) on every page — check for the actual
-    # HTML attribute syntax, not just the substring.
-    assert 'data-inbox-item-id="' not in resp.text
-
-
-def test_task_dismiss_resolves_inbox_item_and_redirects_to_start(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {"resume_html": "<p>x</p>"})
-    q.create_inbox_item(conn, kind="task_followup", message="x", link="/y", task_id=task["id"])
-    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"] == "/"
-    assert q.count_unresolved_inbox_items(conn) == 0
-
-
-def test_task_dismiss_without_inbox_item_still_redirects(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    resp = client.post(f"/tasks/{task['id']}/dismiss", follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"] == "/"
-
-
-def test_task_resume_shows_age_and_dismiss_form(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {"resume_html": "<p>confirm me</p>"})
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    assert f'action="/tasks/{task["id"]}/dismiss"' in resp.text
-    assert 'class="task-age"' in resp.text
-    assert ">Dismiss</button>" in resp.text
-
-
-def test_task_resume_404_without_resume_html(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {})
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    assert resp.status_code == 404
-
-
-def test_task_detail_includes_job_link_for_single_job_kinds(client, conn):
+def test_state_endpoint_link_for_single_job_kinds(client, conn):
     src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
     job_id = q.insert_job(conn, source_id=src_id, url="https://e.com/j", title="J", company="", raw_text="")
     task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": {}})
-    resp = client.get(f"/tasks/{task['id']}")
+    resp = client.get(f"/tasks/{task['id']}/state")
     assert resp.json()["link"] == f"/jobs/{job_id}"
 
 
-def resp_link(client, task_id):
-    return client.get(f"/tasks/{task_id}").json().get("link")
-
-
-def test_task_detail_no_link_for_fetch_source(client, conn):
+def test_state_endpoint_no_link_for_fetch_source(client, conn):
     src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
     task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": src_id})
-    assert resp_link(client, task["id"]) is None
+    assert client.get(f"/tasks/{task['id']}/state").json().get("link") is None
 
 
-def test_task_log_page_shows_job_backlink(client, conn):
-    src_id = q.insert_source(conn, "S", "https://e.com", "generic_listing")
-    job_id = q.insert_job(conn, source_id=src_id, url="https://e.com/j", title="J", company="", raw_text="")
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": job_id, "filter_ctx": {}})
-    html = client.get(f"/tasks/{task['id']}/log").text
-    assert f'href="/jobs/{job_id}"' in html
+def test_detail_page_renders_summary_and_results(client, conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://e.com/j"})
+    q.complete_task(conn, t["id"], {"job_id": jid})
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "Add job by URL" in html
+    assert f'href="/jobs/{jid}"' in html
+    assert "task-log" in html
 
 
-def test_task_resume_shows_action_message_and_heading(client, conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    q.complete_task(conn, task["id"], {
-        "resume_html": "<p>confirm me</p>",
-        "action_message": "New source detected: Careers Page",
+def test_detail_page_shows_needs_action_panel_inline(client, conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "resume_html": "<p id='panel'>confirm me</p>",
+                                    "action_message": "Confirm the detected source"})
+    q.set_task_needs_action(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "confirm me" in html
+    assert "Confirm the detected source" in html
+    assert f'action="/tasks/{t["id"]}/dismiss"' in html
+
+
+def test_detail_page_panelless_needs_action_shows_open_link(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.complete_task(conn, t["id"], {"needs_action": True,
+                                    "action_message": "Reconnect Slack to keep fetching",
+                                    "action_link": "/sources#source-row-1"})
+    q.set_task_needs_action(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "Reconnect Slack to keep fetching" in html  # subtitle
+    assert '<a class="btn btn-primary" href="/sources#source-row-1">Open</a>' in html
+    assert f'action="/tasks/{t["id"]}/dismiss"' in html
+    assert 'id="resume-page"' not in html
+
+
+def test_detail_page_panelless_no_link_shows_dismiss_only(client, conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "Something is off"})
+    q.set_task_needs_action(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "Something is off" in html
+    assert ">Open</a>" not in html
+    assert f'action="/tasks/{t["id"]}/dismiss"' in html
+
+
+def test_panelless_needs_action_dismiss_works(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "x",
+                                    "action_link": "/sources"})
+    q.set_task_needs_action(conn, t["id"])
+    r = client.post(f"/tasks/{t['id']}/dismiss", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, t["id"])["status"] == "dismissed"
+
+
+def test_root_detail_panelless_child_shows_open_link(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.complete_task(conn, child["id"], {"needs_action": True,
+                                       "action_message": "Reconnect Slack for finn.no",
+                                       "action_link": "/sources#source-row-9"})
+    q.set_task_needs_action(conn, child["id"])
+    html = client.get(f"/tasks/{root['id']}").text
+    assert '<a class="btn btn-primary" href="/sources#source-row-9">Open</a>' in html
+    assert f'action="/tasks/{child["id"]}/dismiss"' in html  # dismiss targets the child
+
+
+def test_state_endpoint_returns_json(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.append_task_log(conn, t["id"], "hello")
+    data = client.get(f"/tasks/{t['id']}/state").json()
+    assert data["status"] == "queued"
+    assert data["log"] == "hello\n"
+
+
+def test_log_and_resume_redirect(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    for path in (f"/tasks/{t['id']}/log", f"/tasks/{t['id']}/resume"):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 301
+        assert r.headers["location"] == f"/tasks/{t['id']}"
+
+
+def test_dismiss_sets_dismissed_status(client, conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={})
+    q.complete_task(conn, t["id"], {"needs_action": True})
+    q.set_task_needs_action(conn, t["id"])
+    r = client.post(f"/tasks/{t['id']}/dismiss", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, t["id"])["status"] == "dismissed"
+
+
+def test_dismiss_non_needs_action_is_noop(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, t["id"], {})
+    r = client.post(f"/tasks/{t['id']}/dismiss", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, t["id"])["status"] == "done"
+
+
+def test_root_detail_lists_steps_linking_to_children(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    c2 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    html = client.get(f"/tasks/{root['id']}").text
+    assert "Steps" in html
+    assert f'href="/tasks/{c1["id"]}"' in html
+    assert f'href="/tasks/{c2["id"]}"' in html
+
+
+def test_group_route_gone(client, conn):
+    assert client.get("/tasks/group/anything").status_code == 404
+
+
+def test_child_detail_has_breadcrumb_to_parent(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    html = client.get(f"/tasks/{child['id']}").text
+    assert "Part of:" in html
+    assert f'href="/tasks/{root["id"]}">Fetch all</a>' in html
+
+
+def test_root_detail_has_no_breadcrumb(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    assert "Part of:" not in client.get(f"/tasks/{root['id']}").text
+
+
+def test_needs_action_dismiss_is_a_real_button(client, conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "resume_html": "<p>x</p>"})
+    q.set_task_needs_action(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert '<button type="submit" class="btn">Dismiss</button>' in html
+
+
+def test_root_detail_shows_child_needs_action_panel(client, conn):
+    root = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.resolve_task(conn, root["id"])
+    child = q.enqueue_task(conn, kind="source_confirm",
+                           params={"url": "https://x.io", "name": "N", "fetcher_type": "generic_listing"},
+                           parent_task_id=root["id"])
+    q.complete_task(conn, child["id"], {"needs_action": True, "resume_html": "<p id='cpanel'>decide</p>"})
+    q.set_task_needs_action(conn, child["id"])
+    html = client.get(f"/tasks/{root['id']}").text
+    assert "decide" in html
+    assert f'action="/tasks/{child["id"]}/dismiss"' in html
+
+
+def test_resolved_needs_action_detail_shows_summary_not_form(client, conn):
+    sid = q.insert_source(conn, "X Careers", "https://x.com", "generic_listing")
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, t["id"], {
+        "needs_action": True, "resume_html": "<form id='f'>x</form>", "source_id": sid,
     })
-    resp = client.get(f"/tasks/{task['id']}/resume")
-    assert "<h1>Action needed</h1>" in resp.text
-    assert "New source detected: Careers Page" in resp.text
-    assert "<h1>Resume</h1>" not in resp.text
+    q.set_task_needs_action(conn, t["id"])
+    q.resolve_task(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "<form id='f'>" not in html
+    assert "X Careers" in html and "created" in html
+
+
+def test_dismissed_task_detail_says_dismissed(client, conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={})
+    q.complete_task(conn, t["id"], {"needs_action": True, "resume_html": "<form>x</form>"})
+    q.set_task_needs_action(conn, t["id"])
+    q.dismiss_task(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "Dismissed" in html
+    assert "<form>x</form>" not in html
+
+
+def test_history_lists_all_tasks_newest_first(client, conn):
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    b = q.enqueue_task(conn, kind="job_reset", params={"job_id": 2})
+    q.fail_task(conn, b["id"], "boom")
+    html = client.get("/tasks").text
+    assert html.index(f'/tasks/{b["id"]}"') < html.index(f'/tasks/{a["id"]}"')
+    assert "failed" in html
+
+
+def test_history_status_filter(client, conn):
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    q.fail_task(conn, b["id"], "x")
+    html = client.get("/tasks?status=failed").text
+    assert f'/tasks/{b["id"]}"' in html and f'/tasks/{a["id"]}"' not in html
+
+
+def test_history_state_column_is_just_the_status(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.claim_next_task(conn)
+    q.append_task_log(conn, t["id"], "[2/5] working")
+    html = client.get("/tasks").text
+    # state cell shows the status word, not the next-step detail
+    assert "running" in html
+    assert "Step 2 of 5" not in html
+
+
+def test_history_root_row_shows_derived_state(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})  # root itself done...
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    html = client.get("/tasks").text
+    row = html.split(f'/tasks/{root["id"]}"', 1)[1][:200]
+    assert "running" in row  # ...but a child is still queued
+
+
+def test_history_pagination(client, conn):
+    for i in range(55):
+        q.enqueue_task(conn, kind="fetch_source", params={"source_id": i})
+    page1 = client.get("/tasks").text
+    page2 = client.get("/tasks?page=2").text
+    assert "page=2" in page1
+    assert page1 != page2

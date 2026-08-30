@@ -14,6 +14,7 @@ from app.fetchers.listing_detect import detect_listing_page
 from app.url_rewrite import suggest_rewrite, suggest_source_name
 from app.pipeline import run_fetch
 from app.task_engine import register_task_kind
+from app.routes.tasks import resolve_origin_task_id
 from app.template_env import templates
 from app.version import get_app_version, get_build_date
 
@@ -204,20 +205,30 @@ def detect_source(
     skip_rewrite: bool = Form(False),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    task = q.enqueue_task(conn, kind="source_detect", params={"url": url, "skip_rewrite": skip_rewrite})
+    # source_detect IS the root task of the add-source chain — no wrapper.
+    task = q.enqueue_task(
+        conn, kind="source_detect", params={"url": url, "skip_rewrite": skip_rewrite}
+    )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/sources/detect/confirm")
 def confirm_source(
     url: str = Form(...), name: str = Form(...), fetcher_type: str = Form(...),
+    origin_task_id: str = Form(""),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     if fetcher_type not in DETECTABLE_FETCHER_TYPES:
         raise HTTPException(status_code=400, detail="Invalid fetcher_type")
+    root_id = resolve_origin_task_id(origin_task_id)
     task = q.enqueue_task(
-        conn, kind="source_confirm", params={"url": url, "name": name, "fetcher_type": fetcher_type}
+        conn, kind="source_confirm", params={"url": url, "name": name, "fetcher_type": fetcher_type},
+        parent_task_id=root_id,
     )
+    # This step's decision is made — the root's work is done; its derived state
+    # now follows the new child.
+    if root_id is not None:
+        q.resolve_task(conn, root_id)
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 

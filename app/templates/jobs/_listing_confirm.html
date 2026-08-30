@@ -2,17 +2,19 @@
   <p>Detected {{ link_count }} job posting link{{ 's' if link_count != 1 else '' }} at <strong>{{ domain }}</strong>.</p>
   <input type="hidden" id="listing-url" value="{{ url }}">
   <input type="hidden" id="listing-fetcher-type" value="{{ fetcher_type }}">
+  <input type="hidden" id="listing-origin-task" value="__ORIGIN_TASK__">
   <div class="resume-panel-field">
     <label for="listing-name">Name</label>
     <input type="text" id="listing-name" value="{{ default_name }}" class="text-input">
   </div>
   <div class="resume-panel-actions">
-    <a href="/jobs" class="btn btn-subtle">Cancel</a>
+    <a href="/jobs" class="btn">Cancel</a>
     <button type="button" class="btn btn-primary"
       data-progress-url="/jobs/add-listing-source{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
       data-progress-body-url="#listing-url"
       data-progress-body-name="#listing-name"
       data-progress-body-fetcher_type="#listing-fetcher-type"
+      data-progress-body-origin_task_id="#listing-origin-task"
       data-progress-target="#jobs-content"
       data-progress-action-target="#jobs-add-result"
       data-progress-display="#listing-confirm-progress">Keep as source &amp; fetch</button>

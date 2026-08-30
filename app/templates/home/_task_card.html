@@ -1,0 +1,29 @@
+<li class="task-li task-li-{{ task.status }}" id="task-card-{{ task.id }}">
+  <span class="task-li-icon icon-{{ task.status }}" aria-hidden="true">{{ task.status | status_icon }}</span>
+  <div class="task-li-body">
+    <div class="task-li-head">
+      <a class="task-li-title{% if task.status == 'dismissed' %} task-completed{% endif %}" href="/tasks/{{ task.id }}">{{ pres.title }}</a>
+      <span class="task-age">{{ task.created_at | age }}</span>
+    </div>
+    {% if task.status == "needs_action" %}
+    <div class="task-li-sub">{{ pres.next_step }}</div>
+    <div class="task-li-actions">
+      {% if pres.has_panel %}<a class="btn btn-primary" href="{{ pres.review_href }}">Review</a>
+      {% elif pres.action_link %}<a class="btn btn-primary" href="{{ pres.action_link }}">Open</a>{% endif %}
+      <form method="post" action="/tasks/{{ pres.needs_action_task_id }}/dismiss"><button type="submit" class="btn">Dismiss</button></form>
+    </div>
+    {% elif task.status == "failed" %}
+    <div class="task-li-sub task-li-error">{{ task.error | truncate(120) }}</div>
+    {% elif task.status == "done" %}
+      {% set was_na = (task.result or {}).get("needs_action") is not none %}
+      {% if was_na or pres.results %}
+      <div class="task-li-sub">
+        {% if was_na %}<span>✓ {{ pres.next_step }}</span>{% endif %}
+        {% for r in pres.results %}<a href="{{ r.href }}">{{ r.label }}</a>{% endfor %}
+      </div>
+      {% endif %}
+    {% elif task.status in ("queued", "running") %}
+    <div class="task-li-sub">{{ pres.next_step }}</div>
+    {% endif %}
+  </div>
+</li>

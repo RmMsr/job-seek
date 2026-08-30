@@ -1322,46 +1322,12 @@ def test_get_active_tasks_excludes_done_and_failed(conn):
 
 
 def test_inbox_item_lifecycle(conn):
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="hi", link="/x")
+    item_id = q.create_inbox_item(conn, kind="browser_missing", message="hi", link="/x")
     assert q.count_unresolved_inbox_items(conn) == 1
     items = q.get_unresolved_inbox_items(conn)
     assert items[0]["message"] == "hi"
     q.resolve_inbox_item(conn, item_id)
     assert q.count_unresolved_inbox_items(conn) == 0
-
-
-def test_create_inbox_item_stores_task_id(conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="hi", link="/x", task_id=task["id"])
-    item = q.get_inbox_item_by_task_id(conn, task["id"])
-    assert item["id"] == item_id
-    assert item["message"] == "hi"
-
-
-def test_get_inbox_item_by_task_id_returns_none_when_absent(conn):
-    task = q.enqueue_task(conn, kind="fetch_source", params={})
-    assert q.get_inbox_item_by_task_id(conn, task["id"]) is None
-
-
-def test_get_recent_resolved_inbox_items_only_includes_resolved_within_window(conn):
-    old_item = q.create_inbox_item(conn, kind="task_followup", message="old", link="/x")
-    conn.execute(
-        "UPDATE inbox_items SET resolved_at = datetime('now', '-25 hours') WHERE id = ?", (old_item,)
-    )
-    recent_item = q.create_inbox_item(conn, kind="task_followup", message="recent", link="/y")
-    q.resolve_inbox_item(conn, recent_item)
-    still_open = q.create_inbox_item(conn, kind="task_followup", message="open", link="/z")
-
-    resolved = q.get_recent_resolved_inbox_items(conn)
-    assert [r["message"] for r in resolved] == ["recent"]
-
-
-def test_get_recent_resolved_inbox_items_respects_limit(conn):
-    for i in range(7):
-        item_id = q.create_inbox_item(conn, kind="task_followup", message=f"item {i}", link="/x")
-        q.resolve_inbox_item(conn, item_id)
-    resolved = q.get_recent_resolved_inbox_items(conn, limit=5)
-    assert len(resolved) == 5
 
 
 def test_get_fetch_run_returns_row(conn):
@@ -1372,24 +1338,101 @@ def test_get_fetch_run_returns_row(conn):
     assert run["auth_error"] == 1
 
 
-def test_resolve_source_prompts_for_url_resolves_only_matching_url(conn):
-    t1 = q.enqueue_task(conn, kind="source_detect", params={"url": "https://ex.com/a"})
-    i1 = q.create_inbox_item(conn, kind="task_followup", message="detected a", link="/x", task_id=t1["id"])
-    t2 = q.enqueue_task(conn, kind="source_detect", params={"url": "https://ex.com/b"})
-    i2 = q.create_inbox_item(conn, kind="task_followup", message="detected b", link="/x", task_id=t2["id"])
-    t3 = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://ex.com/a", "status": None})
-    i3 = q.create_inbox_item(conn, kind="task_followup", message="listing a", link="/x", task_id=t3["id"])
-
-    resolved = q.resolve_source_prompts_for_url(conn, "https://ex.com/a")
-
-    assert resolved == 2
-    open_ids = {i["id"] for i in q.get_unresolved_inbox_items(conn)}
-    assert open_ids == {i2}
-    assert i1 not in open_ids and i3 not in open_ids
+def test_enqueue_task_stores_parent_task_id(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    assert q.get_task(conn, child["id"])["parent_task_id"] == root["id"]
+    assert q.get_task(conn, root["id"])["parent_task_id"] is None
 
 
-def test_resolve_source_prompts_for_url_ignores_other_inbox_kinds(conn):
-    t1 = q.enqueue_task(conn, kind="fetch_source", params={"url": "https://ex.com/a"})
-    other = q.create_inbox_item(conn, kind="browser_missing", message="x", link="/sources", task_id=t1["id"])
-    assert q.resolve_source_prompts_for_url(conn, "https://ex.com/a") == 0
-    assert other in {i["id"] for i in q.get_unresolved_inbox_items(conn)}
+def test_set_task_needs_action(conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={})
+    q.claim_next_task(conn)
+    q.set_task_needs_action(conn, t["id"])
+    row = q.get_task(conn, t["id"])
+    assert row["status"] == "needs_action"
+    assert row["finished_at"] is not None
+
+
+def test_resolve_and_dismiss_task(conn):
+    a = q.enqueue_task(conn, kind="source_detect", params={})
+    q.set_task_needs_action(conn, a["id"])
+    q.resolve_task(conn, a["id"])
+    assert q.get_task(conn, a["id"])["status"] == "done"
+    b = q.enqueue_task(conn, kind="source_detect", params={"x": 1})
+    q.set_task_needs_action(conn, b["id"])
+    q.dismiss_task(conn, b["id"])
+    assert q.get_task(conn, b["id"])["status"] == "dismissed"
+
+
+def test_get_task_children_ordered(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    kids = q.get_task_children(conn, root["id"])
+    assert [t["params"]["source_id"] for t in kids] == [1, 2]
+    assert q.get_task_children(conn, 999) == []
+
+
+def test_get_dashboard_tasks_active_always_terminal_recent_only(conn):
+    active = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    old = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    q.complete_task(conn, old["id"], {})
+    conn.execute("UPDATE tasks SET finished_at = datetime('now', '-2 days') WHERE id = ?", (old["id"],))
+    recent = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 3})
+    q.complete_task(conn, recent["id"], {})
+    conn.commit()
+    entries = q.get_dashboard_tasks(conn)
+    ids = {e["root"]["id"] for e in entries}
+    assert active["id"] in ids
+    assert recent["id"] in ids
+    assert old["id"] not in ids
+
+
+def test_get_dashboard_tasks_one_entry_per_root(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    solo = q.enqueue_task(conn, kind="job_reset", params={"job_id": 5})
+    entries = q.get_dashboard_tasks(conn)
+    root_ids = [e["root"]["id"] for e in entries]
+    # children do not surface as their own top-level entry
+    assert c1["id"] not in root_ids
+    assert root["id"] in root_ids and solo["id"] in root_ids
+    root_entry = next(e for e in entries if e["root"]["id"] == root["id"])
+    assert len(root_entry["children"]) == 2
+    solo_entry = next(e for e in entries if e["root"]["id"] == solo["id"])
+    assert solo_entry["children"] == []
+
+
+def test_get_dashboard_tasks_includes_stale_root_with_active_child(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    conn.execute("UPDATE tasks SET finished_at = datetime('now', '-3 days') WHERE id = ?", (root["id"],))
+    conn.commit()
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    entries = q.get_dashboard_tasks(conn)
+    root_entry = next(e for e in entries if e["root"]["id"] == root["id"])
+    assert [c["id"] for c in root_entry["children"]] == [child["id"]]
+
+
+def test_resolve_source_prompts_for_url_dismisses_needs_action_task(conn):
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com/careers"})
+    q.set_task_needs_action(conn, t["id"])
+    other = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com/other"})
+    q.set_task_needs_action(conn, other["id"])
+    n = q.resolve_source_prompts_for_url(conn, "https://x.com/careers")
+    assert n == 1
+    assert q.get_task(conn, t["id"])["status"] == "dismissed"
+    assert q.get_task(conn, other["id"])["status"] == "needs_action"
+
+
+def test_get_recent_terminal_tasks_filter_and_order(conn):
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    q.complete_task(conn, a["id"], {})
+    q.fail_task(conn, b["id"], "boom")
+    rows = q.get_recent_terminal_tasks(conn)
+    assert [r["id"] for r in rows] == [b["id"], a["id"]]
+    failed = q.get_recent_terminal_tasks(conn, status="failed")
+    assert [r["id"] for r in failed] == [b["id"]]

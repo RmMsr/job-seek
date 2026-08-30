@@ -14,6 +14,7 @@ from app.url_rewrite import suggest_rewrite, suggest_source_name
 from app.ai.classify_known_source import classify_known_source, DETECTABLE_FETCHER_TYPES
 from app.ai.generate_source_name import generate_source_name
 from app.routes.sources import check_already_tracked_notice_data
+from app.routes.tasks import resolve_origin_task_id
 from app.task_engine import register_task_kind
 from app.template_env import templates
 
@@ -774,28 +775,38 @@ def job_add_by_url(
     request: Request,
     url: str = Form(...),
     skip_rewrite: bool = Form(False),
+    origin_task_id: str = Form(""),
     conn: sqlite3.Connection = Depends(get_db),
 ):
+    # Normally its own root; when reached as a step of an add-source attempt
+    # (the "add as job instead" mismatch button) it attaches under that root.
+    root_id = resolve_origin_task_id(origin_task_id)
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
         "url": url,
         "status": request.query_params.get("status") or None,
         "content_type": request.query_params.get("content_type") or None,
         "filter_ctx": _filter_context(request),
         "skip_rewrite": skip_rewrite,
-    })
+    }, parent_task_id=root_id)
+    if root_id is not None:
+        q.resolve_task(conn, root_id)
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/add-listing-source")
 def job_add_listing_source(
     request: Request, url: str = Form(...), name: str = Form(...), fetcher_type: str = Form(...),
+    origin_task_id: str = Form(""),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     if fetcher_type not in DETECTABLE_FETCHER_TYPES:
         raise HTTPException(status_code=400, detail="Invalid fetcher_type")
+    root_id = resolve_origin_task_id(origin_task_id)
     task = q.enqueue_task(conn, kind="job_add_listing_source", params={
         "url": url, "name": name, "fetcher_type": fetcher_type,
         "status": request.query_params.get("status") or None,
         "content_type": request.query_params.get("content_type") or None,
-    })
+    }, parent_task_id=root_id)
+    if root_id is not None:
+        q.resolve_task(conn, root_id)
     return {"task_id": task["id"], "already_active": task["already_active"]}

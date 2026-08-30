@@ -675,22 +675,119 @@ def find_active_task(conn: sqlite3.Connection, kind: str, params: dict) -> dict 
     return _decode_task(_row_to_dict(row)) if row is not None else None
 
 
-def enqueue_task(conn: sqlite3.Connection, kind: str, params: dict) -> dict:
+def enqueue_task(
+    conn: sqlite3.Connection, kind: str, params: dict, parent_task_id: int | None = None
+) -> dict:
     """Returns the task dict, with an extra (non-persisted) "already_active"
     key: True when an identical queued/running task was found and reused
-    instead of a new one being created."""
+    instead of a new one being created.
+
+    A child step of a multi-step action passes `parent_task_id` = the id of
+    the *root* task (chains are flattened — a step never points at another
+    step)."""
     existing = find_active_task(conn, kind, params)
     if existing is not None:
         existing["already_active"] = True
         return existing
     params_json = json.dumps(params, sort_keys=True)
     cur = conn.execute(
-        "INSERT INTO tasks (kind, params) VALUES (?, ?)", (kind, params_json)
+        "INSERT INTO tasks (kind, params, parent_task_id) VALUES (?, ?, ?)",
+        (kind, params_json, parent_task_id),
     )
     conn.commit()
     task = get_task(conn, cur.lastrowid)
     task["already_active"] = False
     return task
+
+
+def set_task_needs_action(conn: sqlite3.Connection, task_id: int) -> None:
+    conn.execute(
+        "UPDATE tasks SET status = 'needs_action', "
+        "finished_at = COALESCE(finished_at, datetime('now')) WHERE id = ?",
+        (task_id,),
+    )
+    conn.commit()
+
+
+def resolve_task(conn: sqlite3.Connection, task_id: int) -> None:
+    conn.execute(
+        "UPDATE tasks SET status = 'done', "
+        "finished_at = COALESCE(finished_at, datetime('now')) WHERE id = ?",
+        (task_id,),
+    )
+    conn.commit()
+
+
+def dismiss_task(conn: sqlite3.Connection, task_id: int) -> None:
+    conn.execute(
+        "UPDATE tasks SET status = 'dismissed', "
+        "finished_at = COALESCE(finished_at, datetime('now')) WHERE id = ?",
+        (task_id,),
+    )
+    conn.commit()
+
+
+def get_task_children(conn: sqlite3.Connection, root_id: int) -> list[dict]:
+    """Every step-task pointing at this root, oldest first. Empty for a
+    childless / non-root task."""
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC, id ASC", (root_id,)
+    ).fetchall()
+    return [_decode_task(d) for d in _rows_to_dicts(rows)]
+
+
+_DASHBOARD_WINDOW_HOURS = 24
+
+
+def get_dashboard_tasks(conn: sqlite3.Connection) -> list[dict]:
+    """Entries for the Start-page Tasks section, newest-activity first, one per
+    root. Each entry: {root: task dict, children: [task dict, ...]}.
+
+    A task counts toward the window if it (or, for a root, any subtree task) is
+    active (queued/running/needs_action) or finished within the last 24h.
+    Children never appear as their own top-level entry."""
+    rows = conn.execute(
+        """
+        SELECT * FROM tasks
+        WHERE status IN ('queued', 'running', 'needs_action')
+           OR (status IN ('done', 'failed', 'dismissed')
+               AND finished_at IS NOT NULL
+               AND finished_at >= datetime('now', ?))
+        ORDER BY created_at ASC, id ASC
+        """,
+        (f"-{_DASHBOARD_WINDOW_HOURS} hours",),
+    ).fetchall()
+    tasks = [_decode_task(d) for d in _rows_to_dicts(rows)]
+    # Distinct roots, in first-seen order.
+    root_ids: list[int] = []
+    for t in tasks:
+        rid = t["parent_task_id"] or t["id"]
+        if rid not in root_ids:
+            root_ids.append(rid)
+    entries = []
+    for rid in root_ids:
+        root = get_task(conn, rid)
+        if root is None:
+            continue
+        children = get_task_children(conn, rid)
+        entries.append({"root": root, "children": children})
+    entries.sort(
+        key=lambda e: max(x["created_at"] for x in [e["root"], *e["children"]]), reverse=True
+    )
+    return entries
+
+
+def get_recent_terminal_tasks(
+    conn: sqlite3.Connection, limit: int = 50, offset: int = 0, status: str | None = None
+) -> list[dict]:
+    """History-page listing. status=None -> all; else exact match."""
+    where = "1=1" if status is None else "status = :status"
+    rows = conn.execute(
+        f"SELECT * FROM tasks WHERE {where} ORDER BY created_at DESC, id DESC "
+        "LIMIT :limit OFFSET :offset",
+        {"status": status, "limit": limit, "offset": offset},
+    ).fetchall()
+    return [_decode_task(d) for d in _rows_to_dicts(rows)]
 
 
 def get_task(conn: sqlite3.Connection, task_id: int) -> dict | None:
@@ -753,12 +850,10 @@ def recover_interrupted_tasks(conn: sqlite3.Connection) -> int:
 
 # --- Inbox ---
 
-def create_inbox_item(
-    conn: sqlite3.Connection, kind: str, message: str, link: str, task_id: int | None = None
-) -> int:
+def create_inbox_item(conn: sqlite3.Connection, kind: str, message: str, link: str) -> int:
     cur = conn.execute(
-        "INSERT INTO inbox_items (kind, message, link, task_id) VALUES (?, ?, ?, ?)",
-        (kind, message, link, task_id),
+        "INSERT INTO inbox_items (kind, message, link) VALUES (?, ?, ?)",
+        (kind, message, link),
     )
     conn.commit()
     return cur.lastrowid
@@ -768,19 +863,6 @@ def get_unresolved_inbox_items(conn: sqlite3.Connection) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
             "SELECT * FROM inbox_items WHERE resolved_at IS NULL ORDER BY created_at DESC"
-        ).fetchall()
-    )
-
-
-def get_recent_resolved_inbox_items(conn: sqlite3.Connection, limit: int = 5, hours: int = 24) -> list[dict]:
-    return _rows_to_dicts(
-        conn.execute(
-            """
-            SELECT * FROM inbox_items
-            WHERE resolved_at IS NOT NULL AND resolved_at >= datetime('now', ? || ' hours')
-            ORDER BY resolved_at DESC LIMIT ?
-            """,
-            (f"-{hours}", limit),
         ).fetchall()
     )
 
@@ -800,25 +882,14 @@ def get_inbox_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
     )
 
 
-def get_inbox_item_by_task_id(conn: sqlite3.Connection, task_id: int) -> dict | None:
-    return _row_to_dict(
-        conn.execute("SELECT * FROM inbox_items WHERE task_id = ?", (task_id,)).fetchone()
-    )
-
-
 def resolve_source_prompts_for_url(conn: sqlite3.Connection, url: str) -> int:
-    """Resolve unresolved "new source / listing detected" follow-up items for
-    `url`. Called once that URL has been dealt with (source added, added as a
-    job, already tracked) or superseded by a fresh detect, so stale prompts and
-    duplicates don't pile up in the inbox. Returns the count resolved."""
+    """Dismiss any needs_action source_detect / job_add_by_url task for `url`,
+    so a stale prompt doesn't linger once that URL has been dealt with (source
+    added, added as a job, already tracked) or superseded by a fresh detect.
+    Returns the count dismissed."""
     rows = conn.execute(
-        """
-        SELECT ii.id AS id, t.params AS params
-        FROM inbox_items ii JOIN tasks t ON t.id = ii.task_id
-        WHERE ii.resolved_at IS NULL
-          AND ii.kind = 'task_followup'
-          AND t.kind IN ('source_detect', 'job_add_by_url')
-        """
+        "SELECT id, params FROM tasks "
+        "WHERE status = 'needs_action' AND kind IN ('source_detect', 'job_add_by_url')"
     ).fetchall()
     ids = []
     for row in rows:
@@ -827,9 +898,10 @@ def resolve_source_prompts_for_url(conn: sqlite3.Connection, url: str) -> int:
                 ids.append(row["id"])
         except (ValueError, TypeError):
             continue
-    for item_id in ids:
+    for tid in ids:
         conn.execute(
-            "UPDATE inbox_items SET resolved_at = datetime('now') WHERE id = ?", (item_id,)
+            "UPDATE tasks SET status = 'dismissed', "
+            "finished_at = COALESCE(finished_at, datetime('now')) WHERE id = ?", (tid,)
         )
     if ids:
         conn.commit()

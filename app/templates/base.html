@@ -338,8 +338,26 @@
     .checklist li { padding: 0.4rem 0; }
     .checklist li.done a { color: var(--success-strong); font-weight: 600; }
     .checklist li.todo a { color: var(--accent); font-weight: 600; }
-    #tasks-list li { display: flex; align-items: center; gap: 0.5rem; }
-    #tasks-list li input[type="checkbox"] { flex: none; margin: 0; }
+    .task-checklist { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+    .task-li { display: flex; align-items: baseline; gap: 0.55rem; padding: 0.4rem 0; border-top: 1px solid var(--border); }
+    .task-li:first-child { border-top: none; }
+    .task-li-icon { flex: none; width: 1.1rem; text-align: center; font-weight: 700; color: var(--text-muted); }
+    .task-li-icon.icon-done { color: var(--success); }
+    .task-li-icon.icon-failed { color: var(--alert); }
+    .task-li-icon.icon-needs_action { color: var(--warning); }
+    .task-li-icon.icon-running { color: var(--accent); }
+    .task-li-body { flex: 1 1 auto; min-width: 0; }
+    .task-li-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+    .task-li-title { font-family: var(--font-serif); font-weight: 600; text-decoration: none; }
+    .task-li-title.task-completed { text-decoration: line-through; color: var(--text-muted); }
+    .task-li-head .task-age { margin-left: auto; white-space: nowrap; flex: none; }
+    .task-li-sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.6rem;
+      margin-top: 0.15rem; font-size: 0.88rem; color: var(--text-secondary); }
+    .task-li-error { color: var(--alert); }
+    .task-li-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+      margin-top: 0.45rem; }
+    .task-li-actions form { display: inline; margin: 0; }
+    .task-li-actions .btn { font-size: 0.9rem; }
     .actionable-block { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
       margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 
@@ -393,11 +411,24 @@
     .notice-dismiss:hover { opacity: 1; }
     .task-completed { text-decoration: line-through; color: #888; }
     .task-age { margin-left: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+    .progress-trigger-busy { opacity: 0.55; pointer-events: none; }
+    @media (prefers-reduced-motion: no-preference) {
+      .progress-trigger-busy { animation: trigger-pulse 1.2s ease-in-out infinite; }
+    }
+    @keyframes trigger-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 var(--accent); }
+      50% { box-shadow: 0 0 0 3px var(--accent-tint); }
+    }
     .task-meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; margin: 0 0 1.25rem; }
     .task-meta dt { color: var(--text-muted); }
     .task-meta dd { margin: 0; }
     .task-log { background: var(--ground); border: 1px solid var(--border); border-radius: 6px;
       padding: 0.75rem 1rem; white-space: pre-wrap; overflow-x: auto; }
+    .task-log-details { margin-top: 1.25rem; }
+    .task-log-details summary { cursor: pointer; color: var(--text-secondary); }
+    .resolved-panel { margin: 1rem 0; padding: 0.6rem 0.9rem; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--surface); color: var(--text-secondary); }
+    .resolved-panel p { margin: 0.15rem 0; }
     .resume-subtitle { margin: -0.5rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
     .resume-subtitle .task-age { margin-left: 0; }
     .resume-message { color: var(--text-secondary); }
@@ -411,9 +442,11 @@
     .resume-panel-note { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
     .resume-panel-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     .resume-panel-warn { color: var(--alert); }
-    /* On the standalone action-needed page the panel's own inline Cancel link
-       is replaced by the page's Dismiss button. */
-    #resume-page a.btn-subtle { display: none; }
+    /* On the task detail page the panel's own inline Cancel link is replaced
+       by the page's Dismiss button. */
+    #resume-page a.btn { display: none; }
+    .task-breadcrumb { margin: 0 0 0.25rem; font-size: 0.85rem; color: var(--text-muted); }
+    .task-breadcrumb a { color: var(--text-secondary); }
     #status-bar:empty { display: none; }
     #status-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;
@@ -556,7 +589,13 @@
       }
 
       var resumePage = document.getElementById("resume-page");
-      var resumeInboxItemId = resumePage ? resumePage.getAttribute("data-inbox-item-id") : null;
+
+      function resetTrigger(el) {
+        if (!el) return;
+        delete el.dataset.progressRunning;
+        el.removeAttribute("aria-disabled");
+        el.classList.remove("progress-trigger-busy");
+      }
 
       var watched = {}; // task_id -> {el, targetSelector, oobMode, bodyFieldNames}
 
@@ -565,32 +604,30 @@
         if (!w) return;
         delete watched[taskId];
         if (task.status === "failed") {
-          delete w.el.dataset.progressRunning;
+          resetTrigger(w.el);
           showNotice("<p>" + escapeHtml(task.error || "Failed") + "</p>", "warning");
           return;
         }
-        // The standalone action-needed page has no in-page target to swap into.
-        // The action succeeded, so leave: clear the follow-up item and go back
-        // where we came from, reloaded.
+        // The task detail page (formerly the standalone resume page) has no
+        // in-page target to swap into. If the task now needs the *next*
+        // decision, reload so the fresh panel shows; otherwise the action
+        // succeeded — go back where we came from, reloaded.
         if (resumePage) {
-          var leave = function () {
-            var dest = "/";
-            var ref = document.referrer;
-            if (ref) {
-              try {
-                var u = new URL(ref);
-                if (u.origin === window.location.origin && u.pathname !== window.location.pathname) {
-                  dest = ref;
-                }
-              } catch (e) {}
-            }
-            window.location.assign(dest);
-          };
-          if (resumeInboxItemId) {
-            fetch("/inbox/" + resumeInboxItemId + "/resolve", { method: "POST" }).then(leave, leave);
-          } else {
-            leave();
+          if (task.status === "needs_action") {
+            window.location.reload();
+            return;
           }
+          var dest = "/";
+          var ref = document.referrer;
+          if (ref) {
+            try {
+              var u = new URL(ref);
+              if (u.origin === window.location.origin && u.pathname !== window.location.pathname) {
+                dest = ref;
+              }
+            } catch (e) {}
+          }
+          window.location.assign(dest);
           return;
         }
         var result = task.result || {};
@@ -636,41 +673,23 @@
         // Removed only after the swap above lands, so anything watching this
         // attribute (e.g. profile/_editor.html's textarea-lock safety net)
         // sees the real post-swap DOM state, not a still-empty target.
-        delete w.el.dataset.progressRunning;
+        resetTrigger(w.el);
       }
+
+      var WATCH_TERMINAL = ["done", "failed", "needs_action"];
 
       function pollWatched(taskId) {
         var w = watched[taskId];
         if (!w) return;
-        fetch("/tasks/" + taskId).then(function (r) { return r.json(); }).then(function (task) {
+        fetch("/tasks/" + taskId + "/state").then(function (r) { return r.json(); }).then(function (task) {
           if (!watched[taskId]) return;
-          if (task.status === "done" || task.status === "failed") {
+          if (WATCH_TERMINAL.indexOf(task.status) !== -1) {
             finishWatched(taskId, task);
           } else {
             setTimeout(function () { pollWatched(taskId); }, 2000);
           }
         }).catch(function () {
           setTimeout(function () { pollWatched(taskId); }, 2000);
-        });
-      }
-
-      function pollBatch(taskIds, el) {
-        Promise.all(taskIds.map(function (id) {
-          return fetch("/tasks/" + id).then(function (r) { return r.json(); });
-        })).then(function (tasks) {
-          var pending = tasks.some(function (t) { return t.status !== "done" && t.status !== "failed"; });
-          if (pending) {
-            setTimeout(function () { pollBatch(taskIds, el); }, 2000);
-            return;
-          }
-          delete el.dataset.progressRunning;
-          var failedCount = tasks.filter(function (t) { return t.status === "failed"; }).length;
-          if (failedCount) {
-            showNotice("<p>" + failedCount + " of " + tasks.length + " fetch(es) failed.</p>", "warning");
-          }
-          location.reload();
-        }).catch(function () {
-          setTimeout(function () { pollBatch(taskIds, el); }, 2000);
         });
       }
 
@@ -687,6 +706,18 @@
           return;
         }
         el.dataset.progressRunning = "1";
+        var ap = el.closest(".add-panel");
+        if (ap) {
+          // B2: the panel's input has served its purpose — collapse it. No
+          // busy/pulse state here: the button is about to be hidden and its
+          // glow would bleed a sliver during the collapse. The toast + the
+          // Start-page card are the feedback.
+          ap.classList.remove("add-panel-open");
+        } else {
+          // B1: a standalone / per-row trigger stays on screen — show it's busy.
+          el.setAttribute("aria-disabled", "true");
+          el.classList.add("progress-trigger-busy");
+        }
 
         var url = el.getAttribute("data-progress-url");
         var targetSelector = el.getAttribute("data-progress-target");
@@ -699,7 +730,7 @@
         var body = null;
         if (el.hasAttribute("data-progress-jobs")) {
           var checked = document.querySelectorAll('input[name="job_ids"]:checked');
-          if (!checked.length) { delete el.dataset.progressRunning; return; }
+          if (!checked.length) { resetTrigger(el); return; }
           body = new URLSearchParams();
           checked.forEach(function (cb) { body.append("job_ids", cb.value); });
         }
@@ -715,7 +746,7 @@
           for (var j = 0; j < bodyFieldNames.length; j++) {
             var fieldName = bodyFieldNames[j];
             var fieldEl = document.querySelector(el.getAttribute("data-progress-body-" + fieldName));
-            if (!fieldEl || !fieldEl.value) { delete el.dataset.progressRunning; return; }
+            if (!fieldEl || !fieldEl.value) { resetTrigger(el); return; }
             body.append(fieldName, fieldEl.value);
           }
         }
@@ -726,16 +757,8 @@
           return r.json();
         }).then(function (data) {
           if (data.skipped) {
-            delete el.dataset.progressRunning;
+            resetTrigger(el);
             showNotice("<p>" + escapeHtml(data.message || "Nothing to do.") + "</p>", "info");
-            return;
-          }
-          if (data.task_ids) {
-            showNotice(
-              "<p>" + escapeHtml("New task: " + startLabel) + " (" + data.task_ids.length + " source" +
-              (data.task_ids.length === 1 ? "" : "s") + ")</p>", "info"
-            );
-            pollBatch(data.task_ids, el);
             return;
           }
           var noticeText = data.already_active
@@ -794,7 +817,7 @@
             var statusWord = current.status === "running" ? "started" : current.status;
             parts.push('<span>' + escapeHtml(statusWord) + '</span>');
           }
-          parts.push('<a href="/tasks/' + current.id + '/log">details</a>');
+          parts.push('<a href="/tasks/' + current.id + '">details</a>');
           if (current.link) parts.push('<a href="' + escapeHtml(current.link) + '">view job</a>');
           if (queuedCount > 0) parts.push('<span>+' + queuedCount + ' queued</span>');
         }

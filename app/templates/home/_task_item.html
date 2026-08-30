@@ -1,15 +1,13 @@
-{% if done %}
-<li class="task-completed">
-  <input type="checkbox" checked disabled>
-  {{ item.message }}
-  <span class="task-age">{{ item.created_at | age }}</span>
+<li class="task-li task-li-notice" id="inbox-item-{{ notice.id }}">
+  <span class="task-li-icon icon-needs_action" aria-hidden="true">!</span>
+  <div class="task-li-body">
+    <div class="task-li-head">
+      <a class="task-li-title" href="{{ notice.link }}">{{ notice.message }}</a>
+      <span class="task-age">{{ notice.created_at | age }}</span>
+    </div>
+    <div class="task-li-actions">
+      <button type="button" class="btn" hx-post="/inbox/{{ notice.id }}/resolve"
+              hx-target="#inbox-item-{{ notice.id }}" hx-swap="outerHTML">Dismiss</button>
+    </div>
+  </div>
 </li>
-{% else %}
-<li id="inbox-item-{{ item.id }}">
-  <input type="checkbox" hx-post="/inbox/{{ item.id }}/resolve"
-    hx-target="#inbox-item-{{ item.id }}" hx-swap="outerHTML"
-    aria-label="Mark done">
-  <a href="{{ item.link }}">{{ item.message }}</a>
-  <span class="task-age">{{ item.created_at | age }}</span>
-</li>
-{% endif %}

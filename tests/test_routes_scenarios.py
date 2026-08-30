@@ -394,6 +394,22 @@ def test_manual_add_criterion_does_not_mark_feedback_handled(client, conn):
     assert q.get_recent_feedback_notes(conn, sid) == [{"direction": "lower", "note": "too junior"}]
 
 
+def test_apply_criteria_proposals_shows_confirmation(client, conn):
+    sid = q.insert_scenario(conn, "S", "")
+    resp = client.post(
+        f"/scenarios/{sid}/refine/accept",
+        data={"apply_0": "on", "kind_0": "add", "weight_0": "must", "text_0": "Remote OK",
+              "feedback_anchor": ""},
+    )
+    assert "✓" in resp.text and "added" in resp.text
+
+
+def test_apply_criteria_no_changes_shows_reviewed(client, conn):
+    sid = q.insert_scenario(conn, "S", "")
+    resp = client.post(f"/scenarios/{sid}/refine/accept", data={"feedback_anchor": ""})
+    assert "✓" in resp.text and "Reviewed" in resp.text
+
+
 def test_apply_batch_inserts_checked_add_and_deletes_checked_remove(client, conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     cid = q.insert_criterion(conn, sid, "Must be remote", "must")

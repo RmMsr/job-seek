@@ -98,33 +98,79 @@ def test_execute_task_unknown_kind_fails_immediately(conn):
     assert "no_such_kind" in fetched["error"]
 
 
-def test_execute_task_creates_inbox_item_when_needs_action(conn):
-    @te.register_task_kind("test_execute_needs_action")
-    def fn(conn, client, model, config, params):
-        yield "checking"
-        return {"needs_action": True, "action_message": "please decide", "action_link": "/somewhere"}
+def test_needs_action_result_sets_needs_action_status(conn):
+    @te.register_task_kind("_t_needs")
+    def _gen(conn, client, model, config, params):
+        yield "working"
+        return {"needs_action": True, "resume_html": "<p>confirm</p>"}
 
-    task = q.enqueue_task(conn, kind="test_execute_needs_action", params={})
-    te.execute_task(conn, None, None, None, task)
-    items = q.get_unresolved_inbox_items(conn)
-    assert len(items) == 1
-    assert items[0]["message"] == "please decide"
-    assert items[0]["link"] == "/somewhere"
-    assert q.get_inbox_item_by_task_id(conn, task["id"])["id"] == items[0]["id"]
-    del te.TASK_KINDS["test_execute_needs_action"]
+    t = q.enqueue_task(conn, kind="_t_needs", params={})
+    te.execute_task(conn, None, None, None, q.get_task(conn, t["id"]))
+    row = q.get_task(conn, t["id"])
+    assert row["status"] == "needs_action"
+    assert row["finished_at"] is not None
+    assert conn.execute("SELECT COUNT(*) FROM inbox_items").fetchone()[0] == 0
+    del te.TASK_KINDS["_t_needs"]
 
 
-def test_execute_task_needs_action_defaults_link_to_resume(conn):
-    @te.register_task_kind("test_execute_needs_action_resume")
-    def fn(conn, client, model, config, params):
-        yield "checking"
-        return {"needs_action": True, "action_message": "decide", "resume_html": "<p>panel</p>"}
+def test_plain_result_still_completes(conn):
+    @te.register_task_kind("_t_plain")
+    def _gen(conn, client, model, config, params):
+        yield "x"
+        return {"html_chunks": []}
 
-    task = q.enqueue_task(conn, kind="test_execute_needs_action_resume", params={})
-    te.execute_task(conn, None, None, None, task)
-    items = q.get_unresolved_inbox_items(conn)
-    assert items[0]["link"] == f"/tasks/{task['id']}/resume"
-    del te.TASK_KINDS["test_execute_needs_action_resume"]
+    t = q.enqueue_task(conn, kind="_t_plain", params={})
+    te.execute_task(conn, None, None, None, q.get_task(conn, t["id"]))
+    assert q.get_task(conn, t["id"])["status"] == "done"
+    del te.TASK_KINDS["_t_plain"]
+
+
+def test_origin_task_sentinel_gets_root_id(conn):
+    # A root task (no parent): the sentinel resolves to its own id.
+    @te.register_task_kind("_t_root")
+    def _gen(conn, client, model, config, params):
+        yield "x"
+        return {"needs_action": True,
+                "resume_html": '<input value="__ORIGIN_TASK__">',
+                "html_chunks": ['<form data-x="__ORIGIN_TASK__">']}
+
+    t = q.enqueue_task(conn, kind="_t_root", params={})
+    te.execute_task(conn, None, None, None, q.get_task(conn, t["id"]))
+    row = q.get_task(conn, t["id"])
+    assert row["result"]["resume_html"] == f'<input value="{t["id"]}">'
+    assert row["result"]["html_chunks"] == [f'<form data-x="{t["id"]}">']
+    del te.TASK_KINDS["_t_root"]
+
+
+def test_origin_task_sentinel_flattens_to_root_for_a_child(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+
+    @te.register_task_kind("_t_child")
+    def _gen(conn, client, model, config, params):
+        yield "x"
+        return {"needs_action": True, "resume_html": '<input value="__ORIGIN_TASK__">'}
+
+    c = q.enqueue_task(conn, kind="_t_child", params={}, parent_task_id=root["id"])
+    te.execute_task(conn, None, None, None, q.get_task(conn, c["id"]))
+    assert q.get_task(conn, c["id"])["result"]["resume_html"] == f'<input value="{root["id"]}">'
+    del te.TASK_KINDS["_t_child"]
+
+
+def test_kind_fn_receives_own_task_id(conn):
+    seen = {}
+
+    @te.register_task_kind("_t_selfid")
+    def _gen(conn, client, model, config, params):
+        seen["id"] = params["_task_id"]
+        return {}
+        yield  # pragma: no cover
+
+    t = q.enqueue_task(conn, kind="_t_selfid", params={})
+    te.execute_task(conn, None, None, None, q.get_task(conn, t["id"]))
+    assert seen["id"] == t["id"]
+    # not persisted onto the stored params
+    assert "_task_id" not in q.get_task(conn, t["id"])["params"]
+    del te.TASK_KINDS["_t_selfid"]
 
 
 def test_run_worker_forever_processes_queued_task_then_stops(conn, monkeypatch):

@@ -31,3 +31,19 @@ templates.env.filters["markdown_text"] = markdown_to_text
 templates.env.filters["time_ago"] = time_ago
 templates.env.filters["age"] = age
 templates.env.filters["score_style"] = score_style
+
+_STATUS_ICONS = {
+    "queued": "○",
+    "running": "◔",
+    "needs_action": "!",
+    "done": "✓",
+    "failed": "✗",
+    "dismissed": "–",
+}
+
+
+def status_icon(status: str) -> str:
+    return _STATUS_ICONS.get(status, "•")
+
+
+templates.env.filters["status_icon"] = status_icon

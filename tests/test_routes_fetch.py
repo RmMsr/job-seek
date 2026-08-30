@@ -144,38 +144,44 @@ def test_fetch_source_task_flags_auth_error_as_needing_action(conn):
     fetched = q.get_task(conn, task["id"])
     assert fetched["result"]["needs_action"] is True
     assert "reconnect Slack" in fetched["result"]["action_message"]
-    items = q.get_unresolved_inbox_items(conn)
-    assert len(items) == 1
+    assert fetched["result"]["action_link"] == f"/sources#source-row-{sid}"
+    assert fetched["status"] == "needs_action"
+    # needs_action is now a task status, not a mirrored inbox item.
+    assert [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"] == []
 
 
-def test_post_fetch_all_enqueues_one_task_per_source(client, conn):
+def test_post_fetch_all_enqueues_one_root_that_fans_out_children(client, conn):
     sid1 = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     sid2 = q.insert_source(conn, "other.no", "https://other.no", "generic_listing")
     resp = client.post("/fetch/all")
     assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["task_ids"]) == 2
-    tasks = [q.get_task(conn, tid) for tid in data["task_ids"]]
-    assert {t["kind"] for t in tasks} == {"fetch_source"}
-    assert {t["params"]["source_id"] for t in tasks} == {sid1, sid2}
+    root_id = resp.json()["task_id"]
+    root = q.get_task(conn, root_id)
+    assert root["kind"] == "fetch_all" and root["parent_task_id"] is None
+    execute_task(conn, MagicMock(), "m", MagicMock(browser_profile_dir="/tmp"), root)
+    kids = q.get_task_children(conn, root_id)
+    assert {k["kind"] for k in kids} == {"fetch_source"}
+    assert {k["params"]["source_id"] for k in kids} == {sid1, sid2}
+    assert all(k["parent_task_id"] == root_id for k in kids)
 
 
-def test_post_fetch_all_excludes_manual_and_disabled_sources(client, conn):
+def test_fetch_all_child_fanout_excludes_manual_and_disabled(client, conn):
     q.get_or_create_manual_source(conn)
     disabled = q.insert_source(conn, "off.no", "https://off.no", "generic_listing")
     q.update_source(conn, disabled, name="off.no", url="https://off.no", fetcher_type="generic_listing", enabled=False)
     q.insert_source(conn, "on.no", "https://on.no", "generic_listing")
     resp = client.post("/fetch/all")
-    data = resp.json()
-    assert len(data["task_ids"]) == 1
+    root_id = resp.json()["task_id"]
+    execute_task(conn, MagicMock(), "m", MagicMock(browser_profile_dir="/tmp"), q.get_task(conn, root_id))
+    assert len(q.get_task_children(conn, root_id)) == 1
 
 
-def test_post_fetch_all_reuses_already_active_source_task(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
-    existing = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
-    resp = client.post("/fetch/all")
-    data = resp.json()
-    assert data["task_ids"] == [existing["id"]]
+def test_post_fetch_all_dedupes_a_still_running_root(client, conn):
+    q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    first = client.post("/fetch/all").json()["task_id"]
+    second = client.post("/fetch/all").json()
+    assert second["task_id"] == first
+    assert second["already_active"] is True
 
 
 def test_post_fetch_all_with_no_sources_is_skipped(client, conn):

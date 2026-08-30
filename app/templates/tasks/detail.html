@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ pres.title }} — Job Seek{% endblock %}
+{% block content %}
+{% if parent %}<p class="task-breadcrumb">Part of: <a href="/tasks/{{ parent.id }}">{{ parent.title }}</a></p>{% endif %}
+<h1>{{ pres.title }}</h1>
+{% if pres.goal %}<p class="resume-message">{{ pres.goal }}</p>{% endif %}
+<p class="resume-subtitle"><strong>{{ pres.next_step }}</strong></p>
+
+<dl class="task-meta">
+  <dt>State</dt><dd id="task-log-status">{{ pres.status if is_group else task.status }}{% if task.error and not is_group %} — {{ task.error }}{% endif %}</dd>
+  <dt>Created</dt><dd>{{ task.created_at | age }}</dd>
+  {% if task.started_at %}<dt>Started</dt><dd>{{ task.started_at | age }}</dd>{% endif %}
+  {% if task.finished_at and not is_group %}<dt>{{ 'Needs you since' if task.status == 'needs_action' else 'Finished' }}</dt><dd>{{ task.finished_at | age }}</dd>{% endif %}
+</dl>
+
+{% if resume_html %}
+<div id="resume-page" data-task-id="{{ panel_task_id }}" style="margin:1.25rem 0;">{{ resume_html | safe }}</div>
+<form method="post" action="/tasks/{{ panel_task_id }}/dismiss" class="resume-dismiss">
+  <button type="submit" class="btn">Dismiss</button>
+</form>
+{% elif awaiting %}
+{# needs-you but no inline panel — the subtitle already shows action_message #}
+<div class="task-li-actions" style="margin-top:1.25rem;">
+  {% if pres.action_link %}<a class="btn btn-primary" href="{{ pres.action_link }}">Open</a>{% endif %}
+  <form method="post" action="/tasks/{{ panel_task_id }}/dismiss"><button type="submit" class="btn">Dismiss</button></form>
+</div>
+{% elif resolved_panel %}
+{% include "tasks/_resolved_panel.html" %}
+{% endif %}
+
+{% if is_group %}
+<h2>Steps</h2>
+<ol class="task-steps">
+{% for s in steps %}
+  <li>
+    <a href="/tasks/{{ s.task.id }}">{{ s.pres.title }}</a>
+    <span class="task-li-icon icon-{{ s.task.status }}" aria-hidden="true">{{ s.task.status | status_icon }}</span>
+    <span class="task-step-note">{{ s.pres.next_step }}</span>
+  </li>
+{% endfor %}
+</ol>
+{% endif %}
+
+{% if pres.results %}
+<h2>Results</h2>
+<ul>{% for r in pres.results %}<li><a href="{{ r.href }}">{{ r.label }}</a></li>{% endfor %}</ul>
+{% endif %}
+
+{% if not is_group %}
+<details class="task-log-details" {% if active %}open{% endif %}>
+  <summary>Log</summary>
+  <pre id="task-log-lines" class="task-log">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+</details>
+{% endif %}
+
+{% if active %}
+<script>
+(function () {
+  {% if is_group %}
+  setInterval(function () { location.reload(); }, 3000);
+  {% else %}
+  var pre = document.getElementById("task-log-lines");
+  var statusEl = document.getElementById("task-log-status");
+  setInterval(function () {
+    fetch("/tasks/{{ task.id }}/state").then(function (r) { return r.json(); }).then(function (t) {
+      pre.textContent = (t.log || "").trim();
+      statusEl.textContent = t.status;
+      if (["done", "failed", "needs_action", "dismissed"].indexOf(t.status) !== -1) location.reload();
+    });
+  }, 2000);
+  {% endif %}
+})();
+</script>
+{% endif %}
+
+<p style="margin-top:1.5rem;"><a href="/tasks">All tasks</a></p>
+{% endblock %}

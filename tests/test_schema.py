@@ -933,10 +933,83 @@ def test_inbox_items_table_exists():
     conn.row_factory = sqlite3.Row
     init_db(conn)
     conn.execute(
-        "INSERT INTO inbox_items (kind, message, link) VALUES ('task_followup', 'x', '/y')"
+        "INSERT INTO inbox_items (kind, message, link) VALUES ('browser_missing', 'x', '/y')"
     )
     row = conn.execute("SELECT * FROM inbox_items").fetchone()
     assert row["resolved_at"] is None
+
+
+def test_tasks_table_has_parent_pointer_and_wide_status(conn):
+    init_db(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+    assert "parent_task_id" in cols
+    assert "group_id" not in cols
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()[0]
+    for s in ("queued", "running", "needs_action", "done", "failed", "dismissed"):
+        assert f"'{s}'" in sql
+    assert "REFERENCES tasks(id)" in sql
+
+
+def test_migrate_group_id_to_parent_task_id_hard_cutover(conn):
+    # Simulate a DB left on the interim group_id shape.
+    conn.executescript(
+        """
+        CREATE TABLE tasks (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
+            group_id TEXT,
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued','running','needs_action','done','failed','dismissed')),
+            log TEXT NOT NULL DEFAULT '', result TEXT, error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT);
+        INSERT INTO tasks (id, kind, group_id, status) VALUES (1, 'fetch_source', 'fa-abc', 'done');
+        INSERT INTO tasks (id, kind, group_id, status) VALUES (2, 'fetch_source', 'fa-abc', 'queued');
+        """
+    )
+    conn.commit()
+    init_db(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+    assert "group_id" not in cols and "parent_task_id" in cols
+    assert conn.execute("SELECT parent_task_id FROM tasks WHERE id=1").fetchone()[0] is None
+    assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 2
+
+
+def test_inbox_items_has_no_task_id(conn):
+    init_db(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(inbox_items)")}
+    assert "task_id" not in cols
+
+
+def test_migration_from_legacy_shape():
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.executescript(
+        """
+        CREATE TABLE tasks (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','done','failed')),
+            log TEXT NOT NULL DEFAULT '', result TEXT, error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT);
+        CREATE TABLE inbox_items (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, message TEXT NOT NULL,
+            link TEXT NOT NULL, task_id INTEGER REFERENCES tasks(id),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), resolved_at TEXT);
+        INSERT INTO tasks (id, kind, params, status, result, finished_at)
+            VALUES (1, 'source_detect', '{}', 'done', '{"needs_action": true}', datetime('now'));
+        INSERT INTO tasks (id, kind, params, status, result, finished_at)
+            VALUES (2, 'source_detect', '{}', 'done', '{"needs_action": true}', datetime('now'));
+        INSERT INTO inbox_items (kind, message, link, task_id) VALUES ('task_followup', 'm', '/t/1', 1);
+        INSERT INTO inbox_items (kind, message, link, task_id, resolved_at)
+            VALUES ('task_followup', 'm', '/t/2', 2, datetime('now'));
+        INSERT INTO inbox_items (kind, message, link) VALUES ('browser_missing', 'b', '/sources');
+        """
+    )
+    c.commit()
+    init_db(c)
+    assert c.execute("SELECT status FROM tasks WHERE id=1").fetchone()[0] == "needs_action"
+    assert c.execute("SELECT status FROM tasks WHERE id=2").fetchone()[0] == "done"
+    assert c.execute("SELECT COUNT(*) FROM inbox_items WHERE kind='task_followup'").fetchone()[0] == 0
+    assert "task_id" not in {r[1] for r in c.execute("PRAGMA table_info(inbox_items)")}
+    assert c.execute("SELECT COUNT(*) FROM inbox_items WHERE kind='browser_missing'").fetchone()[0] == 1
+    c.close()
 
 
 def test_migrate_canonicalizes_job_urls_and_collapses_collisions(conn):

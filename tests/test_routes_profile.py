@@ -310,6 +310,20 @@ def test_refine_profile_alone_does_not_mark_feedback_handled(client, conn):
     assert len(q.get_unhandled_profile_notes(conn)) == 1
 
 
+def test_accept_profile_proposals_shows_decided_summary(client, conn):
+    q.upsert_profile(conn, "## Technologies\n\n- Python\n")
+    resp = client.post(
+        "/profile/refine/accept",
+        data={"kind_0": "add", "section_0": "Technologies", "text_0": "AI/ML", "apply_0": "on"},
+    )
+    assert "✓" in resp.text and "applied" in resp.text
+
+
+def test_accept_profile_proposals_no_changes_shows_reviewed(client, conn):
+    resp = client.post("/profile/refine/accept", data={"job_ids": "1"})
+    assert "✓" in resp.text and "Reviewed" in resp.text
+
+
 def test_accept_profile_proposals_applies_checked_add(client, conn):
     q.upsert_profile(conn, "## Technologies\n\n- Python\n")
     resp = client.post(

@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from app.config import check_config_status
 from app.deps import get_db_optional
 from app.db import queries as q
+from app.routes.tasks import task_presentation, root_presentation
 from app.template_env import templates
 
 router = APIRouter()
@@ -35,7 +36,13 @@ def home(
         context["onboarding_complete"] = all(item["done"] for item in checklist)
         context["jobs_new"] = counts["new"]
         context["last_fetch_at"] = q.get_last_fetch_completed_at(conn)
-        context["pending_tasks"] = q.get_unresolved_inbox_items(conn)
-        context["recent_completed_tasks"] = q.get_recent_resolved_inbox_items(conn)
+        entries = q.get_dashboard_tasks(conn)
+        for e in entries:
+            e["pres"] = (
+                root_presentation(conn, e["root"], e["children"]) if e["children"]
+                else task_presentation(conn, e["root"])
+            )
+        context["task_entries"] = entries
+        context["standalone_notices"] = q.get_unresolved_inbox_items(conn)
 
     return templates.TemplateResponse(request, "home/index.html", context)

@@ -88,51 +88,149 @@ def test_home_full_setup_shows_actionable_block(client, conn):
 def test_home_shows_no_tasks_section_when_nothing_pending_or_resolved(client, conn):
     _use_test_db(conn)
     resp = client.get("/")
-    assert "Tasks" not in resp.text
+    assert "all tasks →" not in resp.text
 
 
-def test_home_shows_pending_task_with_resolve_checkbox(client, conn):
+def test_home_shows_active_task_card(client, conn):
     _use_test_db(conn)
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="please decide", link="/somewhere")
-    resp = client.get("/")
-    assert "please decide" in resp.text
-    assert 'href="/somewhere"' in resp.text
-    assert f'hx-post="/inbox/{item_id}/resolve"' in resp.text
-    assert 'type="checkbox"' in resp.text
-    assert "Dismiss</button>" not in resp.text
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    html = client.get("/").text
+    assert "Fetch: Cord" in html
+    assert "Queued" in html
+    # rendered as a checklist <li>, not a bordered card
+    assert 'class="checklist task-checklist"' in html
+    assert "task-li" in html
 
 
-def test_home_resolved_task_shows_checked_disabled_box(client, conn):
+def test_home_child_task_links_to_own_detail_not_a_group(client, conn):
     _use_test_db(conn)
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="already handled", link="/x")
-    q.resolve_inbox_item(conn, item_id)
-    resp = client.get("/")
-    assert 'class="task-completed"' in resp.text
-    assert "disabled" in resp.text
-    assert "checked" in resp.text
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    html = client.get("/").text
+    # the root row links to /tasks/{root}, never to a /tasks/group/ URL
+    assert f'href="/tasks/{root["id"]}"' in html
+    assert "/tasks/group/" not in html
 
 
-def test_home_shows_recently_resolved_task_struck_through(client, conn):
+def test_home_shows_needs_action_card_with_dismiss(client, conn):
     _use_test_db(conn)
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="already handled", link="/x")
-    q.resolve_inbox_item(conn, item_id)
-    resp = client.get("/")
-    assert 'class="task-completed"' in resp.text
-    assert "already handled" in resp.text
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "Confirm the detected source"})
+    q.set_task_needs_action(conn, t["id"])
+    html = client.get("/").text
+    assert "Confirm the detected source" in html
+    assert f'/tasks/{t["id"]}/dismiss' in html
 
 
-def test_home_omits_resolved_task_older_than_24h(client, conn):
+def test_home_shows_fetch_all_root_as_one_aggregate_row(client, conn):
     _use_test_db(conn)
-    item_id = q.create_inbox_item(conn, kind="task_followup", message="a day-old completed item", link="/x")
-    q.resolve_inbox_item(conn, item_id)
-    conn.execute("UPDATE inbox_items SET resolved_at = datetime('now', '-25 hours') WHERE id = ?", (item_id,))
-    resp = client.get("/")
-    assert "a day-old completed item" not in resp.text
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    html = client.get("/").text
+    assert "Fetch all" in html
+    assert "2 sources" in html  # count moved into the derived next-step line
+    assert f'href="/tasks/{root["id"]}"' in html
+    # children are not their own top-level rows
+    assert f'href="/tasks/{c1["id"]}"' not in html
 
 
-def test_home_pending_task_shows_age(client, conn):
+def test_home_done_task_without_results_has_no_second_line(client, conn):
     _use_test_db(conn)
-    q.create_inbox_item(conn, kind="task_followup", message="decide me", link="/x")
-    resp = client.get("/")
-    assert 'class="task-age"' in resp.text
-    assert "just now" in resp.text
+    t = q.enqueue_task(conn, kind="source_confirm",
+                       params={"url": "https://x.io", "name": "N", "fetcher_type": "generic_listing"})
+    q.complete_task(conn, t["id"], {})  # no source_id -> no result links
+    html = client.get("/").text
+    li = html.split(f'task-card-{t["id"]}', 1)[1].split("</li>", 1)[0]
+    assert "task-li-sub" not in li  # glyph + title + age only
+    assert ">Done<" not in li and "✓ Done" not in li
+
+
+def test_home_done_task_with_results_still_shows_them(client, conn):
+    _use_test_db(conn)
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 0})
+    html = client.get("/").text
+    li = html.split(f'task-card-{t["id"]}', 1)[1].split("</li>", 1)[0]
+    assert "Jobs from Cord" in li
+
+
+def _card_li(html, task_id):
+    return html.split(f'task-card-{task_id}', 1)[1].split("</li>", 1)[0]
+
+
+def test_home_needs_action_with_panel_shows_review(client, conn):
+    _use_test_db(conn)
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "Confirm it",
+                                    "resume_html": "<p>panel</p>"})
+    q.set_task_needs_action(conn, t["id"])
+    li = _card_li(client.get("/").text, t["id"])
+    assert f'class="btn btn-primary" href="/tasks/{t["id"]}">Review</a>' in li
+    assert f'<form method="post" action="/tasks/{t["id"]}/dismiss"><button type="submit" class="btn">Dismiss</button></form>' in li
+    assert '<div class="task-li-actions">' in li
+    assert "task-li-sub task-li-actions" not in li
+
+
+def test_home_needs_action_no_panel_but_link_shows_open(client, conn):
+    _use_test_db(conn)
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.complete_task(conn, t["id"], {"needs_action": True,
+                                    "action_message": "Reconnect Slack to keep fetching",
+                                    "action_link": "/sources#source-row-1"})
+    q.set_task_needs_action(conn, t["id"])
+    li = _card_li(client.get("/").text, t["id"])
+    assert "Reconnect Slack to keep fetching" in li
+    assert '<a class="btn btn-primary" href="/sources#source-row-1">Open</a>' in li
+    assert ">Review</a>" not in li  # no dead Review → detail page
+    assert f'action="/tasks/{t["id"]}/dismiss"' in li
+
+
+def test_home_needs_action_no_panel_no_link_dismiss_only(client, conn):
+    _use_test_db(conn)
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "action_message": "Something is off"})
+    q.set_task_needs_action(conn, t["id"])
+    li = _card_li(client.get("/").text, t["id"])
+    assert "Something is off" in li
+    assert ">Review</a>" not in li and ">Open</a>" not in li
+    assert f'action="/tasks/{t["id"]}/dismiss"' in li
+
+
+def test_home_browser_missing_notice_dismiss_is_a_button(client, conn):
+    _use_test_db(conn)
+    q.create_inbox_item(conn, kind="browser_missing", message="Install chromium", link="/sources")
+    html = client.get("/").text
+    li = html.split("inbox-item-", 1)[1].split("</li>", 1)[0]
+    assert '<div class="task-li-actions">' in li
+    assert 'class="btn"' in li and "btn-link" not in li
+
+
+def test_home_hides_old_done_task(client, conn):
+    _use_test_db(conn)
+    t = q.enqueue_task(conn, kind="fetch_source", params={})
+    q.complete_task(conn, t["id"], {})
+    conn.execute("UPDATE tasks SET finished_at = datetime('now','-2 days') WHERE id = ?", (t["id"],))
+    conn.commit()
+    assert f'/tasks/{t["id"]}"' not in client.get("/").text
+
+
+def test_home_resolved_needs_action_card_shows_decided_summary(client, conn):
+    _use_test_db(conn)
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, t["id"], {"needs_action": True, "resume_html": "<form id='live'>x</form>"})
+    q.set_task_needs_action(conn, t["id"])
+    q.dismiss_task(conn, t["id"])
+    html = client.get("/").text
+    assert "<form id='live'>" not in html
+    # dismissed row: struck-through title, no live panel
+    assert "task-completed" in html
+
+
+def test_home_still_shows_browser_missing_notice(client, conn):
+    _use_test_db(conn)
+    q.create_inbox_item(conn, kind="browser_missing", message="Install chromium", link="/sources")
+    assert "Install chromium" in client.get("/").text

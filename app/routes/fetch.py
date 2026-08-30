@@ -52,6 +52,21 @@ def _task_fetch_source(conn, client, model, config, params):
     return result
 
 
+@register_task_kind("fetch_all")
+def _task_fetch_all(conn, client, model, config, params):
+    """Root task for a "fetch everything" run: fan out one fetch_source child
+    per enabled source, all pointing back at this task. Completes immediately —
+    its displayed state is derived from the children."""
+    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
+    for s in sources:
+        q.enqueue_task(
+            conn, kind="fetch_source", params={"source_id": s["id"]},
+            parent_task_id=params["_task_id"],
+        )
+    yield f"Queued {len(sources)} source{'s' if len(sources) != 1 else ''}"
+    return {}
+
+
 @router.get("/fetch", response_class=HTMLResponse)
 def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "fetch/panel.html", _fetch_panel_context(conn))
@@ -62,8 +77,8 @@ def trigger_fetch_all(conn: sqlite3.Connection = Depends(get_db)):
     sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
     if not sources:
         return {"skipped": True, "message": "No sources to fetch."}
-    tasks = [q.enqueue_task(conn, kind="fetch_source", params={"source_id": s["id"]}) for s in sources]
-    return {"task_ids": [t["id"] for t in tasks]}
+    task = q.enqueue_task(conn, kind="fetch_all", params={})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/fetch/{source_id}")

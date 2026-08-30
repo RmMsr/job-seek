@@ -32,17 +32,18 @@
   {% endif %}
 {% endif %}
 
-{% if pending_tasks or recent_completed_tasks %}
+{% if task_entries or standalone_notices %}
 <section class="tasks-section">
-  <h2>Tasks</h2>
-  <ul class="checklist" id="tasks-list">
-    {% for item in pending_tasks %}
-      {% set done = False %}
-      {% include "home/_task_item.html" with context %}
+  <h2>Tasks <a href="/tasks" style="font-size:0.7em; font-weight:400;">all tasks →</a></h2>
+  <ul class="checklist task-checklist" id="tasks-list">
+    {% for notice in standalone_notices %}
+      {% include "home/_task_item.html" %}
     {% endfor %}
-    {% for item in recent_completed_tasks %}
-      {% set done = True %}
-      {% include "home/_task_item.html" with context %}
+    {% for entry in task_entries %}
+      {% set task = entry.root %}{% set pres = entry.pres %}
+      {% if entry.children %}{% include "home/_task_group.html" %}
+      {% else %}{% include "home/_task_card.html" %}
+      {% endif %}
     {% endfor %}
   </ul>
 </section>

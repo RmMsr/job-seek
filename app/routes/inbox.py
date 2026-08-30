@@ -12,7 +12,5 @@ router = APIRouter()
 @router.post("/inbox/{item_id}/resolve", response_class=HTMLResponse)
 def inbox_resolve(item_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     q.resolve_inbox_item(conn, item_id)
-    item = q.get_inbox_item(conn, item_id)
-    if item is None:
-        return HTMLResponse(content="")
-    return templates.TemplateResponse(request, "home/_task_item.html", {"item": item, "done": True})
+    # The card is removed from the page (hx-swap="outerHTML" with empty body).
+    return HTMLResponse(content="")

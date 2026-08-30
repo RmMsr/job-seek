@@ -50,8 +50,16 @@ def execute_task(
     if kind_fn is None:
         q.fail_task(conn, task["id"], f"Unknown task kind: {task['kind']!r}")
         return
+    # Kind fns that spawn child steps (e.g. fetch_all) need the running task's
+    # own id; pass it (and the parent) alongside the persisted params without
+    # mutating the stored row.
+    call_params = {
+        **task["params"],
+        "_task_id": task["id"],
+        "_parent_task_id": task.get("parent_task_id"),
+    }
     try:
-        gen = kind_fn(conn, client, model, config, task["params"])
+        gen = kind_fn(conn, client, model, config, call_params)
         result: dict = {}
         try:
             while True:
@@ -65,15 +73,21 @@ def execute_task(
         return
     finally:
         _sync_browser_missing_inbox(conn)
-    q.complete_task(conn, task["id"], result)
+    # Sentinel substitution: a needs_action panel rendered by a kind fn can't
+    # know its task's id, so it embeds "__ORIGIN_TASK__" in a hidden
+    # origin_task_id field; swap in this action's *root* id (its own id when it
+    # has no parent) so a spawned follow-up step attaches to the right root.
+    _root = str(task.get("parent_task_id") or task["id"])
+    if result.get("resume_html"):
+        result["resume_html"] = result["resume_html"].replace("__ORIGIN_TASK__", _root)
+    if result.get("html_chunks"):
+        result["html_chunks"] = [
+            c.replace("__ORIGIN_TASK__", _root) if isinstance(c, str) else c
+            for c in result["html_chunks"]
+        ]
+    q.complete_task(conn, task["id"], result)      # persist result JSON
     if result.get("needs_action"):
-        q.create_inbox_item(
-            conn,
-            kind="task_followup",
-            message=result.get("action_message", "A task needs your attention"),
-            link=result.get("action_link") or f"/tasks/{task['id']}/resume",
-            task_id=task["id"],
-        )
+        q.set_task_needs_action(conn, task["id"])  # then flip status off 'done'
 
 
 def run_worker_forever(stop_event: threading.Event, poll_interval: float = 1.0) -> None:

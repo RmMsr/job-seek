@@ -439,13 +439,13 @@ def test_detect_source_confirm_panel_has_cancel_link(conn):
     with patch("app.routes.sources.detect_listing_page") as mock_fetch:
         fetched = _run_detect(conn, _SLACK_URL)
     mock_fetch.assert_not_called()
-    assert '<a href="/sources" class="btn btn-subtle">Cancel</a>' in fetched["result"]["html_chunks"][0]
+    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 def test_detect_source_mismatch_panel_has_cancel_link(conn):
     with patch("app.routes.sources.detect_listing_page", return_value=_not_listing()):
         fetched = _run_detect(conn, "https://example.com/job/1")
-    assert '<a href="/sources" class="btn btn-subtle">Cancel</a>' in fetched["result"]["html_chunks"][0]
+    assert '<a href="/sources" class="btn">Cancel</a>' in fetched["result"]["html_chunks"][0]
 
 
 def test_detect_source_slow_path_not_a_listing_shows_mismatch(conn):
@@ -531,7 +531,7 @@ def _run_confirm(conn, url, name, fetcher_type):
 
 
 def _followups(conn):
-    return [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"]
+    return conn.execute("SELECT id FROM tasks WHERE status = 'needs_action'").fetchall()
 
 
 def test_source_detect_twice_for_same_url_leaves_a_single_prompt(conn):
@@ -540,6 +540,27 @@ def test_source_detect_twice_for_same_url_leaves_a_single_prompt(conn):
         _run_detect(conn, url)
         _run_detect(conn, url)
     assert len(_followups(conn)) == 1
+
+
+def test_detect_confirm_attaches_child_under_root_and_resolves_it(client, conn):
+    detect = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.com"})
+    q.complete_task(conn, detect["id"], {"needs_action": True})
+    q.set_task_needs_action(conn, detect["id"])
+    resp = client.post("/sources/detect/confirm", data={
+        "url": "https://x.com", "name": "X Careers", "fetcher_type": "generic_listing",
+        "origin_task_id": str(detect["id"]),
+    })
+    tid = resp.json()["task_id"]
+    assert q.get_task(conn, tid)["parent_task_id"] == detect["id"]
+    # the root's step is decided -> resolved to done
+    assert q.get_task(conn, detect["id"])["status"] == "done"
+
+
+def test_detect_confirm_without_origin_is_its_own_root(client, conn):
+    resp = client.post("/sources/detect/confirm", data={
+        "url": "https://x.com", "name": "X", "fetcher_type": "generic_listing",
+    })
+    assert q.get_task(conn, resp.json()["task_id"])["parent_task_id"] is None
 
 
 def test_source_confirm_resolves_open_detect_prompt(conn):

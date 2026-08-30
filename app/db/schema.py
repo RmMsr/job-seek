@@ -96,7 +96,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,
     params TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'done', 'failed')),
+    parent_task_id INTEGER REFERENCES tasks(id),
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued', 'running', 'needs_action', 'done', 'failed', 'dismissed')),
     log TEXT NOT NULL DEFAULT '',
     result TEXT,
     error TEXT,
@@ -110,7 +112,6 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     kind TEXT NOT NULL,
     message TEXT NOT NULL,
     link TEXT NOT NULL,
-    task_id INTEGER REFERENCES tasks(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     resolved_at TEXT
 );
@@ -564,6 +565,118 @@ def _migrate_jobs_canonicalize_urls(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_tasks_group_and_status(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    if row is None or "'needs_action'" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE tasks_new (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            group_id TEXT,
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued','running','needs_action','done','failed','dismissed')),
+            log TEXT NOT NULL DEFAULT '',
+            result TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            started_at TEXT,
+            finished_at TEXT
+        );
+        INSERT INTO tasks_new (id, kind, params, status, log, result, error, created_at, started_at, finished_at)
+            SELECT id, kind, params, status, log, result, error, created_at, started_at, finished_at FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+        """
+    )
+    # Backfill: a done task whose result asked for follow-up and whose inbox
+    # item is still open becomes needs_action. (inbox_items still has task_id
+    # at this point — _migrate_inbox_drop_task_id runs after this.)
+    if "task_id" in {r[1] for r in conn.execute("PRAGMA table_info(inbox_items)")}:
+        conn.execute(
+            """
+            UPDATE tasks SET status = 'needs_action'
+            WHERE status = 'done'
+              AND id IN (
+                SELECT task_id FROM inbox_items
+                WHERE kind = 'task_followup' AND resolved_at IS NULL AND task_id IS NOT NULL
+              )
+            """
+        )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_inbox_drop_task_id(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='inbox_items'"
+    ).fetchone()
+    if row is None or "task_id" not in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        DELETE FROM inbox_items WHERE kind = 'task_followup';
+        CREATE TABLE inbox_items_new (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            message TEXT NOT NULL,
+            link TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at TEXT
+        );
+        INSERT INTO inbox_items_new (id, kind, message, link, created_at, resolved_at)
+            SELECT id, kind, message, link, created_at, resolved_at FROM inbox_items;
+        DROP TABLE inbox_items;
+        ALTER TABLE inbox_items_new RENAME TO inbox_items;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_tasks_group_to_parent(conn: sqlite3.Connection) -> None:
+    # Hard cutover (personal single-instance app): the opaque group_id token
+    # is replaced by a real self-referential parent pointer. group_id carried
+    # no data worth keeping — every pre-cutover row just gets parent_task_id
+    # NULL.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    if row is None or "parent_task_id" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE tasks_new (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            parent_task_id INTEGER REFERENCES tasks(id),
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued','running','needs_action','done','failed','dismissed')),
+            log TEXT NOT NULL DEFAULT '',
+            result TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            started_at TEXT,
+            finished_at TEXT
+        );
+        INSERT INTO tasks_new (id, kind, params, status, log, result, error, created_at, started_at, finished_at)
+            SELECT id, kind, params, status, log, result, error, created_at, started_at, finished_at FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -586,3 +699,6 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_fetch_runs_add_auth_error(conn)
     _migrate_jobs_add_evaluation_completed_at(conn)
     _migrate_jobs_canonicalize_urls(conn)
+    _migrate_tasks_group_and_status(conn)
+    _migrate_inbox_drop_task_id(conn)
+    _migrate_tasks_group_to_parent(conn)

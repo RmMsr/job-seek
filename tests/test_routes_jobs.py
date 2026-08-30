@@ -2033,11 +2033,11 @@ def test_add_listing_source_resolves_open_listing_detected_prompt(conn):
     job_links = ["https://careers.example.com/jobs/1", "https://careers.example.com/jobs/2"]
     with patch("app.routes.jobs.detect_listing_page", return_value=_listing(job_links)):
         _run_add_by_url(conn, url)
-    assert [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"]
+    assert conn.execute("SELECT COUNT(*) FROM tasks WHERE status = 'needs_action'").fetchone()[0] == 1
 
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
         _run_add_listing_source(conn, url, "careers.example.com", "generic_listing")
-    assert not [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"]
+    assert conn.execute("SELECT COUNT(*) FROM tasks WHERE status = 'needs_action'").fetchone()[0] == 0
 
 
 def test_add_listing_source_rejects_url_already_tracked_as_source(conn):

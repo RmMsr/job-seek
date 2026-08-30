@@ -287,13 +287,16 @@ async def accept_proposals(
     # appears in the form when that row should be applied.
     form = await request.form()
     i = 0
+    added = removed = 0
     while f"kind_{i}" in form:
         if f"apply_{i}" in form:
             kind = form[f"kind_{i}"]
             if kind == "add":
                 q.insert_criterion(conn, scenario_id, form[f"text_{i}"], form[f"weight_{i}"], source="feedback")
+                added += 1
             elif kind == "remove":
                 q.delete_criterion(conn, int(form[f"criterion_id_{i}"]))
+                removed += 1
         i += 1
     # The whole batch was reviewed in one go, regardless of which individual
     # rows were applied vs skipped, so its feedback is fully handled now.
@@ -302,5 +305,15 @@ async def accept_proposals(
     html = templates.get_template("scenarios/_criteria.html").render(
         request=request, criteria=criteria, scenario_id=scenario_id
     )
-    html += f'<div id="proposals-area-{scenario_id}" hx-swap-oob="true" style="margin-top:0.75rem; width:100%;"></div>'
+    parts = []
+    if added:
+        parts.append(f"{added} criteri{'on' if added == 1 else 'a'} added")
+    if removed:
+        parts.append(f"{removed} removed")
+    summary = "✓ " + (", ".join(parts) if parts else "Reviewed — no changes")
+    html += (
+        f'<div id="proposals-area-{scenario_id}" hx-swap-oob="true" '
+        'style="margin-top:0.75rem; width:100%;">'
+        f'<p class="save-confirmation">{summary}</p></div>'
+    )
     return HTMLResponse(content=html)

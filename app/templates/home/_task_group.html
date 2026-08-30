@@ -1,0 +1,22 @@
+<li class="task-li task-li-{{ pres.status }}" id="task-card-{{ task.id }}">
+  <span class="task-li-icon icon-{{ pres.status }}" aria-hidden="true">{{ pres.status | status_icon }}</span>
+  <div class="task-li-body">
+    <div class="task-li-head">
+      <a class="task-li-title" href="/tasks/{{ task.id }}">{{ pres.title }}</a>
+      <span class="task-age">{{ task.created_at | age }}</span>
+    </div>
+    <div class="task-li-sub">
+      <span>{{ pres.next_step }}</span>
+      {% for r in pres.results %}<a href="{{ r.href }}">{{ r.label }}</a>{% endfor %}
+    </div>
+    {% if pres.status == "needs_action" %}
+    <div class="task-li-actions">
+      {% if pres.has_panel %}<a class="btn btn-primary" href="{{ pres.review_href }}">Review</a>
+      {% elif pres.action_link %}<a class="btn btn-primary" href="{{ pres.action_link }}">Open</a>{% endif %}
+      {% if pres.needs_action_task_id %}
+      <form method="post" action="/tasks/{{ pres.needs_action_task_id }}/dismiss"><button type="submit" class="btn">Dismiss</button></form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</li>
