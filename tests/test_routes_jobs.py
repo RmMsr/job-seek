@@ -1972,7 +1972,7 @@ def test_add_job_by_url_listing_detected_shows_confirm_panel(conn):
     assert "careers.example.com" in html
     assert 'data-progress-url="/jobs/add-listing-source"' in html
     assert '<label for="listing-name"' in html
-    assert ">Name:</label>" in html
+    assert ">Name</label>" in html
     assert fetched["result"]["needs_action"] is True
     assert q.get_jobs(conn) == []
     assert [s for s in q.get_sources(conn) if s["fetcher_type"] == "generic_listing"] == []

@@ -1,11 +1,9 @@
-<div style="display:flex; flex-direction:column; gap:0.75rem; width:100%;">
-  <p style="margin:0; color:#dc3545;">
-    This page looks like a single job posting, not a listing of multiple jobs.
-  </p>
+<div class="resume-panel">
+  <p class="resume-panel-warn">This page looks like a single job posting, not a listing of multiple jobs.</p>
   <input type="hidden" id="detect-url" value="{{ url }}">
   <input type="hidden" id="detect-name" value="{{ name }}">
   <input type="hidden" id="detect-fetcher-type" value="generic_listing">
-  <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <div class="resume-panel-actions">
     <a href="/sources" class="btn btn-subtle">Cancel</a>
     <button type="button" class="btn"
       data-progress-url="/jobs/add-by-url"

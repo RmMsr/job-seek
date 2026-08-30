@@ -396,6 +396,15 @@
     .resume-subtitle .task-age { margin-left: 0; }
     .resume-message { color: var(--text-secondary); }
     .resume-dismiss { margin-top: 1rem; }
+    .resume-panel { display: flex; flex-direction: column; gap: 1rem; max-width: 640px;
+      padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+    .resume-panel > p { margin: 0; line-height: 1.5; }
+    .resume-panel-field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .resume-panel-field > label { font-size: 0.85em; color: var(--text-secondary); }
+    .resume-panel-field input[type="text"], .resume-panel-field input[type="url"] { width: 100%; }
+    .resume-panel-note { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+    .resume-panel-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .resume-panel-warn { color: var(--reject, #dc3545); }
     /* On the standalone action-needed page the panel's own inline Cancel link
        is replaced by the page's Dismiss button. */
     #resume-page a.btn-subtle { display: none; }
