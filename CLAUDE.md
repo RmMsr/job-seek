@@ -20,15 +20,27 @@ When a change is UI-facing, after implementation leave the dev server running an
 
 ## Finishing a change
 
-Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR:
+Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR.
+
+The merge has to run from the main checkout, and a worktree-isolated session refuses any git command that `cd`s (or `-C`s) out of its worktree. So leave the worktree *first*, keeping it on disk, then merge:
 
 ```bash
-cd <main checkout>
+# 1. in the worktree: make sure everything is committed
+git status
+
+# 2. leave the worktree, keeping it (ExitWorktree action: "keep") —
+#    the session's cwd is now the main checkout
+
+# 3. from the main checkout (already the cwd — no cd needed)
 git merge --squash <branch>
 git commit
+
+# 4. clean up: remove the worktree and delete the branch
+git worktree remove <worktree path>
+git branch -D <branch>
 ```
 
-Then clean up: remove the worktree and delete the branch (same cleanup `finishing-a-development-branch` does for its "merge locally" option — just use `git merge --squash` there instead of a plain merge).
+Cleanup mirrors what `finishing-a-development-branch` does for its "merge locally" option — just `git merge --squash` instead of a plain merge. If `git worktree remove` reports "device or resource busy" (the harness keeps config files mounted into a live worktree), run `git worktree prune` to clear git's tracking; the leftover directory is swept when the session exits.
 
 ## Default feature workflow
 
