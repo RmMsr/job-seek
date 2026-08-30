@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "job-seek"
 version = "0.1.0"
 requires-python = ">=3.12"
+license = "BSD-2-Clause"
+license-files = ["LICENSE"]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

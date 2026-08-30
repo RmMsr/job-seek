@@ -105,3 +105,7 @@ uv run python -m app.cli.slack_login
 ```
 
 Or follow the instructions in the webapp to get the cookie by hand.
+
+## License
+
+[BSD 2-Clause](LICENSE)
