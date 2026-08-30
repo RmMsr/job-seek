@@ -114,7 +114,8 @@ def task_log(task_id: int, request: Request, conn: sqlite3.Connection = Depends(
         raise HTTPException(status_code=404, detail="Task not found")
     lines = task["log"].strip().split("\n") if task["log"].strip() else []
     return templates.TemplateResponse(
-        request, "tasks/log.html", {"task": task, "lines": lines, "job_link": _task_link(task)}
+        request, "tasks/log.html",
+        {"task": task, "lines": lines, "label": _task_label(conn, task), "job_link": _task_link(task)},
     )
 
 

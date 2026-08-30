@@ -112,10 +112,19 @@ def test_task_log_page_renders_lines_and_status(client, conn):
     q.append_task_log(conn, task["id"], "second line")
     resp = client.get(f"/tasks/{task['id']}/log")
     assert resp.status_code == 200
-    assert "<h1>Task: fetch source</h1>" in resp.text
+    assert "<h1>fetch source</h1>" in resp.text
+    assert 'class="task-meta"' in resp.text
     assert "first line" in resp.text
     assert "second line" in resp.text
     assert "queued" in resp.text
+
+
+def test_task_log_page_title_names_the_job(client, conn):
+    src = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    job_id = q.insert_job(conn, source_id=src, url="https://e.com/j", title="Data Lead", company="", raw_text="")
+    task = q.enqueue_task(conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": {}})
+    resp = client.get(f"/tasks/{task['id']}/log")
+    assert "<h1>Re-evaluate job: Data Lead</h1>" in resp.text
 
 
 def test_task_log_page_404_for_missing(client, conn):

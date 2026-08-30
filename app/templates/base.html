@@ -387,6 +387,11 @@
     .notice-dismiss:hover { opacity: 1; }
     .task-completed { text-decoration: line-through; color: #888; }
     .task-age { margin-left: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+    .task-meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.9rem; margin: 0 0 1.25rem; }
+    .task-meta dt { color: var(--text-muted); }
+    .task-meta dd { margin: 0; }
+    .task-log { background: var(--ground); border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.75rem 1rem; white-space: pre-wrap; overflow-x: auto; }
     #status-bar:empty { display: none; }
     #status-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 960px; box-sizing: border-box; z-index: 20;
