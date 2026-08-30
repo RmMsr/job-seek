@@ -1520,6 +1520,14 @@ def test_job_expand_has_permalink_icon(client, conn):
     assert f'href="/jobs/{jid}" class="job-link-icon"' in resp.text
 
 
+def test_job_row_permalink_is_absolute_positioned_copy_control(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/jobs")
+    assert f'href="/jobs/{jid}"' in resp.text
+    assert 'class="job-link-icon"' in resp.text
+    assert 'data-permalink' in resp.text
+
+
 def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
