@@ -18,9 +18,13 @@ Stop the dev server once manual testing is done; the throwaway DB copy is gitign
 
 When a change is UI-facing, after implementation leave the dev server running and hand the URL to the user so *they* can try it, rather than only exercising it yourself and moving straight to "finishing a development branch" options. Wait for their go-ahead before offering to merge/clean up.
 
+If you seed sample data into the throwaway DB so the user has something to look at, create it through the real code path (enqueue the real task, run the real fetch) — not hand-written rows straight into SQLite. A malformed fixture row reads as a real bug. If you must insert rows directly, tell the user exactly which ones are seeded.
+
 ## Finishing a change
 
 Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR.
+
+If a background subagent drove the implementation and left a dev server running for UI handoff, `TaskStop` that subagent **before** killing the dev server or merging — while it's still resumable it will relaunch the server each time you kill it, and you'll chase it in circles.
 
 The merge has to run from the main checkout, and a worktree-isolated session refuses any git command that `cd`s (or `-C`s) out of its worktree. So leave the worktree *first*, keeping it on disk, then merge:
 
@@ -50,6 +54,8 @@ For non-trivial feature work, default to this pipeline unless told otherwise:
 2. **Write the spec** to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, commit it.
 3. **Write the plan** (`superpowers:writing-plans`) to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`, commit it.
 4. **Implement via background subagent(s)** working through the plan task-by-task (TDD, commit after each task per "Commit frequently" above) inside the same worktree, reporting back only once — when the whole plan is done or it's stuck. Default to a single agent; only split into parallel agents when the plan has genuinely independent tasks where that would clearly help. If it hits a genuine design question the spec/plan doesn't answer, it should ask directly (e.g. via AskUserQuestion) rather than guessing.
+
+For substantially UI-facing work, the implementing subagent should use the `frontend-design` skill from the start — establishing spacing, button hierarchy, alignment and state styling up front is far cheaper than converging on them through many one-tweak review rounds with the user.
 
 This is the default; skip steps only when the user explicitly asks for something lighter-weight.
 
