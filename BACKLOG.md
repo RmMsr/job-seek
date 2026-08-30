@@ -5,6 +5,7 @@ Known gaps, not yet scheduled.
 - bug: Version hash on setup page seems stale. Also it should state UTC build time.
 - bug: Age label on collapsed job card overlaps with link and checkbox. It should be left of the link icon.
 - feature: Make last run info a link to the correspondingfetch task. Adding a symbol for success/failure
+- feature: Allow destructive scenario deletion.
 - ux: shorten URLs on sources page. show a "expand" action to reveal the full url and have a "open" link.
 - Scenario filter for jobs list includig "None" defaulting to "All".
 - fetch: **`generic_listing` has no pagination.** Sopra Steria and Tieto both cap
