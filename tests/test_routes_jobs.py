@@ -136,7 +136,7 @@ def test_job_list_card_is_clickable_and_has_no_details_button(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/expand?status=&content_type="' in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?status=new"' in resp.text
     assert "Details" not in resp.text
     assert 'role="button"' in resp.text
 
@@ -333,7 +333,7 @@ def test_job_expand_shows_pass_as_new_button_when_gate_failed(client, conn):
     resp = client.get(f"/jobs/{jid}/expand")
 
     assert resp.status_code == 200
-    assert f'data-progress-url="/jobs/{jid}/pass-as-new"' in resp.text
+    assert f'data-progress-url="/jobs/{jid}/pass-as-new?status=new"' in resp.text
     assert "Pass as new" in resp.text
 
 
@@ -362,7 +362,7 @@ def test_job_expand_shows_reevaluate_button_when_new(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'data-progress-url="/jobs/{jid}/reevaluate"' in resp.text
+    assert f'data-progress-url="/jobs/{jid}/reevaluate?status=new"' in resp.text
 
 
 def test_job_expand_shows_reevaluate_button_when_accepted(client, conn):
@@ -370,7 +370,7 @@ def test_job_expand_shows_reevaluate_button_when_accepted(client, conn):
     q.update_job_feedback(conn, jid, "accepted", "")
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'data-progress-url="/jobs/{jid}/reevaluate"' in resp.text
+    assert f'data-progress-url="/jobs/{jid}/reevaluate?status=new"' in resp.text
 
 
 def test_job_expand_omits_reevaluate_button_when_rejected(client, conn):
@@ -419,7 +419,7 @@ def test_job_expand_shows_delete_instead_of_trash_when_already_trash(client, con
     q.update_job_feedback(conn, jid, "trash", None)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/delete-confirm"' in resp.text
+    assert f'hx-get="/jobs/{jid}/delete-confirm?status=new"' in resp.text
     assert 'name="status" value="trash"' not in resp.text
 
 
@@ -435,7 +435,7 @@ def test_job_collapse_returns_row_view(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/collapse")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/expand"' in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?status=new"' in resp.text
     assert f'id="job-{jid}"' in resp.text
 
 
@@ -512,7 +512,7 @@ def test_job_expand_header_is_collapsible(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/collapse"' in resp.text
+    assert f'hx-get="/jobs/{jid}/collapse?status=new"' in resp.text
 
 
 def test_job_list_has_swappable_content_wrapper(client, conn):
@@ -603,13 +603,13 @@ def test_job_expand_reset_button_has_progress_oob_attribute(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'data-progress-url="/jobs/{jid}/reset"' in resp.text
+    assert f'data-progress-url="/jobs/{jid}/reset?status=new"' in resp.text
     assert "data-progress-oob" in resp.text
 
 
 def test_job_reset_task_execution_html_chunk_for_updated_row(conn):
     sid, jid, scenario_id = _seed(conn)
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "detail": True})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
@@ -660,15 +660,14 @@ def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
 def test_job_reset_task_execution_with_filter_forwards_it_into_rendered_row(conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "accepted", "")
-    filter_ctx = {"filter_status": "accepted", "filter_content_type": ""}
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter": {"status": "accepted"}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
     # Resetting an accepted job always returns it to status "new", so it falls out of
     # the Accepted tab -> renders as the stale short row, whose own expand link must
     # still carry the filter forward.
-    assert f'jobs/{jid}/expand?status=accepted&content_type=' in fetched["result"]["html_chunks"][0]
+    assert f'jobs/{jid}/expand?status=accepted' in fetched["result"]["html_chunks"][0]
 
 
 def _fake_run_reprocess_job_to_passing(conn, client, model, job, scenarios, profile, progress_prefix=""):
@@ -690,21 +689,19 @@ def test_job_reset_task_execution_from_not_relevant_tab_shows_moved_to_new_badge
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
 
-    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter": {"status": "not_relevant"}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
     fetched = q.get_task(conn, task["id"])
     html = fetched["result"]["html_chunks"][0]
     assert "Moved to New" in html
-    assert f'href="/jobs#job-{jid}"' in html
+    assert f'href="/jobs?status=new#job-{jid}"' in html
 
 
 def test_job_reset_task_execution_that_stays_in_current_filter_shows_no_badge(conn):
     sid, jid, scenario_id = _seed(conn)  # already gate-passed, status "new"
-    filter_ctx = {"filter_status": None, "filter_content_type": None}
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": filter_ctx})
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter": {}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
@@ -719,7 +716,7 @@ def test_job_reset_task_execution_without_filter_shows_no_badge(conn):
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
 
-    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "filter_ctx": {}})
+    task = q.enqueue_task(conn, kind="job_reset", params={"job_id": jid, "detail": True})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
@@ -734,8 +731,7 @@ def test_job_pass_as_new_task_execution_shows_moved_to_new_badge(conn):
     scenario_id = q.insert_scenario(conn, "A", "")
     q.upsert_job_score(conn, jid, scenario_id, 0.2, "too junior", "hash1")
 
-    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
-    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter_ctx": filter_ctx})
+    task = q.enqueue_task(conn, kind="job_pass_as_new", params={"job_id": jid, "filter": {"status": "not_relevant"}})
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
@@ -809,7 +805,7 @@ def test_bulk_reset_task_execution_produces_chunk_per_job_plus_counts(conn):
     q.update_job_feedback(conn, j1, "rejected", "note")
     q.update_job_feedback(conn, j2, "trash", "note")
 
-    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [j1, j2], "filter_ctx": {}})
+    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [j1, j2], "detail": True})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
@@ -828,8 +824,7 @@ def test_bulk_reset_task_execution_with_filter_shows_moved_marker_per_job(conn):
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")  # gate-failed -> "Not relevant" tab
 
-    filter_ctx = {"filter_status": "not_relevant", "filter_content_type": ""}
-    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [jid], "filter_ctx": filter_ctx})
+    task = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [jid], "filter": {"status": "not_relevant"}})
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job_to_passing):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
@@ -840,14 +835,14 @@ def test_bulk_reset_task_execution_with_filter_shows_moved_marker_per_job(conn):
 def test_job_bulk_reset_button_has_progress_oob_and_filter_query(client, conn):
     resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
-    assert 'data-progress-url="/jobs/bulk-reset?status=accepted&content_type="' in resp.text
+    assert 'data-progress-url="/jobs/bulk-reset?status=accepted"' in resp.text
     assert 'data-progress-oob="1"' in resp.text
 
 
 def test_job_bulk_reevaluate_button_has_progress_oob_and_filter_query(client, conn):
     resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
-    assert 'data-progress-url="/jobs/bulk-reevaluate?status=accepted&content_type="' in resp.text
+    assert 'data-progress-url="/jobs/bulk-reevaluate?status=accepted"' in resp.text
     assert 'data-progress-jobs' in resp.text
 
 def test_bulk_reevaluate_enqueues_task_with_job_ids(client, conn):
@@ -881,7 +876,7 @@ def test_bulk_reevaluate_task_execution_produces_chunk_per_job_plus_counts(conn)
     q.update_job_pipeline(conn, j2, simplified_content="clean", content_type="job_posting", summary="role")
     q.upsert_job_score(conn, j2, scenario_id, 0.4, "reason", "hash1")
 
-    task = q.enqueue_task(conn, kind="jobs_bulk_reevaluate", params={"job_ids": [j1, j2], "filter_ctx": {}})
+    task = q.enqueue_task(conn, kind="jobs_bulk_reevaluate", params={"job_ids": [j1, j2], "detail": True})
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
@@ -1276,13 +1271,13 @@ def test_job_list_has_persistent_bulk_form_shell(client, conn):
     # gate-passed default), so the hidden field must carry that same
     # unfiltered semantics — not a literal "new" status, which would apply
     # gate-agnostic filtering and diverge from what's actually shown.
-    assert '<input type="hidden" name="status_filter" value="">' in resp.text
+    assert '<input type="hidden" name="status_filter" value="new" form="bulk-form">' in resp.text
 
 
 def test_job_list_bulk_form_shell_carries_explicit_filter(client, conn):
     resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
-    assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
+    assert '<input type="hidden" name="status_filter" value="accepted" form="bulk-form">' in resp.text
 
 
 def test_job_list_bulk_bar_has_actions_and_no_scenario_select(client, conn):
@@ -1318,7 +1313,7 @@ def test_job_expand_has_no_scenario_select(client, conn):
 def test_job_list_bulk_form_reflects_active_filter(client, conn):
     resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
-    assert '<input type="hidden" name="status_filter" value="accepted">' in resp.text
+    assert '<input type="hidden" name="status_filter" value="accepted" form="bulk-form">' in resp.text
 
 
 def test_base_page_includes_bulk_bar_visibility_and_count_script(client, conn):
@@ -1383,7 +1378,7 @@ def test_job_list_leads_tab_includes_gate_failed_leads(client, conn):
     scenario_id = q.insert_scenario(conn, "A", "")  # default gate_threshold 0.7
     q.upsert_job_score(conn, jid, scenario_id, 0.3, "not a fit", "hash1")
 
-    resp = client.get("/jobs?content_type=lead")
+    resp = client.get("/jobs?status=lead")
     assert "Low Score Lead" in resp.text
 
 
@@ -1397,7 +1392,7 @@ def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
     q.update_job_pipeline(conn, jid_rejected, simplified_content="clean", content_type="lead", summary="role")
     q.update_job_feedback(conn, jid_rejected, "rejected", "")
 
-    resp = client.get("/jobs?content_type=lead")
+    resp = client.get("/jobs?status=lead")
     assert "Accepted Lead" not in resp.text
     assert "Rejected Lead" not in resp.text
     assert '<span id="count-lead">0</span>' in resp.text
@@ -1533,7 +1528,7 @@ def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, co
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/expand?status=&content_type="' in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?status=new"' in resp.text
 
 
 def test_job_list_filtered_tab_expand_link_carries_filter_params(client, conn):
@@ -1541,22 +1536,21 @@ def test_job_list_filtered_tab_expand_link_carries_filter_params(client, conn):
     q.update_job_feedback(conn, jid, "accepted", "")
     resp = client.get("/jobs?status=accepted")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/expand?status=accepted&content_type="' in resp.text
+    assert f'hx-get="/jobs/{jid}/expand?status=accepted"' in resp.text
 
 
 def test_job_expand_forwards_filter_to_collapse_link(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/expand?status=accepted&content_type=")
+    resp = client.get(f"/jobs/{jid}/expand?status=accepted")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/collapse?status=accepted&content_type="' in resp.text
+    assert f'hx-get="/jobs/{jid}/collapse?status=accepted"' in resp.text
 
 
 def test_job_expand_without_filter_query_omits_collapse_filter_params(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/collapse"' in resp.text
-    assert "collapse?status=" not in resp.text
+    assert f'hx-get="/jobs/{jid}/collapse?status=new"' in resp.text
 
 
 def test_job_accept_from_new_tab_shows_stale_short_row(client, conn):
@@ -1599,11 +1593,11 @@ def test_job_feedback_that_stays_in_current_filter_shows_no_badge(client, conn):
     assert "Moved to" not in resp.text
 
 
-def test_job_feedback_without_filter_query_shows_no_badge(client, conn):
+def test_job_feedback_without_filter_query_defaults_to_new_tab_badge(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
     assert resp.status_code == 200
-    assert "Moved to" not in resp.text
+    assert "Moved to Accepted" in resp.text
 
 
 def test_job_feedback_with_redirect_still_bypasses_row_rendering(client, conn):
@@ -1687,18 +1681,17 @@ def _listing(job_links, html="<html><body>listing</body></html>"):
     return ListingDetection(html, True, list(job_links), False)
 
 
-def _run_add_by_url(conn, url, filter_ctx=None, status=None, content_type=None, skip_rewrite=False):
+def _run_add_by_url(conn, url, filter=None, skip_rewrite=False):
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
-        "url": url, "status": status, "content_type": content_type,
-        "filter_ctx": filter_ctx or {}, "skip_rewrite": skip_rewrite,
+        "url": url, "filter": filter or {}, "skip_rewrite": skip_rewrite,
     })
     execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
     return q.get_task(conn, task["id"])
 
 
-def _run_add_listing_source(conn, url, name, fetcher_type, status=None, content_type=None):
+def _run_add_listing_source(conn, url, name, fetcher_type, filter=None):
     task = q.enqueue_task(conn, kind="job_add_listing_source", params={
-        "url": url, "name": name, "fetcher_type": fetcher_type, "status": status, "content_type": content_type,
+        "url": url, "name": name, "fetcher_type": fetcher_type, "filter": filter or {},
     })
     execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
     return q.get_task(conn, task["id"])
@@ -1817,7 +1810,7 @@ def test_add_job_by_url_lead_shows_persistent_notice_with_link(conn):
     assert fetched["result"]["notices"]
     job = q.get_job_by_url(conn, "http://example.com/job/1")
     assert job["content_type"] == "lead"
-    assert f'href="/jobs?content_type=lead#job-{job["id"]}"' in fetched["result"]["notices"][0]["html"]
+    assert f'href="/jobs?status=lead#job-{job["id"]}"' in fetched["result"]["notices"][0]["html"]
 
 
 @respx.mock
@@ -2155,44 +2148,48 @@ def test_job_list_add_by_url_button_uses_generalized_body_attribute(client, conn
     assert 'data-progress-url-input' not in resp.text
 
 
-def test_job_list_source_id_shows_every_status_for_that_source(client, conn):
+def test_job_list_source_id_composes_with_status_tab(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     other_sid = q.insert_source(conn, "other.no", "https://other.no", "generic_listing")
-    j_new = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="New Job", company="C", raw_text="r")
     j_accepted = q.insert_job(conn, source_id=sid, url="http://finn.no/job/2", title="Accepted Job", company="C", raw_text="r")
     q.update_job_feedback(conn, j_accepted, "accepted", "")
-    j_trash = q.insert_job(conn, source_id=sid, url="http://finn.no/job/3", title="Trashed Job", company="C", raw_text="r")
-    q.update_job_feedback(conn, j_trash, "trash", "")
     q.insert_job(conn, source_id=other_sid, url="http://other.no/job/1", title="Other Source Job", company="C", raw_text="r")
+    o_accepted = q.insert_job(conn, source_id=other_sid, url="http://other.no/job/2", title="Other Accepted", company="C", raw_text="r")
+    q.update_job_feedback(conn, o_accepted, "accepted", "")
 
-    resp = client.get(f"/jobs?source_id={sid}")
+    resp = client.get(f"/jobs?status=accepted&source_id={sid}")
 
     assert resp.status_code == 200
-    assert "New Job" in resp.text
     assert "Accepted Job" in resp.text
-    assert "Trashed Job" in resp.text
-    assert "Other Source Job" not in resp.text
+    assert "Other Accepted" not in resp.text
 
 
-def test_job_list_source_id_header_shows_name_and_count(client, conn):
+def test_job_list_source_id_keeps_status_tabs_visible(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    resp = client.get(f"/jobs?source_id={sid}")
+    assert resp.status_code == 200
+    assert "New Jobs (" in resp.text
+    assert "Accepted (" in resp.text
+    # the source select reflects the active narrowing
+    assert f'<option value="{sid}" selected' in resp.text
+
+
+def test_job_list_source_id_shows_clear_all_filters_link(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
     resp = client.get(f"/jobs?source_id={sid}")
     assert resp.status_code == 200
-    assert "All jobs from finn.no (1)" in resp.text
-    assert '<a href="/jobs">Clear filter</a>' in resp.text
+    assert 'href="/jobs?status=new"' in resp.text
+    assert "Clear all filters" in resp.text
 
 
-def test_job_list_source_id_hides_status_tabs(client, conn):
-    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
-    resp = client.get(f"/jobs?source_id={sid}")
-    assert resp.status_code == 200
-    assert "New Jobs (" not in resp.text
-
-
-def test_job_feedback_within_source_view_stays_visible_no_stale_badge(client, conn):
+def test_job_feedback_within_source_filter_gives_stale_badge(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Job A", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="role")
+    scenario_id = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scenario_id, 0.9, "fit", "h")
+    q.mark_job_evaluation_complete(conn, jid)
 
     resp = client.post(
         f"/jobs/{jid}/feedback?source_id={sid}",
@@ -2200,5 +2197,146 @@ def test_job_feedback_within_source_view_stays_visible_no_stale_badge(client, co
     )
 
     assert resp.status_code == 200
-    assert "Moved to" not in resp.text
-    assert "Job A" in resp.text
+    assert "Moved to Accepted" in resp.text
+
+
+# --- composable filter behaviour ---
+
+def _seed_posting(conn, *, sid, title, company="Acme", score=0.9, url=None, ctype="job_posting"):
+    scenario = q.get_scenarios(conn)
+    scenario_id = scenario[0]["id"] if scenario else q.insert_scenario(conn, "S", "")
+    jid = q.insert_job(conn, source_id=sid, url=url or f"http://x/{title}", title=title, company=company, raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type=ctype, summary="s")
+    q.upsert_job_score(conn, jid, scenario_id, score, "", "h")
+    q.mark_job_evaluation_complete(conn, jid)
+    return jid, scenario_id
+
+
+def test_new_tab_excludes_leads(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="Real Posting")
+    lead = q.insert_job(conn, source_id=sid, url="http://x/lead", title="Just A Lead", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, lead, simplified_content="c", content_type="lead", summary="s")
+    q.mark_job_evaluation_complete(conn, lead)
+
+    resp = client.get("/jobs")
+    assert "Real Posting" in resp.text
+    assert "Just A Lead" not in resp.text
+
+
+def test_scenario_filter_composes_with_accepted_tab(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = q.insert_scenario(conn, "Alpha", "")
+    hit = q.insert_job(conn, source_id=sid, url="http://x/1", title="Matches Alpha", company="C", raw_text="r")
+    miss = q.insert_job(conn, source_id=sid, url="http://x/2", title="No Match", company="C", raw_text="r")
+    for j, sc in ((hit, 0.9), (miss, 0.2)):
+        q.update_job_pipeline(conn, j, simplified_content="c", content_type="job_posting", summary="s")
+        q.upsert_job_score(conn, j, a, sc, "", "h")
+        q.mark_job_evaluation_complete(conn, j)
+        q.update_job_feedback(conn, j, "accepted", "")
+
+    resp = client.get(f"/jobs?status=accepted&scenario={a}")
+    assert "Matches Alpha" in resp.text
+    assert "No Match" not in resp.text
+    assert '<span id="count-accepted">1</span>' in resp.text
+
+
+def test_scenario_none_filter(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = q.insert_scenario(conn, "Alpha", "")
+    failed = q.insert_job(conn, source_id=sid, url="http://x/f", title="Scored No Gate", company="C", raw_text="r")
+    q.update_job_pipeline(conn, failed, simplified_content="c", content_type="job_posting", summary="s")
+    q.upsert_job_score(conn, failed, a, 0.2, "", "h")
+    q.mark_job_evaluation_complete(conn, failed)
+
+    resp = client.get("/jobs?status=not_relevant&scenario=none")
+    assert "Scored No Gate" in resp.text
+    assert '<option value="none" selected' in resp.text
+
+
+def test_source_filter_via_query_keeps_tabs(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    other = q.insert_source(conn, "o", "http://o", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="From S")
+    _seed_posting(conn, sid=other, title="From O")
+
+    resp = client.get(f"/jobs?source_id={sid}")
+    assert "From S" in resp.text
+    assert "From O" not in resp.text
+    assert "New Jobs (" in resp.text and "Accepted (" in resp.text
+
+
+def test_org_filter_via_query(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
+    _seed_posting(conn, sid=sid, title="Globex Role", company="Globex")
+
+    resp = client.get("/jobs?org=Acme")
+    assert "Acme Role" in resp.text
+    assert "Globex Role" not in resp.text
+
+
+def test_clear_all_filters_link_present_when_narrowed(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
+    resp = client.get("/jobs?org=Acme")
+    assert 'href="/jobs?status=new"' in resp.text
+    assert "Clear all filters" in resp.text
+
+    plain = client.get("/jobs")
+    assert "Clear all filters" not in plain.text
+
+
+def test_legacy_scenario_id_param_still_works(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = q.insert_scenario(conn, "Alpha", "")
+    _seed_posting(conn, sid=sid, title="Alpha Match", score=0.9)
+
+    resp = client.get(f"/jobs?scenario_id={a}")
+    assert resp.status_code == 200
+    assert "Alpha Match" in resp.text
+
+
+def test_feedback_action_under_org_filter_gives_stale_badge(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    jid, _ = _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
+
+    resp = client.post(
+        f"/jobs/{jid}/feedback?status=new&org=Acme",
+        data={"status": "rejected", "note": ""},
+    )
+    assert resp.status_code == 200
+    assert "Moved to Rejected" in resp.text
+
+
+def test_filter_row_selects_render_with_selected_state(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
+    resp = client.get("/jobs?org=Acme")
+    assert '<option value="Acme" selected' in resp.text
+    assert '<select name="scenario"' in resp.text
+    assert '<select name="source_id"' in resp.text
+    assert ">All</option>" in resp.text
+
+
+def test_org_chip_is_a_filter_link(client, conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    q.insert_scenario(conn, "S", "")
+    _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
+    resp = client.get("/jobs")
+    assert 'class="tag tag-org"' in resp.text
+    assert "org=Acme" in resp.text
+
+
+def test_job_detail_page_chips_are_plain(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert "tag tag-org" in resp.text
+    assert '<a class="tag tag-org"' not in resp.text

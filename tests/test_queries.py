@@ -531,7 +531,7 @@ def test_get_job_counts(conn):
     q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
     q.mark_job_evaluation_complete(conn, j3)
     counts = q.get_job_counts(conn)
-    assert counts == {"new": 1, "accepted": 1, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
+    assert counts == {"new": 0, "accepted": 1, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
 
 
 def test_get_job_counts_splits_new_from_not_relevant(conn):
@@ -1464,3 +1464,104 @@ def test_get_recent_terminal_tasks_filter_and_order(conn):
     assert [r["id"] for r in rows] == [b["id"], a["id"]]
     failed = q.get_recent_terminal_tasks(conn, status="failed")
     assert [r["id"] for r in failed] == [b["id"]]
+
+
+def test_get_jobs_filter_by_org(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    a = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="Acme", raw_text="r")
+    q.insert_job(conn, source_id=sid, url="http://job/2", title="T2", company="Globex", raw_text="r")
+    result = q.get_jobs(conn, org="Acme")
+    assert [j["id"] for j in result] == [a]
+
+
+def test_get_jobs_scenario_gate_none_returns_scored_but_failed(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    sc = q.insert_scenario(conn, "A", "")  # gate 0.7
+    failed = q.insert_job(conn, source_id=sid, url="http://job/f", title="F", company="C", raw_text="r")
+    passed = q.insert_job(conn, source_id=sid, url="http://job/p", title="P", company="C", raw_text="r")
+    unscored_lead = q.insert_job(conn, source_id=sid, url="http://job/l", title="L", company="C", raw_text="r")
+    q.update_job_pipeline(conn, failed, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, passed, simplified_content="", content_type="job_posting")
+    q.update_job_pipeline(conn, unscored_lead, simplified_content="", content_type="lead")
+    q.upsert_job_score(conn, failed, sc, 0.3, "", "h1")
+    q.upsert_job_score(conn, passed, sc, 0.9, "", "h2")
+    for j in (failed, passed, unscored_lead):
+        q.mark_job_evaluation_complete(conn, j)
+
+    result = {j["id"] for j in q.get_jobs(conn, scenario_gate="none")}
+    assert result == {failed}
+
+
+def test_get_jobs_org_and_scenario_id_compose(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    sc = q.insert_scenario(conn, "A", "")
+    hit = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="Acme", raw_text="r")
+    miss_org = q.insert_job(conn, source_id=sid, url="http://job/2", title="T", company="Globex", raw_text="r")
+    for j in (hit, miss_org):
+        q.update_job_pipeline(conn, j, simplified_content="", content_type="job_posting")
+        q.upsert_job_score(conn, j, sc, 0.9, "", "h")
+        q.mark_job_evaluation_complete(conn, j)
+    result = {j["id"] for j in q.get_jobs(conn, scenario_id=sc, org="Acme")}
+    assert result == {hit}
+
+
+def test_get_job_counts_new_excludes_leads(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    lead = q.insert_job(conn, source_id=sid, url="http://job/l", title="L", company="C", raw_text="r")
+    posting = q.insert_job(conn, source_id=sid, url="http://job/p", title="P", company="C", raw_text="r")
+    q.update_job_pipeline(conn, lead, simplified_content="", content_type="lead")
+    q.update_job_pipeline(conn, posting, simplified_content="", content_type="job_posting")
+    q.mark_job_evaluation_complete(conn, lead)
+    q.mark_job_evaluation_complete(conn, posting)
+    counts = q.get_job_counts(conn)
+    assert counts["new"] == 1  # posting only
+    assert counts["lead"] == 1
+
+
+def test_get_job_counts_respects_org_filter(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    a = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="Acme", raw_text="r")
+    g = q.insert_job(conn, source_id=sid, url="http://job/2", title="T", company="Globex", raw_text="r")
+    q.update_job_feedback(conn, a, "accepted", "n")
+    q.update_job_feedback(conn, g, "accepted", "n")
+    counts = q.get_job_counts(conn, org="Acme")
+    assert counts["accepted"] == 1
+
+
+def test_get_job_counts_respects_scenario_filter(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    sc = q.insert_scenario(conn, "A", "")
+    match = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
+    other = q.insert_job(conn, source_id=sid, url="http://job/2", title="T", company="C", raw_text="r")
+    for j, score in ((match, 0.9), (other, 0.2)):
+        q.update_job_pipeline(conn, j, simplified_content="", content_type="job_posting")
+        q.upsert_job_score(conn, j, sc, score, "", "h")
+        q.mark_job_evaluation_complete(conn, j)
+    q.update_job_feedback(conn, match, "accepted", "n")
+    q.update_job_feedback(conn, other, "accepted", "n")
+    counts = q.get_job_counts(conn, scenario_id=sc)
+    assert counts["accepted"] == 1
+
+
+def test_get_distinct_companies_sorted_no_blanks(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="Zeta", raw_text="r")
+    q.insert_job(conn, source_id=sid, url="http://job/2", title="T", company="Acme", raw_text="r")
+    q.insert_job(conn, source_id=sid, url="http://job/3", title="T", company="Acme", raw_text="r")
+    q.insert_job(conn, source_id=sid, url="http://job/4", title="T", company="", raw_text="r")
+    assert q.get_distinct_companies(conn) == ["Acme", "Zeta"]
+
+
+def test_get_jobs_exposes_passed_scenario_ids(conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    a = q.insert_scenario(conn, "Alpha", "")
+    b = q.insert_scenario(conn, "Beta", "")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="", content_type="job_posting")
+    q.upsert_job_score(conn, jid, a, 0.9, "", "h")
+    q.upsert_job_score(conn, jid, b, 0.8, "", "h")
+    q.mark_job_evaluation_complete(conn, jid)
+    job = q.get_job(conn, jid)
+    names = job["passed_scenario_names"].split(", ")
+    ids = [int(x) for x in job["passed_scenario_ids"].split(",")]
+    assert dict(zip(names, ids)) == {"Alpha": a, "Beta": b}

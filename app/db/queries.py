@@ -410,6 +410,7 @@ _GATE_SELECT = """
     jobs.*,
     gate.passed_count AS passed_gate_count,
     gate.passed_scenario_names AS passed_scenario_names,
+    gate.passed_scenario_ids AS passed_scenario_ids,
     gate.top_passed_scenario_id AS top_passed_scenario_id,
     gate.top_passed_scenario_name AS top_passed_scenario_name,
     scored.scored_count AS scored_gate_count
@@ -434,6 +435,7 @@ _GATE_JOIN = """
         SELECT ranked.job_id,
                COUNT(*) AS passed_count,
                GROUP_CONCAT(ranked.scenario_name, ', ') AS passed_scenario_names,
+               GROUP_CONCAT(ranked.scenario_id) AS passed_scenario_ids,
                MAX(CASE WHEN ranked.rn = 1 THEN ranked.scenario_id END) AS top_passed_scenario_id,
                MAX(CASE WHEN ranked.rn = 1 THEN ranked.scenario_name END) AS top_passed_scenario_name
         FROM (
@@ -462,6 +464,8 @@ def get_jobs(
     gate_status: str | None = None,
     source_id: int | None = None,
     scenario_id: int | None = None,
+    org: str | None = None,
+    scenario_gate: str | None = None,
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -473,6 +477,13 @@ def get_jobs(
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
+    if org is not None:
+        clauses.append("jobs.company = ?")
+        params.append(org)
+    if scenario_gate == "none":
+        clauses.append(
+            "(scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0))"
+        )
     if scenario_id is not None:
         clauses.append(
             """EXISTS (
@@ -492,24 +503,77 @@ def get_jobs(
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
-def get_job_counts(conn: sqlite3.Connection) -> dict[str, int]:
+def get_job_counts(
+    conn: sqlite3.Connection,
+    *,
+    scenario_id: int | None = None,
+    scenario_none: bool = False,
+    source_id: int | None = None,
+    org: str | None = None,
+) -> dict[str, int]:
+    extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org)
     counts = {"new": 0, "accepted": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
-    for status, n in conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall():
-        counts[status] = n
+
+    for key in ("accepted", "rejected", "trash"):
+        counts[key] = conn.execute(
+            f"SELECT COUNT(*) {_GATE_JOIN} WHERE jobs.status = ?{extra}",
+            [key, *eparams],
+        ).fetchone()[0]
+
     counts["lead"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE content_type = ? AND status = 'new'", ("lead",)
+        f"SELECT COUNT(*) {_GATE_JOIN} "
+        f"WHERE jobs.content_type = 'lead' AND jobs.status = 'new'{extra}",
+        eparams,
     ).fetchone()[0]
-    not_relevant = conn.execute(
+
+    counts["not_relevant"] = conn.execute(
         f"""
         SELECT COUNT(*) {_GATE_JOIN}
-        WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting' AND {_GATE_FAILED_CLAUSE}
-        """
+        WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
+          AND {_GATE_FAILED_CLAUSE}{extra}
+        """,
+        eparams,
     ).fetchone()[0]
-    counts["not_relevant"] = not_relevant
+
     counts["new"] = conn.execute(
-        f"SELECT COUNT(*) {_GATE_JOIN} WHERE jobs.status = 'new' AND {_GATE_PASSED_CLAUSE}"
+        f"""
+        SELECT COUNT(*) {_GATE_JOIN}
+        WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
+          AND {_GATE_PASSED_CLAUSE}{extra}
+        """,
+        eparams,
     ).fetchone()[0]
     return counts
+
+
+def _count_filter_sql(
+    scenario_id: int | None, scenario_none: bool, source_id: int | None, org: str | None
+) -> tuple[str, list]:
+    clauses, params = [], []
+    if source_id is not None:
+        clauses.append("jobs.source_id = ?")
+        params.append(source_id)
+    if org is not None:
+        clauses.append("jobs.company = ?")
+        params.append(org)
+    if scenario_id is not None:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM job_scores js JOIN scenarios s ON s.id = js.scenario_id "
+            "WHERE js.job_id = jobs.id AND js.scenario_id = ? AND js.relevance_score >= s.gate_threshold)"
+        )
+        params.append(scenario_id)
+    if scenario_none:
+        clauses.append(
+            "(scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0))"
+        )
+    return ("".join(" AND " + c for c in clauses), params)
+
+
+def get_distinct_companies(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT company FROM jobs WHERE company != '' ORDER BY company COLLATE NOCASE"
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:

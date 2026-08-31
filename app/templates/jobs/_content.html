@@ -1,35 +1,68 @@
+{% import "jobs/_macros.html" as macros %}
+{% set tab_defs = [
+  ("new", "New Jobs", "count-new", counts.new, "Job postings awaiting your decision — passed at least one scenario's relevance gate."),
+  ("lead", "New Leads", "count-lead", counts.lead, "Leads awaiting your decision — mentions of a possible opportunity, not full postings."),
+  ("accepted", "Accepted", "count-accepted", counts.accepted, "Jobs and leads you've accepted."),
+  ("rejected", "Rejected", "count-rejected", counts.rejected, "Jobs and leads you've rejected."),
+  ("not_relevant", "Not relevant", "count-not_relevant", counts.not_relevant, "Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios."),
+  ("trash", "Trash", "count-trash", counts.trash, "Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily."),
+] %}
+<input type="hidden" name="status_filter" value="{{ filter.status_tab }}" form="bulk-form">
+<input type="hidden" name="scenario_filter" value="{{ filter.query_params().get('scenario', '') }}" form="bulk-form">
+<input type="hidden" name="source_id_filter" value="{{ filter.source_id or '' }}" form="bulk-form">
+<input type="hidden" name="org_filter" value="{{ filter.org or '' }}" form="bulk-form">
 <div class="filter-bar">
-  {% if filter_source_id %}
-    <div class="filter-links">
-      <span>All jobs from {{ filter_source.name }} ({{ jobs | length }})</span>
-      <a href="/jobs">Clear filter</a>
-    </div>
-  {% elif filter_scenario_id %}
-    <div class="filter-links">
-      <span>All jobs matching {{ filter_scenario.name }} ({{ jobs | length }})</span>
-      <a href="/jobs">Clear filter</a>
-    </div>
-  {% else %}
-    <div class="filter-links">
-      <a href="/jobs" {% if status == "new" and not content_type %}class="active"{% endif %}
-        title="Job postings awaiting your decision — passed at least one scenario's relevance gate.">New Jobs (<span id="count-new">{{ counts.new }}</span>)</a>
-      <a href="/jobs?content_type=lead" {% if content_type == "lead" %}class="active"{% endif %}
-        title="Leads awaiting your decision — mentions of a possible opportunity, not full postings.">New Leads (<span id="count-lead">{{ counts.lead }}</span>)</a>
-      <a href="/jobs?status=accepted" {% if status == "accepted" %}class="active"{% endif %}
-        title="Jobs and leads you've accepted.">Accepted (<span id="count-accepted">{{ counts.accepted }}</span>)</a>
-      <a href="/jobs?status=rejected" {% if status == "rejected" %}class="active"{% endif %}
-        title="Jobs and leads you've rejected.">Rejected (<span id="count-rejected">{{ counts.rejected }}</span>)</a>
-      <a href="/jobs?status=not_relevant" {% if status == "not_relevant" %}class="active"{% endif %}
-        title="Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios.">Not relevant (<span id="count-not_relevant">{{ counts.not_relevant }}</span>)</a>
-      <a href="/jobs?status=trash" {% if status == "trash" %}class="active"{% endif %}
-        title="Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily.">Trash (<span id="count-trash">{{ counts.trash }}</span>)</a>
-    </div>
-  {% endif %}
+  <div class="filter-links">
+    {% for tab, label, count_id, count, tip in tab_defs %}
+    {% set target = filter.for_status(tab).query_params() | urlencode %}
+    <a href="/jobs?{{ target }}"
+       hx-get="/jobs?{{ target }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+       {% if status == tab %}class="active"{% endif %}
+       title="{{ tip | safe }}">{{ label }} (<span id="{{ count_id }}">{{ count }}</span>)</a>
+    {% endfor %}
+  </div>
   {% if jobs %}
     <label class="select-all">
       <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
       Select all
     </label>
+  {% endif %}
+</div>
+<div class="filter-row">
+  <label>Scenario
+    <select name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
+            hx-include="[name='source_id'],[name='org']">
+      <option value="">All</option>
+      <option value="none" {% if filter.scenario_none %}selected{% endif %}>None</option>
+      {% for s in scenarios %}
+        <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Source
+    <select name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
+            hx-include="[name='scenario'],[name='org']">
+      <option value="">All</option>
+      {% for s in sources %}
+        <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Organization
+    <select name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
+            hx-include="[name='scenario'],[name='source_id']">
+      <option value="">All</option>
+      {% for c in companies %}
+        <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if filter.is_narrowed %}
+    <a class="filter-clear" href="/jobs?status={{ status }}"
+       hx-get="/jobs?status={{ status }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">Clear all filters</a>
   {% endif %}
 </div>
 <div class="bulk-bar decision-panel">
@@ -41,7 +74,7 @@
     <details class="job-advanced">
       <summary>Advanced&hellip;</summary>
       <button type="button" class="btn"
-        data-progress-url="/jobs/bulk-reevaluate{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
+        data-progress-url="/jobs/bulk-reevaluate{{ macros.qsuffix(filter) }}"
         data-progress-jobs
         data-progress-oob="1"
         data-progress-display="#bulk-reevaluate-progress"
@@ -49,7 +82,7 @@
         Re-evaluate
       </button>
       <button type="button" class="btn btn-reset"
-        data-progress-url="/jobs/bulk-reset{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
+        data-progress-url="/jobs/bulk-reset{{ macros.qsuffix(filter) }}"
         data-progress-jobs
         data-progress-oob="1"
         data-progress-display="#bulk-reset-progress"
@@ -67,7 +100,7 @@
     {% include "jobs/_row.html" %}
   {% endfor %}
 {% elif not stale_jobs %}
-  <p>No jobs found.</p>
+  <p>{% if filter.is_narrowed %}No jobs match these filters.{% else %}No jobs found.{% endif %}</p>
 {% endif %}
 {% if stale_jobs %}
   {% for job in stale_jobs %}

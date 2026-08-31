@@ -1,3 +1,7 @@
+{% macro qsuffix(filter, detail=false) -%}
+{%- if detail -%}?detail=1{%- else -%}?{{ filter.query_params() | urlencode }}{%- endif -%}
+{%- endmacro %}
+
 {% macro fit_score_badge(job, size="") %}
 {% if job.fit_score is not none %}
 {% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format(job.interest_score * 100, job.attainability_score * 100) %}
@@ -15,12 +19,16 @@
 {% endif %}
 {% endmacro %}
 
-{% macro meta_tags(job) %}
+{% macro meta_tags(job, filter=none) %}
 <dl class="job-tags">
   {% if job.passed_scenario_names %}
   <dt class="sr-only">Matched scenarios</dt>
+  {% set sc_ids = (job.passed_scenario_ids or '').split(',') %}
   {% for name in job.passed_scenario_names.split(', ') %}
-  <dd><span class="tag tag-accent">{{ name }}</span></dd>
+  <dd>{% if filter and sc_ids[loop.index0] %}<a class="tag tag-accent" onclick="event.stopPropagation()"
+      hx-get="/jobs?{{ filter.with_scenario_id(sc_ids[loop.index0]).query_params() | urlencode }}"
+      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ name }}</a>
+    {% else %}<span class="tag tag-accent">{{ name }}</span>{% endif %}</dd>
   {% endfor %}
   {% endif %}
   {% if job.status == "accepted" or job.status == "rejected" or job.status == "trash" %}
@@ -29,7 +37,17 @@
   {% endif %}
   <dt class="sr-only">Content type</dt>
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
+  {% if job.company %}
+  <dt class="sr-only">Organization</dt>
+  <dd>{% if filter %}<a class="tag tag-org" onclick="event.stopPropagation()"
+      hx-get="/jobs?{{ filter.with_org(job.company).query_params() | urlencode }}"
+      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ job.company }}</a>
+    {% else %}<span class="tag tag-org">{{ job.company }}</span>{% endif %}</dd>
+  {% endif %}
   <dt class="sr-only">Source</dt>
-  <dd><span class="tag">{{ job.source_name or "" }}</span></dd>
+  <dd>{% if filter and job.source_id %}<a class="tag tag-source" onclick="event.stopPropagation()"
+      hx-get="/jobs?{{ filter.with_source_id(job.source_id).query_params() | urlencode }}"
+      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ job.source_name or "" }}</a>
+    {% else %}<span class="tag tag-source">{{ job.source_name or "" }}</span>{% endif %}</dd>
 </dl>
 {% endmacro %}

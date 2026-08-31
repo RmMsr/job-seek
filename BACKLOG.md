@@ -6,9 +6,6 @@ Known gaps, not yet scheduled.
 - feature: Make last run info a link to the correspondingfetch task. Adding a symbol for success/failure
 - feature: Allow destructive scenario deletion.
 - ux: shorten URLs on sources page. show a "expand" action to reveal the full url and have a "open" link.
-- filter: Scenario filter for jobs list includig "None" defaulting to "All".
-- filter: Allow tags for sources to be used as filter
-- filter: Show organizations as tags that also work as filters
 - fetch: **`generic_listing` has no pagination.** Sopra Steria and Tieto both cap
   at exactly 10 postings (their page-1 size) — later pages are never fetched.
   (JS-driven pagination, not hyperlink pagers — needs Playwright click/scroll)

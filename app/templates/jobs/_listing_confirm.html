@@ -10,7 +10,7 @@
   <div class="resume-panel-actions">
     <a href="/jobs" class="btn">Cancel</a>
     <button type="button" class="btn btn-primary"
-      data-progress-url="/jobs/add-listing-source{% if filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% endif %}"
+      data-progress-url="/jobs/add-listing-source{% if filter and filter.is_narrowed %}?{{ filter.query_params() | urlencode }}{% endif %}"
       data-progress-body-url="#listing-url"
       data-progress-body-name="#listing-name"
       data-progress-body-fetcher_type="#listing-fetcher-type"

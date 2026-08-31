@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
+from app.job_filter import JobFilter
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
 from app.fetchers.content import (
     FetchError, NoContentError, extract_text_or_raise, extract_page_title,
@@ -42,56 +43,68 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
     return jobs
 
 
-def _get_filtered_jobs(
-    conn: sqlite3.Connection,
-    status: str | None,
-    content_type: str | None,
-    source_id: int | None = None,
-    scenario_id: int | None = None,
-) -> list[dict]:
-    if source_id is not None:
-        return q.get_jobs(conn, source_id=source_id)
-    if scenario_id is not None:
-        return q.get_jobs(conn, scenario_id=scenario_id)
-    if status == "not_relevant":
-        return q.get_jobs(conn, status="new", content_type="job_posting", gate_status="failed")
-    if status is None and content_type is None:
-        return q.get_jobs(conn, status="new", gate_status="passed")
-    if status is None and content_type == "lead":
-        return q.get_jobs(conn, status="new", content_type="lead")
-    return q.get_jobs(conn, status=status, content_type=content_type)
+# status tab -> base kwargs for get_jobs (before scenario/source/org narrowing)
+_BASE_KWARGS_FOR_TAB = {
+    "new": {"status": "new", "content_type": "job_posting", "gate_status": "passed"},
+    "lead": {"status": "new", "content_type": "lead"},
+    "accepted": {"status": "accepted"},
+    "rejected": {"status": "rejected"},
+    "not_relevant": {"status": "new", "content_type": "job_posting", "gate_status": "failed"},
+    "trash": {"status": "trash"},
+}
 
 
-def _filter_context(request: Request) -> dict:
-    has_status = "status" in request.query_params
-    has_content_type = "content_type" in request.query_params
-    has_source_id = "source_id" in request.query_params
-    has_scenario_id = "scenario_id" in request.query_params
-    if not (has_status or has_content_type or has_source_id or has_scenario_id):
-        return {}
-    source_id_param = request.query_params.get("source_id") or None
-    scenario_id_param = request.query_params.get("scenario_id") or None
-    return {
-        "filter_status": request.query_params.get("status") or None,
-        "filter_content_type": request.query_params.get("content_type") or None,
-        "filter_source_id": int(source_id_param) if source_id_param else None,
-        "filter_scenario_id": int(scenario_id_param) if scenario_id_param else None,
-    }
+def _jobs_for_filter(conn: sqlite3.Connection, f: JobFilter) -> list[dict]:
+    kwargs = dict(_BASE_KWARGS_FOR_TAB[f.status_tab])
+    if f.source_id is not None:
+        kwargs["source_id"] = f.source_id
+    if f.org is not None:
+        kwargs["org"] = f.org
+    if f.scenario_id is not None:
+        kwargs["scenario_id"] = f.scenario_id
+    if f.scenario_none:
+        kwargs["scenario_gate"] = "none"
+    return q.get_jobs(conn, **kwargs)
+
+
+def _counts_for_filter(conn: sqlite3.Connection, f: JobFilter) -> dict[str, int]:
+    return q.get_job_counts(
+        conn,
+        scenario_id=f.scenario_id,
+        scenario_none=f.scenario_none,
+        source_id=f.source_id,
+        org=f.org,
+    )
+
+
+def _filter_from_request(request: Request) -> JobFilter:
+    return JobFilter.from_params(request.query_params)
 
 
 def _is_detail_page_request(request: Request) -> bool:
     return request.query_params.get("detail") == "1"
 
 
+def _filter_task_params(request: Request) -> dict:
+    """Serialisable filter state to stash in an enqueued task's params."""
+    return {
+        "filter": _filter_from_request(request).query_params(),
+        "detail": _is_detail_page_request(request),
+    }
+
+
+def _filter_from_task_params(params: dict) -> tuple[JobFilter, bool]:
+    return JobFilter.from_params(params.get("filter") or {}), bool(params.get("detail"))
+
+
 def _stale_badge(
     conn: sqlite3.Connection,
     job: dict,
-    status: str | None,
-    content_type: str | None,
-    source_id: int | None = None,
-    scenario_id: int | None = None,
+    f: JobFilter,
+    filtered_ids: set[int] | None = None,
 ) -> dict | None:
-    filtered_ids = {j["id"] for j in _get_filtered_jobs(conn, status, content_type, source_id, scenario_id)}
+    if filtered_ids is None:
+        filtered_ids = {j["id"] for j in _jobs_for_filter(conn, f)}
     if job["id"] in filtered_ids:
         return None
     anchor = f"#job-{job['id']}"
@@ -103,10 +116,10 @@ def _stale_badge(
         return {"label": "Moved to Trash", "href": f"/jobs?status=trash{anchor}"}
     if job["content_type"] == "job_posting":
         if job["passed_gate_count"] or job["gate_override"]:
-            return {"label": "Moved to New", "href": f"/jobs{anchor}"}
+            return {"label": "Moved to New", "href": f"/jobs?status=new{anchor}"}
         return {"label": "Moved to Not relevant", "href": f"/jobs?status=not_relevant{anchor}"}
     if job["content_type"] == "lead":
-        return {"label": "Moved to Leads", "href": f"/jobs?content_type=lead{anchor}"}
+        return {"label": "Moved to Leads", "href": f"/jobs?status=lead{anchor}"}
     return {"label": "No longer shown in this view", "href": None}
 
 
@@ -117,70 +130,71 @@ def _render_removed_job_html(job_id: int) -> str:
     )
 
 
-def _render_updated_job_html(conn: sqlite3.Connection, request: Request, job_id: int, filter_ctx: dict) -> str:
+def _render_updated_job_html(
+    conn: sqlite3.Connection,
+    request: Request | None,
+    job_id: int,
+    f: JobFilter,
+    *,
+    detail: bool = False,
+) -> str:
     job = q.get_job(conn, job_id)
     if job is None:
         return _render_removed_job_html(job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
 
-    stale_badge = None
-    if filter_ctx:
-        stale_badge = _stale_badge(
-            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
-        )
-
+    stale_badge = None if detail else _stale_badge(conn, job, f)
     if stale_badge:
         job["stale_badge"] = stale_badge
-        context = {"job": job}
-        context.update(filter_ctx)
-        return templates.get_template("jobs/_row.html").render(request=request, **context)
+        return templates.get_template("jobs/_row.html").render(
+            request=request, job=job, filter=f, is_detail_page=detail
+        )
 
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
-    context = {"job": job, "scenarios": scenarios, "job_scores": job_scores}
-    context.update(filter_ctx)
-    return templates.get_template("jobs/_feedback.html").render(request=request, **context)
-
-
-def _content_context(
-    conn: sqlite3.Connection,
-    status: str | None,
-    content_type: str | None,
-    source_id: int | None = None,
-    scenario_id: int | None = None,
-) -> dict:
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status, content_type, source_id, scenario_id))
-    counts = q.get_job_counts(conn)
-    scenarios = q.get_scenarios(conn)
-    effective_status = (
-        status if (status is not None or content_type is not None or source_id is not None or scenario_id is not None)
-        else "new"
+    return templates.get_template("jobs/_feedback.html").render(
+        request=request, job=job, scenarios=scenarios, job_scores=job_scores,
+        filter=f, is_detail_page=detail,
     )
-    filter_source = q.get_source(conn, source_id) if source_id is not None else None
-    filter_scenario = q.get_scenario(conn, scenario_id) if scenario_id is not None else None
+
+
+def _content_context(conn: sqlite3.Connection, f: JobFilter, *, jobs: list[dict] | None = None) -> dict:
+    if jobs is None:
+        jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     return {
-        "jobs": jobs, "stale_jobs": [], "counts": counts, "scenarios": scenarios,
-        "status": effective_status, "content_type": content_type,
-        "filter_status": status, "filter_content_type": content_type,
-        "filter_source_id": source_id, "filter_source": filter_source,
-        "filter_scenario_id": scenario_id, "filter_scenario": filter_scenario,
+        "filter": f,
+        "jobs": jobs,
+        "stale_jobs": [],
+        "counts": _counts_for_filter(conn, f),
+        "scenarios": q.get_scenarios(conn),
+        "sources": q.get_sources(conn),
+        "companies": q.get_distinct_companies(conn),
+        "status": f.status_tab,
     }
 
 
+def _filter_from_bulk_form(
+    status_filter: str | None,
+    scenario_filter: str | None,
+    source_id_filter: str | None,
+    org_filter: str | None,
+) -> JobFilter:
+    return JobFilter.from_params({
+        "status": status_filter or "new",
+        "scenario": scenario_filter or "",
+        "source_id": source_id_filter or "",
+        "org": org_filter or "",
+    })
+
+
 @router.get("/jobs", response_class=HTMLResponse)
-def job_list(
-    request: Request,
-    status: str | None = None,
-    content_type: str | None = None,
-    source_id: int | None = None,
-    scenario_id: int | None = None,
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    return templates.TemplateResponse(
-        request, "jobs/list.html", _content_context(conn, status, content_type, source_id, scenario_id)
-    )
+def job_list(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    f = _filter_from_request(request)
+    # htmx filter/tab navigation swaps only #jobs-content; a full browser
+    # navigation (no HX-Request header) gets the whole page.
+    template = "jobs/_content.html" if request.headers.get("HX-Request") else "jobs/list.html"
+    return templates.TemplateResponse(request, template, _content_context(conn, f))
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -194,7 +208,8 @@ def job_detail(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job_scores = q.get_job_scores(conn, job_id)
     return templates.TemplateResponse(
         request, "jobs/detail.html",
-        {"job": job, "scenarios": scenarios, "job_scores": job_scores, "is_detail_page": True},
+        {"job": job, "scenarios": scenarios, "job_scores": job_scores,
+         "is_detail_page": True, "filter": None},
     )
 
 
@@ -205,18 +220,16 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
-    filter_ctx = _filter_context(request)
-    if filter_ctx:
-        stale_badge = _stale_badge(
-            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
-        )
+    detail = _is_detail_page_request(request)
+    f = _filter_from_request(request)
+    if not detail:
+        stale_badge = _stale_badge(conn, job, f)
         if stale_badge:
             job["stale_badge"] = stale_badge
-    context = {"job": job, "scenarios": scenarios, "job_scores": job_scores}
-    context.update(filter_ctx)
-    if _is_detail_page_request(request):
-        context["is_detail_page"] = True
+    context = {
+        "job": job, "scenarios": scenarios, "job_scores": job_scores,
+        "filter": f, "is_detail_page": detail,
+    }
     return templates.TemplateResponse(request, "jobs/_feedback.html", context)
 
 
@@ -225,18 +238,13 @@ def job_collapse(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     job = q.get_job(conn, job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
-    filter_ctx = _filter_context(request)
-    if filter_ctx:
-        stale_badge = _stale_badge(
-            conn, job, filter_ctx.get("filter_status"), filter_ctx.get("filter_content_type"),
-            filter_ctx.get("filter_source_id"), filter_ctx.get("filter_scenario_id"),
-        )
+    detail = _is_detail_page_request(request)
+    f = _filter_from_request(request)
+    if not detail:
+        stale_badge = _stale_badge(conn, job, f)
         if stale_badge:
             job["stale_badge"] = stale_badge
-    context = {"job": job}
-    context.update(filter_ctx)
-    if _is_detail_page_request(request):
-        context["is_detail_page"] = True
+    context = {"job": job, "filter": f, "is_detail_page": detail}
     return templates.TemplateResponse(request, "jobs/_row.html", context)
 
 
@@ -247,10 +255,11 @@ def job_delete_confirm(job_id: int, request: Request, conn: sqlite3.Connection =
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] != "trash":
         raise HTTPException(status_code=400, detail="Only trashed jobs can be deleted")
-    context = {"job": job}
-    context.update(_filter_context(request))
-    if _is_detail_page_request(request):
-        context["is_detail_page"] = True
+    context = {
+        "job": job,
+        "filter": _filter_from_request(request),
+        "is_detail_page": _is_detail_page_request(request),
+    }
     return templates.TemplateResponse(request, "jobs/_row_delete_confirm.html", context)
 
 
@@ -280,9 +289,10 @@ def job_feedback(
     q.update_job_feedback(conn, job_id, status, note)
     if redirect:
         return HTMLResponse(content="", headers={"HX-Redirect": redirect})
-    filter_ctx = _filter_context(request)
-    row_html = _render_updated_job_html(conn, request, job_id, filter_ctx)
-    counts = q.get_job_counts(conn)
+    f = _filter_from_request(request)
+    detail = _is_detail_page_request(request)
+    row_html = _render_updated_job_html(conn, request, job_id, f, detail=detail)
+    counts = _counts_for_filter(conn, f)
     counts_html = templates.get_template("jobs/_counts_oob.html").render(request=request, counts=counts)
     return HTMLResponse(content=row_html + counts_html)
 
@@ -326,9 +336,10 @@ def _task_job_reset(conn, client, model, config, params):
             yield next(gen)
     except StopIteration:
         pass
-    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    f, detail = _filter_from_task_params(params)
+    html = _render_updated_job_html(conn, None, params["job_id"], f, detail=detail)
     counts_html = templates.get_template("jobs/_counts_oob.html").render(
-        request=None, counts=q.get_job_counts(conn)
+        request=None, counts=_counts_for_filter(conn, f)
     )
     return {"html_chunks": [html, counts_html], "notices": []}
 
@@ -345,9 +356,10 @@ def _task_job_pass_as_new(conn, client, model, config, params):
             yield next(gen)
     except StopIteration:
         pass
-    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    f, detail = _filter_from_task_params(params)
+    html = _render_updated_job_html(conn, None, params["job_id"], f, detail=detail)
     counts_html = templates.get_template("jobs/_counts_oob.html").render(
-        request=None, counts=q.get_job_counts(conn)
+        request=None, counts=_counts_for_filter(conn, f)
     )
     return {"html_chunks": [html, counts_html], "notices": []}
 
@@ -365,9 +377,10 @@ def _task_job_reevaluate(conn, client, model, config, params):
             yield next(gen)
     except StopIteration:
         pass
-    html = _render_updated_job_html(conn, None, params["job_id"], params["filter_ctx"])
+    f, detail = _filter_from_task_params(params)
+    html = _render_updated_job_html(conn, None, params["job_id"], f, detail=detail)
     counts_html = templates.get_template("jobs/_counts_oob.html").render(
-        request=None, counts=q.get_job_counts(conn)
+        request=None, counts=_counts_for_filter(conn, f)
     )
     return {"html_chunks": [html, counts_html], "notices": []}
 
@@ -378,7 +391,7 @@ def job_reset(job_id: int, request: Request, conn: sqlite3.Connection = Depends(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     task = q.enqueue_task(
-        conn, kind="job_reset", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+        conn, kind="job_reset", params={"job_id": job_id, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
@@ -389,7 +402,7 @@ def job_pass_as_new(job_id: int, request: Request, conn: sqlite3.Connection = De
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     task = q.enqueue_task(
-        conn, kind="job_pass_as_new", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+        conn, kind="job_pass_as_new", params={"job_id": job_id, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
@@ -400,7 +413,7 @@ def job_reevaluate(job_id: int, request: Request, conn: sqlite3.Connection = Dep
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     task = q.enqueue_task(
-        conn, kind="job_reevaluate", params={"job_id": job_id, "filter_ctx": _filter_context(request)}
+        conn, kind="job_reevaluate", params={"job_id": job_id, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
@@ -408,7 +421,7 @@ def job_reevaluate(job_id: int, request: Request, conn: sqlite3.Connection = Dep
 @register_task_kind("jobs_bulk_reset")
 def _task_jobs_bulk_reset(conn, client, model, config, params):
     job_ids = params["job_ids"]
-    filter_ctx = params["filter_ctx"]
+    f, detail = _filter_from_task_params(params)
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
     yield f"Resetting {len(job_ids)} job(s)"
@@ -424,9 +437,11 @@ def _task_jobs_bulk_reset(conn, client, model, config, params):
                 yield next(gen)
         except StopIteration:
             pass
-        html_chunks.append(_render_updated_job_html(conn, None, job_id, filter_ctx))
+        html_chunks.append(_render_updated_job_html(conn, None, job_id, f, detail=detail))
     html_chunks.append(
-        templates.get_template("jobs/_counts_oob.html").render(request=None, counts=q.get_job_counts(conn))
+        templates.get_template("jobs/_counts_oob.html").render(
+            request=None, counts=_counts_for_filter(conn, f)
+        )
     )
     yield f"Reset complete: {len(job_ids)} job(s) reprocessed"
     return {"html_chunks": html_chunks, "notices": []}
@@ -435,7 +450,7 @@ def _task_jobs_bulk_reset(conn, client, model, config, params):
 @register_task_kind("jobs_bulk_reevaluate")
 def _task_jobs_bulk_reevaluate(conn, client, model, config, params):
     job_ids = params["job_ids"]
-    filter_ctx = params["filter_ctx"]
+    f, detail = _filter_from_task_params(params)
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
     yield f"Re-evaluating {len(job_ids)} job(s)"
@@ -451,9 +466,11 @@ def _task_jobs_bulk_reevaluate(conn, client, model, config, params):
                 yield next(gen)
         except StopIteration:
             pass
-        html_chunks.append(_render_updated_job_html(conn, None, job_id, filter_ctx))
+        html_chunks.append(_render_updated_job_html(conn, None, job_id, f, detail=detail))
     html_chunks.append(
-        templates.get_template("jobs/_counts_oob.html").render(request=None, counts=q.get_job_counts(conn))
+        templates.get_template("jobs/_counts_oob.html").render(
+            request=None, counts=_counts_for_filter(conn, f)
+        )
     )
     yield f"Re-evaluation complete: {len(job_ids)} job(s) updated"
     return {"html_chunks": html_chunks, "notices": []}
@@ -462,7 +479,7 @@ def _task_jobs_bulk_reevaluate(conn, client, model, config, params):
 @router.post("/jobs/bulk-reset")
 def job_bulk_reset(request: Request, job_ids: list[int] = Form(...), conn: sqlite3.Connection = Depends(get_db)):
     task = q.enqueue_task(
-        conn, kind="jobs_bulk_reset", params={"job_ids": job_ids, "filter_ctx": _filter_context(request)}
+        conn, kind="jobs_bulk_reset", params={"job_ids": job_ids, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
@@ -470,7 +487,7 @@ def job_bulk_reset(request: Request, job_ids: list[int] = Form(...), conn: sqlit
 @router.post("/jobs/bulk-reevaluate")
 def job_bulk_reevaluate(request: Request, job_ids: list[int] = Form(...), conn: sqlite3.Connection = Depends(get_db)):
     task = q.enqueue_task(
-        conn, kind="jobs_bulk_reevaluate", params={"job_ids": job_ids, "filter_ctx": _filter_context(request)}
+        conn, kind="jobs_bulk_reevaluate", params={"job_ids": job_ids, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
@@ -482,21 +499,16 @@ def job_bulk_feedback(
     status: str = Form(...),
     note: str | None = Form(None),
     status_filter: str | None = Form(None),
-    content_type_filter: str | None = Form(None),
+    scenario_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
-    scenario_id_filter: str | None = Form(None),
+    org_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
         q.update_job_feedback(conn, job_id, status, note)
 
-    status_filter = status_filter or None
-    content_type_filter = content_type_filter or None
-    source_id_filter = source_id_filter or None
-    scenario_id_filter = scenario_id_filter or None
-    source_id = int(source_id_filter) if source_id_filter else None
-    scenario_id = int(scenario_id_filter) if scenario_id_filter else None
-    jobs = _enrich_jobs(conn, _get_filtered_jobs(conn, status_filter, content_type_filter, source_id, scenario_id))
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter)
+    jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     matched_ids = {j["id"] for j in jobs}
 
     # Jobs just acted on that no longer match the current filter get a stale
@@ -510,7 +522,7 @@ def job_bulk_feedback(
         job = q.get_job(conn, job_id)
         if not job:
             continue
-        badge = _stale_badge(conn, job, status_filter, content_type_filter, source_id, scenario_id)
+        badge = _stale_badge(conn, job, f, filtered_ids=matched_ids)
         if not badge:
             continue
         job["stale_badge"] = badge
@@ -521,26 +533,8 @@ def job_bulk_feedback(
         key=lambda j: (j["fit_score"] if j["fit_score"] is not None else float("-inf"), j["fetched_at"] or ""),
         reverse=True,
     )
-    stale_jobs = []
-
-    counts = q.get_job_counts(conn)
-    scenarios = q.get_scenarios(conn)
-    effective_status = (
-        status_filter
-        if (status_filter is not None or content_type_filter is not None or source_id is not None or scenario_id is not None)
-        else "new"
-    )
-    filter_source = q.get_source(conn, source_id) if source_id is not None else None
-    filter_scenario = q.get_scenario(conn, scenario_id) if scenario_id is not None else None
     return templates.TemplateResponse(
-        request, "jobs/_content.html",
-        {
-            "jobs": jobs, "stale_jobs": stale_jobs, "counts": counts, "scenarios": scenarios,
-            "status": effective_status, "content_type": content_type_filter,
-            "filter_status": status_filter, "filter_content_type": content_type_filter,
-            "filter_source_id": source_id, "filter_source": filter_source,
-            "filter_scenario_id": scenario_id, "filter_scenario": filter_scenario,
-        },
+        request, "jobs/_content.html", _content_context(conn, f, jobs=jobs)
     )
 
 
@@ -558,21 +552,14 @@ def job_bulk_delete(
     request: Request,
     job_ids: list[int] = Form(...),
     status_filter: str | None = Form(None),
-    content_type_filter: str | None = Form(None),
+    scenario_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
-    scenario_id_filter: str | None = Form(None),
+    org_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
-    status_filter = status_filter or None
-    content_type_filter = content_type_filter or None
-    source_id_filter = source_id_filter or None
-    scenario_id_filter = scenario_id_filter or None
-    source_id = int(source_id_filter) if source_id_filter else None
-    scenario_id = int(scenario_id_filter) if scenario_id_filter else None
-    return templates.TemplateResponse(
-        request, "jobs/_content.html", _content_context(conn, status_filter, content_type_filter, source_id, scenario_id)
-    )
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter)
+    return templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
 
 
 @router.post("/jobs/bulk-actions-cancel", response_class=HTMLResponse)
@@ -587,8 +574,7 @@ def job_bulk_actions_cancel(
 @register_task_kind("job_add_by_url")
 def _task_job_add_by_url(conn, client, model, config, params):
     url = params["url"]
-    status = params.get("status")
-    content_type = params.get("content_type")
+    f = JobFilter.from_params(params.get("filter") or {})
     notices: list[dict] = []
     html_chunks: list[str] = []
     result = {"notices": notices, "html_chunks": html_chunks}
@@ -654,7 +640,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
                         "link_count": len(detection.job_links), "domain": domain,
                         "default_name": default_name,
                     }
-                    panel_context.update(params.get("filter_ctx", {}))
+                    panel_context["filter"] = f
                     panel = templates.get_template("jobs/_listing_confirm.html").render(**panel_context)
                     html_chunks.append(panel)
                     result["needs_action"] = True
@@ -717,7 +703,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
     q.resolve_source_prompts_for_url(conn, url)
     html_chunks.append(
         templates.get_template("jobs/_content.html").render(
-            request=None, **_content_context(conn, status, content_type)
+            request=None, **_content_context(conn, f)
         )
     )
     return result
@@ -726,8 +712,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
 @register_task_kind("job_add_listing_source")
 def _task_job_add_listing_source(conn, client, model, config, params):
     url, name, fetcher_type = params["url"], params["name"], params["fetcher_type"]
-    status = params.get("status")
-    content_type = params.get("content_type")
+    f = JobFilter.from_params(params.get("filter") or {})
     notices = []
 
     q.resolve_source_prompts_for_url(conn, url)
@@ -735,7 +720,7 @@ def _task_job_add_listing_source(conn, client, model, config, params):
     if already_tracked is not None:
         notices.append(already_tracked)
         html_chunks = [templates.get_template("jobs/_content.html").render(
-            request=None, **_content_context(conn, status, content_type)
+            request=None, **_content_context(conn, f)
         )]
         return {"notices": notices, "html_chunks": html_chunks}
 
@@ -765,7 +750,7 @@ def _task_job_add_listing_source(conn, client, model, config, params):
         })
 
     html_chunks = [templates.get_template("jobs/_content.html").render(
-        request=None, **_content_context(conn, status, content_type)
+        request=None, **_content_context(conn, f)
     )]
     return {"notices": notices, "html_chunks": html_chunks}
 
@@ -783,9 +768,7 @@ def job_add_by_url(
     root_id = resolve_origin_task_id(origin_task_id)
     task = q.enqueue_task(conn, kind="job_add_by_url", params={
         "url": url,
-        "status": request.query_params.get("status") or None,
-        "content_type": request.query_params.get("content_type") or None,
-        "filter_ctx": _filter_context(request),
+        "filter": _filter_from_request(request).query_params(),
         "skip_rewrite": skip_rewrite,
     }, parent_task_id=root_id)
     if root_id is not None:
@@ -804,8 +787,7 @@ def job_add_listing_source(
     root_id = resolve_origin_task_id(origin_task_id)
     task = q.enqueue_task(conn, kind="job_add_listing_source", params={
         "url": url, "name": name, "fetcher_type": fetcher_type,
-        "status": request.query_params.get("status") or None,
-        "content_type": request.query_params.get("content_type") or None,
+        "filter": _filter_from_request(request).query_params(),
     }, parent_task_id=root_id)
     if root_id is not None:
         q.resolve_task(conn, root_id)

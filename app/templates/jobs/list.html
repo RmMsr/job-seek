@@ -2,12 +2,7 @@
 {% block title %}Jobs — Job Seek{% endblock %}
 {% block content %}
 <h1>Jobs</h1>
-<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML">
-  <input type="hidden" name="status_filter" value="{{ filter_status or '' }}">
-  <input type="hidden" name="content_type_filter" value="{{ filter_content_type or '' }}">
-  <input type="hidden" name="source_id_filter" value="{{ filter_source_id or '' }}">
-  <input type="hidden" name="scenario_id_filter" value="{{ filter_scenario_id or '' }}">
-</form>
+<form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML"></form>
 {% from "_add_panel.html" import add_panel %}
 {% call add_panel("Add") %}
 <form class="add-job-by-url">

@@ -165,6 +165,10 @@
     .tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 0.8em; background: var(--border); color: var(--text-secondary); }
     .tag-accent { background: var(--accent-tint); color: var(--accent); }
     .tag-feedback { background: var(--accent-tint); color: var(--accent); }
+    .tag-source { background: var(--warning-tint); color: var(--warning); }
+    .tag-org { background: var(--success-tint); color: var(--success-strong); }
+    a.tag { text-decoration: none; cursor: pointer; }
+    a.tag:hover { filter: brightness(1.08); text-decoration: underline; }
 
     .job-row {
       border: 1px solid var(--border);
@@ -331,6 +335,10 @@
     .filter-bar a.active { font-weight: 600; color: var(--text-primary); text-decoration: underline; text-decoration-color: var(--accent); }
     .select-all { display: flex; align-items: center; gap: 0.4rem; color: var(--text-secondary); white-space: nowrap; }
     .select-all input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem; }
+    .filter-row label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.85em; color: var(--text-secondary); }
+    .filter-row select { font-family: var(--font-sans); font-size: 0.9em; padding: 2px 4px; }
+    .filter-clear { font-size: 0.85em; }
     body:has(input[name="job_ids"]:checked) { padding-bottom: calc(var(--status-bar-h, 0px) + var(--bulk-bar-h, 9rem) + 4rem); }
     .bulk-bar { display: none; position: fixed; bottom: var(--status-bar-h, 0px); left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 880px; box-sizing: border-box; z-index: 10;

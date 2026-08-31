@@ -1,6 +1,6 @@
 {% import "jobs/_macros.html" as macros %}
 <article class="job-row{% if job.stale_badge %} job-row-stale{% endif %}" id="job-{{ job.id }}" role="button" tabindex="0" style="cursor:pointer; view-transition-name: job-row-{{ job.id }}"
-  hx-get="/jobs/{{ job.id }}/expand{% if is_detail_page %}?detail=1{% elif filter_status is defined %}?status={{ filter_status or '' }}&content_type={{ filter_content_type or '' }}{% if filter_source_id %}&source_id={{ filter_source_id }}{% elif filter_scenario_id %}&scenario_id={{ filter_scenario_id }}{% endif %}{% endif %}"
+  hx-get="/jobs/{{ job.id }}/expand{{ macros.qsuffix(filter, detail=is_detail_page|default(false)) }}"
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML transition:true"
   hx-trigger="click, keyup[key=='Enter']">
@@ -34,6 +34,6 @@
     {% elif job.summary %}
       <p class="job-hook">{{ job.summary | markdown_text | truncate(200) }}</p>
     {% endif %}
-    {{ macros.meta_tags(job) }}
+    {{ macros.meta_tags(job, filter=filter if filter is defined else none) }}
   </div>
 </article>
