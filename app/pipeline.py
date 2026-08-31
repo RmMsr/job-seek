@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Generator
 import openai
@@ -67,34 +68,38 @@ def _ingest_posting(
     *,
     url: str,
     progress_prefix: str = "",
+    preserve_existing_metadata: bool = False,
 ) -> Generator[str, None, None]:
     simplified = simplify(raw_text)
     content_type, _ = classify(client, model, simplified, is_slack=is_slack)
     yield _progress(f"{progress_prefix}Classified as {content_type}: {url}")
 
     if content_type in ("job_posting", "lead"):
-        ai_title, headline, job_summary = summarize(
+        job_summary = summarize(
             client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
+            today=datetime.now(timezone.utc).date(),
         )
         q.update_job_pipeline(
             conn, job_id,
             simplified_content=simplified,
             content_type=content_type,
-            title=ai_title or fallback_title,
-            headline=headline,
-            summary=job_summary,
+            title=job_summary.title or fallback_title,
+            headline=job_summary.headline,
+            summary=job_summary.summary,
+            company="" if preserve_existing_metadata else job_summary.company,
+            published_at="" if preserve_existing_metadata else job_summary.posted_date,
         )
         passed_gate = False
         for scenario in scenarios:
             criteria = q.get_criteria(conn, scenario["id"])
-            score, reasoning = evaluate(client, model, scenario, criteria, job_summary)
+            score, reasoning = evaluate(client, model, scenario, criteria, job_summary.summary)
             version_hash = compute_version_hash(scenario, criteria)
             q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
             if score >= scenario["gate_threshold"]:
                 passed_gate = True
             yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {url}")
         if passed_gate:
-            result = assess_fit(client, model, profile, job_summary)
+            result = assess_fit(client, model, profile, job_summary.summary)
             q.update_job_fit(
                 conn, job_id,
                 result["interest"], result["interest_reasoning"],
@@ -150,6 +155,7 @@ def run_fetch(
             yield from _ingest_posting(
                 conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
                 url=raw_url, progress_prefix=f"[{i}/{jobs_found}] ",
+                preserve_existing_metadata=raw.published_at is not None,
             )
             if not q.job_exists(conn, job_id):
                 jobs_new -= 1
@@ -200,6 +206,7 @@ def run_reprocess_job(
     yield from _ingest_posting(
         conn, client, model, job["id"], job["raw_text"], job["title"], is_slack, profile, scenarios,
         url=job["url"], progress_prefix=progress_prefix,
+        preserve_existing_metadata=job["published_at"] is not None,
     )
     if q.job_exists(conn, job["id"]):
         yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
@@ -242,15 +249,14 @@ def run_reevaluate_job(
         yield _progress(f"{progress_prefix}Skipped (not eligible for re-evaluation): {job['url']}")
         return
 
-    ai_title, headline, new_summary = summarize(
-        client, model, job["simplified_content"], content_type=job["content_type"]
-    )
+    s = summarize(client, model, job["simplified_content"], content_type=job["content_type"])
+    new_summary = s.summary
     q.update_job_pipeline(
         conn, job["id"],
         simplified_content=job["simplified_content"],
         content_type=job["content_type"],
-        title=ai_title or job["title"],
-        headline=headline,
+        title=s.title or job["title"],
+        headline=s.headline,
         summary=new_summary,
     )
 
@@ -303,9 +309,8 @@ def run_reevaluate(
 
     for i, job in enumerate(to_evaluate, start=1):
         if job["simplified_content"]:
-            ai_title, headline, new_summary = summarize(
-                client, model, job["simplified_content"], content_type=job["content_type"]
-            )
+            s = summarize(client, model, job["simplified_content"], content_type=job["content_type"])
+            ai_title, headline, new_summary = s.title, s.headline, s.summary
         else:
             ai_title, headline, new_summary = job["title"], job["headline"], job["summary"]
         score, reasoning = evaluate(client, model, scenario, criteria, new_summary)

@@ -46,6 +46,20 @@ def test_fetch_panel_has_view_all_jobs_link_per_source(client, conn):
     assert f'href="/jobs?source_id={sid}"' in resp.text
 
 
+def test_fetch_table_last_run_shows_relative_age_not_raw_timestamp(client, conn):
+    sid = _seed(conn)
+    run = q.start_fetch_run(conn, sid)
+    q.complete_fetch_run(conn, run, jobs_found=1, jobs_new=1)
+    raw_ts = q.get_fetch_stats_by_source(conn)[sid]["last_success_at"]
+
+    html = client.get("/fetch").text
+    # The "Last run" column renders the coarse `age` filter as its text …
+    assert "just now" in html or "ago" in html
+    # … and keeps the exact timestamp only on hover, never as displayed text.
+    assert f'title="{raw_ts} UTC"' in html
+    assert f">{raw_ts}<" not in html
+
+
 def test_fetch_table_links_source_name_to_sources_page(client, conn):
     src_id = q.insert_source(conn, "Acme Board", "https://acme.example/jobs", "generic_listing")
     html = client.get("/fetch").text

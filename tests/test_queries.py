@@ -308,11 +308,13 @@ def test_insert_job_stores_published_at(conn):
     assert job["published_at"] == "2026-07-01T00:00:00+00:00"
 
 
-def test_insert_job_published_at_defaults_to_none(conn):
+def test_insert_job_published_at_defaults_to_processing_time(conn):
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
     job = q.get_job(conn, jid)
-    assert job["published_at"] is None
+    assert job["published_at"] is not None
+    # Same INSERT statement ⇒ SQLite freezes datetime('now'), so byte-identical.
+    assert job["published_at"] == job["fetched_at"]
 
 
 def test_get_all_job_urls_empty(conn):
@@ -376,6 +378,32 @@ def test_update_job_pipeline_leaves_title_unchanged_when_not_passed(conn):
     job = q.get_job(conn, jid)
     assert job["title"] == "Scraped Title"
     assert job["headline"] == ""
+
+
+def test_update_job_pipeline_sets_company_and_published_at(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="", raw_text="r")
+    q.update_job_pipeline(
+        conn, jid, simplified_content="clean", content_type="job_posting",
+        summary="s", company="Zivid", published_at="2026-08-17",
+    )
+    job = q.get_job(conn, jid)
+    assert job["company"] == "Zivid"
+    assert job["published_at"] == "2026-08-17"
+
+
+def test_update_job_pipeline_empty_company_and_date_keep_existing(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "finn_listing")
+    jid = q.insert_job(
+        conn, source_id=source_id, url="http://job/1", title="T", company="Acme", raw_text="r",
+        published_at="2026-07-01T00:00:00+00:00",
+    )
+    q.update_job_pipeline(
+        conn, jid, simplified_content="clean", content_type="job_posting", summary="s",
+    )
+    job = q.get_job(conn, jid)
+    assert job["company"] == "Acme"
+    assert job["published_at"] == "2026-07-01T00:00:00+00:00"
 
 
 def test_update_job_feedback(conn):

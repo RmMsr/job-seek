@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from app.db import queries as q
 from app.ai.refine import CriterionProposal
+from app.ai.summarize import JobSummary
 from app.task_engine import execute_task
 
 
@@ -583,7 +584,7 @@ def test_reevaluate_task_execution_updates_jobs(conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -607,7 +608,7 @@ def test_reevaluate_includes_accepted_jobs(conn):
     q.update_job_feedback(conn, job_id, "accepted", "")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -630,7 +631,7 @@ def test_reevaluate_excludes_rejected_and_trash_jobs(conn):
     q.update_job_feedback(conn, trash_id, "trash", "")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("Title", "Hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="Title", headline="Hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -647,7 +648,7 @@ def test_reevaluate_skips_jobs_already_current(conn):
     job_id = q.get_jobs(conn)[0]["id"]
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate, \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         task1 = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
@@ -673,7 +674,7 @@ def test_reevaluate_all_scenarios_combined_progress(conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -696,7 +697,7 @@ def test_reevaluate_all_scenarios_counts_scenarios_and_jobs_independently(conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("ML Engineer - Remote @ Acme", "Great hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -726,7 +727,7 @@ def test_reevaluate_all_scenarios_recomputes_fit_for_accepted_and_gate_failed_jo
         "attainability": 0.6, "attainability_reasoning": "b",
     }
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("Title", "Hook", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="Title", headline="Hook", summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.2, "weak")), \
          patch("app.pipeline.assess_fit", return_value=fit_result):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
@@ -746,7 +747,7 @@ def test_reevaluate_keeps_existing_title_when_ai_title_empty(conn):
     q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
 
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=("", "", "Updated summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(summary="Updated summary")), \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)

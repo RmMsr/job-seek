@@ -205,16 +205,21 @@
     dl.job-tags dt, dl.job-tags dd { margin:0; }
 
     .job-row-content { flex: 1 1 auto; min-width: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; }
-    .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 0; }
-    .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
+    .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 2.4rem; line-height: 1.3; }
+    .job-row-content:has(.job-select-wrap) .job-row-header { padding-right: 4.2rem; }
+    .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; line-height: 1.3; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
     .job-company { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
     .job-age { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
     .job-link-icon { position: absolute; top: 0.3rem; right: 0.5rem; z-index: 3;
-      display: inline-flex; align-items: center; height: 1.85rem;
+      display: inline-flex; align-items: center; height: 1.6rem;
       text-decoration: none; font-size: 0.95rem; line-height: 1;
       padding: 0 0.3rem; border-radius: 4px; color: var(--text-muted); }
     .job-row-content:has(.job-select-wrap) .job-link-icon,
     .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
+    /* Collapsed card: line the permalink + checkbox up with the title's first line,
+       not the card's top edge. (Expanded card keeps them at the top corner.) */
+    .job-row-content > .job-link-icon { top: 0.6rem; }
+    .job-row-content > .job-select-wrap { top: 0.5rem; }
     .job-link-icon:hover { background: var(--ground); color: var(--accent); }
     .job-link-icon--copied { color: var(--accent); }
     .job-hook { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
@@ -224,7 +229,8 @@
        clickable (collapse) area covers that whitespace too, instead of
        leaving an inert gap above it. */
     .job-detail-header { cursor: pointer; margin: 0 -1.1rem; padding: 1rem 1.1rem 0; }
-    .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 0; }
+    .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 2.4rem; }
+    .job-row-expanded:has(.job-select-wrap) .job-detail-title-row { padding-right: 4.2rem; }
     .job-detail-title { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; margin: 0; flex: 1 1 auto; min-width: 0; }
     .job-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.35rem; font-size: 0.9rem; color: var(--text-secondary); }
     .job-detail-meta a { color: var(--text-secondary); }
@@ -478,7 +484,7 @@
       .job-link-icon { position: static; float: right; height: auto; margin: 0 0 0.3rem 0.3rem; padding: 0.2rem 0.3rem; }
       .job-row-content:has(.job-select-wrap) .job-link-icon,
       .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: auto; }
-      .job-row-header { display: block; padding-right: 0; }
+      .job-row-header, .job-detail-title-row { display: block; padding-right: 0; }
       .job-row-header .job-company, .job-row-header .job-age { margin-right: 0.6rem; }
     }
   </style>

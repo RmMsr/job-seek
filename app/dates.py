@@ -19,8 +19,8 @@ def time_ago(published_at: str | None) -> str:
 
 def age(ts: str | None) -> str:
     """Render an ISO-8601 timestamp as a short coarse relative string:
-    'just now', '5m ago', '3h ago', '2d ago'. Finer-grained than time_ago,
-    for task ages that are usually minutes or hours old."""
+    'just now', '5m ago', '3h ago', '2d ago', '3w ago', '5mo ago', '2y ago'.
+    Finer-grained near zero than time_ago; used for task and last-fetch ages."""
     if not ts:
         return ""
     parsed = datetime.fromisoformat(ts)
@@ -35,4 +35,11 @@ def age(ts: str | None) -> str:
     hours = minutes // 60
     if hours < 24:
         return f"{hours}h ago"
-    return f"{hours // 24}d ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    if days < 30:
+        return f"{days // 7}w ago"
+    if days < 365:
+        return f"{days // 30}mo ago"
+    return f"{days // 365}y ago"

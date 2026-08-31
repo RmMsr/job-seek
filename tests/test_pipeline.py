@@ -8,6 +8,7 @@ from app.pipeline import run_add_job, run_reevaluate_job
 from app.fetchers.finn import FinnListingFetcher
 from app.fetchers.generic_listing import GenericListingFetcher
 from app.fetchers.base import RawJob
+from app.ai.summarize import JobSummary
 
 
 @pytest.fixture
@@ -188,6 +189,75 @@ def test_run_fetch_stores_published_at(conn, source):
 
     job = q.get_jobs(conn)[0]
     assert job["published_at"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_run_fetch_stores_extracted_company_and_posted_date(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="<p>desc</p>")]
+    client = _mock_client(
+        classify_resp='{"type": "job_posting", "reason": "full description"}',
+        summarize_resp='{"title": "Team Lead @ Zivid", "company": "Zivid", "headline": "H", '
+                       '"summary": "S", "posted_date": "2026-08-17"}',
+        evaluate_resp='{"score": 0.9, "reasoning": "match"}',
+    )
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    job = q.get_jobs(conn)[0]
+    assert job["company"] == "Zivid"
+    assert job["published_at"] == "2026-08-17"
+
+
+def test_run_fetch_falls_back_to_processing_time_when_no_posted_date(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="<p>desc</p>")]
+    client = _mock_client(
+        classify_resp='{"type": "job_posting", "reason": "full description"}',
+        summarize_resp='{"title": "T", "company": "", "headline": "H", "summary": "S", "posted_date": ""}',
+        evaluate_resp='{"score": 0.9, "reasoning": "match"}',
+    )
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    job = q.get_jobs(conn)[0]
+    assert job["published_at"] is not None
+    # Same INSERT statement ⇒ SQLite freezes datetime('now'), so byte-identical.
+    assert job["published_at"] == job["fetched_at"]
+
+
+def test_run_fetch_keeps_fetcher_published_at_and_company_over_llm(conn, source):
+    raw_jobs = [RawJob(
+        url="http://example.com/job/1", title="T", company="FetcherCo", raw_text="<p>d</p>",
+        published_at="2026-07-01T00:00:00+00:00",
+    )]
+    client = _mock_client(
+        classify_resp='{"type": "job_posting", "reason": "full"}',
+        summarize_resp='{"title": "T", "company": "LLMGuess", "headline": "H", "summary": "S", '
+                       '"posted_date": "2026-08-20"}',
+        evaluate_resp='{"score": 0.9, "reasoning": "m"}',
+    )
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    job = q.get_jobs(conn)[0]
+    assert job["published_at"] == "2026-07-01T00:00:00+00:00"
+    assert job["company"] == "FetcherCo"
+
+
+def test_run_reprocess_job_does_not_overwrite_existing_published_at(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1", title="T",
+        company="Acme", raw_text="<p>posted 2 weeks ago</p>", published_at="2026-06-01",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="s", content_type="job_posting", summary="s")
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full"}',
+        '{"title": "T", "company": "NewGuess", "headline": "H", "summary": "S", "posted_date": "2026-08-25"}',
+        '{"score": 0.9, "reasoning": "m"}',
+    )
+    job = q.get_job(conn, jid)
+    _drain(run_reprocess_job(conn, client, "llama3.2", job, q.get_scenarios(conn), q.get_profile(conn)))
+    updated = q.get_job(conn, jid)
+    assert updated["published_at"] == "2026-06-01"
+    assert updated["company"] == "Acme"
 
 
 def test_run_fetch_skips_existing_url(conn, source):
@@ -521,7 +591,7 @@ def test_run_reevaluate_job_rescopes_and_reassesses_without_moving_status(conn, 
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
 
-    with patch("app.pipeline.summarize", return_value=("New Title", "new hook", "new summary")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="New Title", headline="new hook", summary="new summary")), \
          patch("app.pipeline.evaluate", return_value=(0.9, "now a great match")), \
          patch("app.pipeline.assess_fit", return_value={
              "interest": 0.8, "interest_reasoning": "strong interest",
@@ -557,7 +627,7 @@ def test_run_reevaluate_job_always_recomputes_even_when_unchanged(conn, source):
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
 
-    with patch("app.pipeline.summarize", return_value=("T", "h", "s")), \
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="T", headline="h", summary="s")), \
          patch("app.pipeline.evaluate", return_value=(0.5, "reason")) as mock_evaluate, \
          patch("app.pipeline.assess_fit", return_value={
              "interest": 0.5, "interest_reasoning": "r",

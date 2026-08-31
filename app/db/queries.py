@@ -193,7 +193,8 @@ def insert_job(
     published_at: str | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO jobs (source_id, url, title, company, raw_text, published_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO jobs (source_id, url, title, company, raw_text, published_at) "
+        "VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))",
         (source_id, url, title, company, raw_text, published_at),
     )
     conn.commit()
@@ -223,6 +224,8 @@ def update_job_pipeline(
     title: str | None = None,
     summary: str = "",
     headline: str = "",
+    company: str = "",
+    published_at: str = "",
 ) -> None:
     conn.execute(
         """UPDATE jobs SET
@@ -230,9 +233,11 @@ def update_job_pipeline(
             content_type = ?,
             title = COALESCE(?, title),
             summary = ?,
-            headline = ?
+            headline = ?,
+            company = COALESCE(NULLIF(?, ''), company),
+            published_at = COALESCE(NULLIF(?, ''), published_at)
         WHERE id = ?""",
-        (simplified_content, content_type, title, summary, headline, job_id),
+        (simplified_content, content_type, title, summary, headline, company, published_at, job_id),
     )
     conn.commit()
 

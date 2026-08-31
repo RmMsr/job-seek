@@ -57,3 +57,23 @@ def test_age_days():
 def test_age_future_timestamp_is_just_now():
     ts = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     assert age(ts) == "just now"
+
+
+def test_age_weeks():
+    ts = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+    assert age(ts) == "2w ago"
+
+
+def test_age_months():
+    ts = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    assert age(ts) == "3mo ago"
+
+
+def test_age_years():
+    ts = (datetime.now(timezone.utc) - timedelta(days=800)).isoformat()
+    assert age(ts) == "2y ago"
+
+
+def test_age_six_days_still_days():
+    ts = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+    assert age(ts) == "6d ago"

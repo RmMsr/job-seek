@@ -53,11 +53,12 @@ def test_job_list_shows_published_date(client, conn):
     assert "5 days ago" in resp.text
 
 
-def test_job_list_omits_published_date_when_unknown(client, conn):
+def test_job_list_shows_processing_time_when_no_posting_date(client, conn):
+    # _seed inserts via insert_job with no published_at -> defaults to now
     _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert "days ago" not in resp.text
+    assert '<span class="job-age">today</span>' in resp.text  # time_ago(now) == "today"
 
 
 def test_job_list_filter_accepted(client, conn):
