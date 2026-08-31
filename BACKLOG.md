@@ -16,3 +16,4 @@ Known gaps, not yet scheduled.
 - integration: mcp server
 - doc: Create a list of supported job board examples for user documentation and regression testing.
 - ux: Full text search on job page. Role and org matches rank higher than description.
+- ux: A job card accept/reject should fold it with animation
