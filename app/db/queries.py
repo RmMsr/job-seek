@@ -129,6 +129,20 @@ def get_scenario(conn: sqlite3.Connection, scenario_id: int) -> dict | None:
     return _row_to_dict(conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone())
 
 
+def count_job_scores_for_scenario(conn: sqlite3.Connection, scenario_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM job_scores WHERE scenario_id = ?", (scenario_id,)
+    ).fetchone()[0]
+
+
+def delete_scenario(conn: sqlite3.Connection, scenario_id: int) -> None:
+    # criteria has ON DELETE CASCADE too, but be explicit; job_scores and
+    # scenario_feedback cascade via their FKs (foreign_keys pragma is on).
+    conn.execute("DELETE FROM criteria WHERE scenario_id = ?", (scenario_id,))
+    conn.execute("DELETE FROM scenarios WHERE id = ?", (scenario_id,))
+    conn.commit()
+
+
 # --- Criteria ---
 
 def get_criteria(conn: sqlite3.Connection, scenario_id: int) -> list[dict]:
@@ -369,13 +383,17 @@ def mark_job_evaluation_complete(conn: sqlite3.Connection, job_id: int) -> None:
 
 
 def mark_job_gate_override(conn: sqlite3.Connection, job_id: int) -> None:
-    conn.execute("UPDATE jobs SET gate_override = 1 WHERE id = ?", (job_id,))
+    conn.execute(
+        "UPDATE jobs SET gate_override = 1, status_changed_at = datetime('now') WHERE id = ?",
+        (job_id,),
+    )
     conn.commit()
 
 
 def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
     conn.execute(
-        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_handled_at = NULL WHERE id = ?",
+        "UPDATE jobs SET status = ?, feedback_note = ?, feedback_handled_at = NULL, "
+        "status_changed_at = datetime('now') WHERE id = ?",
         (status, note, job_id),
     )
     conn.commit()
@@ -456,6 +474,17 @@ _GATE_JOIN = """
 """
 
 
+_ORDER_BY = {
+    "change": (
+        "MAX(COALESCE(jobs.status_changed_at, ''), "
+        "COALESCE(jobs.evaluation_completed_at, ''), jobs.fetched_at) "
+        "DESC, jobs.id DESC"
+    ),
+    "score": "jobs.fit_score DESC NULLS LAST, jobs.fetched_at DESC",
+    "age": "COALESCE(jobs.published_at, jobs.fetched_at) DESC, jobs.id DESC",
+}
+
+
 def get_jobs(
     conn: sqlite3.Connection,
     *,
@@ -466,6 +495,8 @@ def get_jobs(
     scenario_id: int | None = None,
     org: str | None = None,
     scenario_gate: str | None = None,
+    org_none: bool = False,
+    order: str = "change",
 ) -> list[dict]:
     clauses, params = [], []
     if status is not None:
@@ -477,7 +508,9 @@ def get_jobs(
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
-    if org is not None:
+    if org_none:
+        clauses.append("jobs.company = ''")
+    elif org is not None:
         clauses.append("jobs.company = ?")
         params.append(org)
     if scenario_gate == "none":
@@ -499,7 +532,7 @@ def get_jobs(
     sql = f"SELECT {_GATE_SELECT} {_GATE_JOIN}"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY jobs.fit_score DESC NULLS LAST, jobs.fetched_at DESC"
+    sql += " ORDER BY " + _ORDER_BY.get(order, _ORDER_BY["change"])
     return _rows_to_dicts(conn.execute(sql, params).fetchall())
 
 
@@ -510,8 +543,9 @@ def get_job_counts(
     scenario_none: bool = False,
     source_id: int | None = None,
     org: str | None = None,
+    org_none: bool = False,
 ) -> dict[str, int]:
-    extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org)
+    extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org, org_none)
     counts = {"new": 0, "accepted": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
 
     for key in ("accepted", "rejected", "trash"):
@@ -547,13 +581,16 @@ def get_job_counts(
 
 
 def _count_filter_sql(
-    scenario_id: int | None, scenario_none: bool, source_id: int | None, org: str | None
+    scenario_id: int | None, scenario_none: bool, source_id: int | None,
+    org: str | None, org_none: bool = False,
 ) -> tuple[str, list]:
     clauses, params = [], []
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
-    if org is not None:
+    if org_none:
+        clauses.append("jobs.company = ''")
+    elif org is not None:
         clauses.append("jobs.company = ?")
         params.append(org)
     if scenario_id is not None:
@@ -658,8 +695,12 @@ def mark_feedback_handled(conn: sqlite3.Connection, scenario_id: int, anchor: st
 
 # --- Fetch runs ---
 
-def start_fetch_run(conn: sqlite3.Connection, source_id: int) -> int:
-    cur = conn.execute("INSERT INTO fetch_runs (source_id) VALUES (?)", (source_id,))
+def start_fetch_run(
+    conn: sqlite3.Connection, source_id: int, task_id: int | None = None
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO fetch_runs (source_id, task_id) VALUES (?, ?)", (source_id, task_id)
+    )
     conn.commit()
     return cur.lastrowid
 

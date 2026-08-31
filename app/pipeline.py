@@ -122,8 +122,9 @@ def run_fetch(
     client: openai.OpenAI,
     model: str,
     profile_dir: str,
+    task_id: int | None = None,
 ) -> Generator[str, None, FetchResult]:
-    run_id = q.start_fetch_run(conn, source["id"])
+    run_id = q.start_fetch_run(conn, source["id"], task_id=task_id)
     yield _progress(f"Starting fetch for '{source['name']}' ({source['fetcher_type']})")
     try:
         fetcher = _make_fetcher(source, profile_dir, conn, client, model)

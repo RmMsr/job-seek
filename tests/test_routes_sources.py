@@ -30,6 +30,14 @@ def test_sources_page_returns_200(client, conn):
     assert "finn.no" in resp.text
 
 
+def test_sources_page_shortens_long_url(client, conn):
+    long = "https://boards.example.com/careers/search?q=" + "x" * 80
+    q.insert_source(conn, "Long", long, "generic_listing")
+    html = client.get("/sources").text
+    assert "…" in html
+    assert f'href="{long}"' in html  # the open ↗ link keeps the full URL
+
+
 def test_source_row_has_source_row_class_for_hash_highlight(client, conn):
     sid = _seed(conn)
     resp = client.get("/sources")
@@ -506,19 +514,19 @@ def test_detect_source_mismatch_panel_also_uses_generated_name(conn):
     assert 'value="acme/senior-engineer"' in html
 
 
-def _fake_run_fetch(source, conn, client, model, profile_dir):
+def _fake_run_fetch(source, conn, client, model, profile_dir, task_id=None):
     yield f"Starting fetch for '{source['name']}'"
     yield "Fetch complete"
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=1, jobs_new=1, error=None)
 
 
-def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir):
+def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir, task_id=None):
     yield f"Starting fetch for '{source['name']}'"
     yield "Fetch complete for '{}': 0 new / 0 found".format(source["name"])
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error=None)
 
 
-def _fake_run_fetch_error(source, conn, client, model, profile_dir):
+def _fake_run_fetch_error(source, conn, client, model, profile_dir, task_id=None):
     yield f"Starting fetch for '{source['name']}'"
     yield "Fetch failed for '{}': boom".format(source["name"])
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error="boom")

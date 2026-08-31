@@ -1052,7 +1052,8 @@ def test_job_bulk_feedback_keeps_moved_job_in_its_original_sort_position(client,
 
     resp = client.post(
         "/jobs/bulk-feedback",
-        data={"job_ids": [jid_b], "status": "accepted", "status_filter": "", "content_type_filter": ""},
+        data={"job_ids": [jid_b], "status": "accepted", "status_filter": "",
+              "content_type_filter": "", "order_filter": "score"},
     )
     assert resp.status_code == 200
     pos_a = resp.text.index(f'id="job-{jid_a}"')
@@ -1990,14 +1991,14 @@ def test_add_job_by_url_single_job_link_does_not_trigger_listing_flow(conn):
     assert len(q.get_jobs(conn)) == 1
 
 
-def _fake_run_fetch(source, conn, client, model, profile_dir):
+def _fake_run_fetch(source, conn, client, model, profile_dir, task_id=None):
     yield f"Starting fetch for '{source['name']}'"
     q.insert_job(conn, source_id=source["id"], url="https://careers.example.com/jobs/1", title="T", company="C", raw_text="r")
     yield "Fetch complete"
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=1, jobs_new=1, error=None)
 
 
-def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir):
+def _fake_run_fetch_nothing_found(source, conn, client, model, profile_dir, task_id=None):
     yield f"Starting fetch for '{source['name']}'"
     return FetchResult(source_id=source["id"], run_id=1, jobs_found=0, jobs_new=0, error=None)
 
@@ -2322,7 +2323,7 @@ def test_filter_row_selects_render_with_selected_state(client, conn):
     assert '<option value="Acme" selected' in resp.text
     assert '<select name="scenario"' in resp.text
     assert '<select name="source_id"' in resp.text
-    assert ">All</option>" in resp.text
+    assert ">(All)</option>" in resp.text
 
 
 def test_org_chip_is_a_filter_link(client, conn):
@@ -2340,3 +2341,54 @@ def test_job_detail_page_chips_are_plain(client, conn):
     assert resp.status_code == 200
     assert "tag tag-org" in resp.text
     assert '<a class="tag tag-org"' not in resp.text
+
+
+def test_jobs_list_respects_order_param(client, conn):
+    sid = q.get_or_create_manual_source(conn)
+    old = q.insert_job(conn, source_id=sid, url="https://x.test/old", title="OLDJOB", company="", raw_text="")
+    new = q.insert_job(conn, source_id=sid, url="https://x.test/new", title="NEWJOB", company="", raw_text="")
+    conn.execute("UPDATE jobs SET content_type='job_posting', gate_override=1, "
+                 "fetched_at='2024-01-01T00:00:00' WHERE id IN (?,?)", (old, new))
+    # OLD changed earlier but was posted later; NEW changed recently but posted earlier.
+    conn.execute("UPDATE jobs SET status_changed_at='2024-02-01T00:00:00', "
+                 "published_at='2024-12-01T00:00:00' WHERE id=?", (old,))
+    conn.execute("UPDATE jobs SET status_changed_at='2024-09-01T00:00:00', "
+                 "published_at='2024-03-01T00:00:00' WHERE id=?", (new,))
+    conn.commit()
+    change = client.get("/jobs?status=new&order=change").text
+    assert change.index("NEWJOB") < change.index("OLDJOB")
+    age = client.get("/jobs?status=new&order=age").text
+    assert age.index("OLDJOB") < age.index("NEWJOB")
+
+
+def test_org_none_filter_and_labels(client, conn):
+    sid = q.get_or_create_manual_source(conn)
+    blank = q.insert_job(conn, source_id=sid, url="https://x.test/b", title="BLANKJOB", company="", raw_text="")
+    named = q.insert_job(conn, source_id=sid, url="https://x.test/n", title="NAMEDJOB", company="Acme", raw_text="")
+    conn.execute("UPDATE jobs SET content_type='job_posting', gate_override=1, "
+                 "evaluation_completed_at=datetime('now') WHERE id IN (?,?)", (blank, named))
+    conn.commit()
+    body = client.get("/jobs?status=new").text
+    assert "(All)" in body and "(Single / None)" in body
+    filtered = client.get("/jobs?status=new&org=none").text
+    assert "BLANKJOB" in filtered and "NAMEDJOB" not in filtered
+
+
+def test_feedback_that_removes_job_sets_reswap_delay(client, conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/f", title="F", company="", raw_text="")
+    conn.execute("UPDATE jobs SET content_type='job_posting', gate_override=1, "
+                 "evaluation_completed_at=datetime('now') WHERE id=?", (jid,))
+    conn.commit()
+    r = client.post(f"/jobs/{jid}/feedback?status=new", data={"status": "accepted"})
+    assert r.headers.get("HX-Reswap") == "outerHTML swap:0.35s"
+
+
+def test_feedback_that_keeps_job_has_no_reswap(client, conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/g", title="G", company="", raw_text="")
+    conn.execute("UPDATE jobs SET status='accepted', content_type='job_posting', gate_override=1, "
+                 "evaluation_completed_at=datetime('now') WHERE id=?", (jid,))
+    conn.commit()
+    r = client.post(f"/jobs/{jid}/feedback?status=accepted", data={"status": "accepted", "note": "still yes"})
+    assert "HX-Reswap" not in r.headers

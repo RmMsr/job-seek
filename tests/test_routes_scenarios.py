@@ -846,3 +846,15 @@ def test_scenarios_page_shows_feedback_refinement_section(client, conn):
     resp = client.get("/scenarios")
 
     assert "Feedback" in resp.text and "Refinement" in resp.text
+
+
+def test_delete_scenario_route(client, conn):
+    sc = q.insert_scenario(conn, "Doomed", "")
+    r = client.delete(f"/scenarios/{sc}")
+    assert r.status_code == 200
+    assert r.headers["HX-Redirect"] == "/scenarios"
+    assert q.get_scenario(conn, sc) is None
+
+
+def test_delete_missing_scenario_404(client):
+    assert client.delete("/scenarios/99999").status_code == 404

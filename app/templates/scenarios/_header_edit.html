@@ -20,6 +20,11 @@
         hx-target="#scenario-header-{{ scenario.id }}"
         hx-swap="outerHTML">Cancel</button>
       <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" class="btn btn-delete" style="margin-left:auto;"
+        hx-delete="/scenarios/{{ scenario.id }}"
+        hx-confirm="Delete '{{ scenario.name }}'? This removes its criteria and all {{ job_scores_count }} job score(s) for it. Job fit scores are not recalculated.">
+        Delete scenario
+      </button>
     </div>
   </form>
 </div>

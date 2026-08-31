@@ -284,6 +284,17 @@ def test_run_fetch_records_fetch_run(conn, source):
     assert runs[0]["completed_at"] is not None
 
 
+def test_run_fetch_records_task_id(conn, source):
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": source["id"]})
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = []
+        _drain(run_fetch(source, conn, client=MagicMock(), model="llama3.2",
+                         profile_dir="bp", task_id=task["id"]))
+
+    row = conn.execute("SELECT task_id FROM fetch_runs ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["task_id"] == task["id"]
+
+
 def test_run_fetch_sets_auth_error_on_slack_auth_required(conn, source):
     from app.fetchers.slack import SlackAuthRequired
 

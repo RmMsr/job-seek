@@ -10,17 +10,31 @@
   </div>
 </div>
 <div class="responsive-table-wrap">
-<table>
+<table class="task-history-table">
   <thead><tr><th>Task</th><th>State</th><th>Age</th></tr></thead>
-  <tbody>
-  {% for it in items %}
+  {% for g in groups %}
+  {% set root = g.root %}
+  <tbody class="task-group">
     <tr>
-      <td><a href="/tasks/{{ it.task.id }}">{{ it.pres.title }}</a></td>
-      <td><span class="task-li-icon icon-{{ it.state }}" aria-hidden="true">{{ it.state | status_icon }}</span> {{ it.state }}</td>
-      <td>{{ it.task.created_at | age }}</td>
+      <td>
+        {% if g.children %}
+        <input type="checkbox" class="task-grp-toggle" id="task-grp-{{ root.task.id }}">
+        <label for="task-grp-{{ root.task.id }}" class="task-grp-caret" aria-hidden="true"></label>
+        {% endif %}
+        <a href="/tasks/{{ root.task.id }}">{{ root.pres.title }}</a>
+      </td>
+      <td><span class="task-li-icon icon-{{ root.state }}" aria-hidden="true">{{ root.state | status_icon }}</span> {{ root.state }}</td>
+      <td>{{ root.task.created_at | age }}</td>
     </tr>
-  {% endfor %}
+    {% for c in g.children %}
+    <tr class="task-child-row">
+      <td class="task-child-cell"><a href="/tasks/{{ c.task.id }}">{{ c.pres.title }}</a></td>
+      <td><span class="task-li-icon icon-{{ c.state }}" aria-hidden="true">{{ c.state | status_icon }}</span> {{ c.state }}</td>
+      <td>{{ c.task.created_at | age }}</td>
+    </tr>
+    {% endfor %}
   </tbody>
+  {% endfor %}
 </table>
 </div>
 <p>

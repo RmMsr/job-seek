@@ -380,18 +380,36 @@ def task_history(request: Request, status: str = "all", page: int = 1,
         rows = [t for t in rows if t["status"] in ("queued", "running", "needs_action")]
     has_next = len(rows) > per
     rows = rows[:per]
-    items = []
-    for t in rows:
+
+    def _entry(t):
         children = q.get_task_children(conn, t["id"])
         if children:
             pres = root_presentation(conn, t, children)
-            state = pres["status"]
-        else:
-            pres = task_presentation(conn, t)
-            state = t["status"]
-        items.append({"task": t, "pres": pres, "state": state})
+            return {"task": t, "pres": pres, "state": pres["status"]}
+        return {"task": t, "pres": task_presentation(conn, t), "state": t["status"]}
+
+    # Group the page's rows by their root. Pull in any root / sibling not on
+    # this page so a group is never shown half-populated.
+    roots: dict[int, dict] = {}
+    order: list[int] = []
+    for t in rows:
+        rid = t["parent_task_id"] or t["id"]
+        if rid not in roots:
+            root_task = t if t["id"] == rid else q.get_task(conn, rid)
+            if root_task is None:
+                continue
+            roots[rid] = {"root": _entry(root_task), "children": []}
+            order.append(rid)
+    for rid in order:
+        child_tasks = q.get_task_children(conn, rid)
+        roots[rid]["children"] = [
+            {"task": c, "pres": task_presentation(conn, c), "state": c["status"]}
+            for c in child_tasks
+        ]
+
+    groups = [roots[r] for r in order]
     return templates.TemplateResponse(request, "tasks/list.html", {
-        "items": items, "status": status, "page": page, "has_next": has_next,
+        "groups": groups, "status": status, "page": page, "has_next": has_next,
     })
 
 

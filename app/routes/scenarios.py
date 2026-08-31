@@ -192,7 +192,10 @@ def _get_criterion_or_404(conn: sqlite3.Connection, criterion_id: int) -> dict:
 @router.get("/scenarios/{scenario_id}/edit", response_class=HTMLResponse)
 def edit_scenario_form(scenario_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     scenario = _get_scenario_or_404(conn, scenario_id)
-    return templates.TemplateResponse(request, "scenarios/_header_edit.html", {"scenario": scenario})
+    return templates.TemplateResponse(
+        request, "scenarios/_header_edit.html",
+        {"scenario": scenario, "job_scores_count": q.count_job_scores_for_scenario(conn, scenario_id)},
+    )
 
 
 @router.get("/scenarios/{scenario_id}", response_class=HTMLResponse)
@@ -214,6 +217,15 @@ def update_scenario(
     q.update_scenario(conn, scenario_id, name=name, description=description, gate_threshold=gate_threshold)
     scenario = q.get_scenario(conn, scenario_id)
     return templates.TemplateResponse(request, "scenarios/_header.html", {"scenario": scenario})
+
+
+@router.delete("/scenarios/{scenario_id}")
+def delete_scenario(scenario_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    _get_scenario_or_404(conn, scenario_id)
+    q.delete_scenario(conn, scenario_id)
+    # Deleting a scenario reshapes the whole tab strip; a full client redirect
+    # is cleaner and more robust than swapping the entire page body via htmx.
+    return HTMLResponse(content="", headers={"HX-Redirect": "/scenarios"})
 
 
 @router.post("/scenarios/{scenario_id}/criteria", response_class=HTMLResponse)

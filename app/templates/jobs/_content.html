@@ -10,7 +10,8 @@
 <input type="hidden" name="status_filter" value="{{ filter.status_tab }}" form="bulk-form">
 <input type="hidden" name="scenario_filter" value="{{ filter.query_params().get('scenario', '') }}" form="bulk-form">
 <input type="hidden" name="source_id_filter" value="{{ filter.source_id or '' }}" form="bulk-form">
-<input type="hidden" name="org_filter" value="{{ filter.org or '' }}" form="bulk-form">
+<input type="hidden" name="org_filter" value="{% if filter.org_none %}none{% else %}{{ filter.org or '' }}{% endif %}" form="bulk-form">
+<input type="hidden" name="order_filter" value="{{ filter.order }}" form="bulk-form">
 <div class="filter-bar">
   <div class="filter-links">
     {% for tab, label, count_id, count, tip in tab_defs %}
@@ -32,9 +33,9 @@
   <label>Scenario
     <select name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
             hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='source_id'],[name='org']">
-      <option value="">All</option>
-      <option value="none" {% if filter.scenario_none %}selected{% endif %}>None</option>
+            hx-include="[name='source_id'],[name='org'],[name='order']">
+      <option value="">(All)</option>
+      <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
       {% for s in scenarios %}
         <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
       {% endfor %}
@@ -43,21 +44,31 @@
   <label>Source
     <select name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
             hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='scenario'],[name='org']">
-      <option value="">All</option>
+            hx-include="[name='scenario'],[name='org'],[name='order']">
+      <option value="">(All)</option>
       {% for s in sources %}
-        <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+        <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
       {% endfor %}
     </select>
   </label>
   <label>Organization
     <select name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
             hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='scenario'],[name='source_id']">
-      <option value="">All</option>
+            hx-include="[name='scenario'],[name='source_id'],[name='order']">
+      <option value="">(All)</option>
+      <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
       {% for c in companies %}
-        <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c }}</option>
+        <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
       {% endfor %}
+    </select>
+  </label>
+  <label>Sort
+    <select name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
+            hx-include="[name='scenario'],[name='source_id'],[name='org']">
+      <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
+      <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
+      <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
     </select>
   </label>
   {% if filter.is_narrowed %}

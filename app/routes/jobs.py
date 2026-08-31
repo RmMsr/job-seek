@@ -58,13 +58,33 @@ def _jobs_for_filter(conn: sqlite3.Connection, f: JobFilter) -> list[dict]:
     kwargs = dict(_BASE_KWARGS_FOR_TAB[f.status_tab])
     if f.source_id is not None:
         kwargs["source_id"] = f.source_id
-    if f.org is not None:
+    if f.org_none:
+        kwargs["org_none"] = True
+    elif f.org is not None:
         kwargs["org"] = f.org
     if f.scenario_id is not None:
         kwargs["scenario_id"] = f.scenario_id
     if f.scenario_none:
         kwargs["scenario_gate"] = "none"
-    return q.get_jobs(conn, **kwargs)
+    return q.get_jobs(conn, order=f.order, **kwargs)
+
+
+def _sort_key(order: str):
+    """Match get_jobs' ORDER BY for the in-Python re-sort of merged stale rows."""
+    if order == "score":
+        return lambda j: (
+            j["fit_score"] if j["fit_score"] is not None else float("-inf"),
+            j["fetched_at"] or "",
+        )
+    if order == "age":
+        return lambda j: (j["published_at"] or j["fetched_at"] or "",)
+    return lambda j: (
+        max(
+            j.get("status_changed_at") or "",
+            j.get("evaluation_completed_at") or "",
+            j["fetched_at"] or "",
+        ),
+    )
 
 
 def _counts_for_filter(conn: sqlite3.Connection, f: JobFilter) -> dict[str, int]:
@@ -74,6 +94,7 @@ def _counts_for_filter(conn: sqlite3.Connection, f: JobFilter) -> dict[str, int]
         scenario_none=f.scenario_none,
         source_id=f.source_id,
         org=f.org,
+        org_none=f.org_none,
     )
 
 
@@ -179,12 +200,14 @@ def _filter_from_bulk_form(
     scenario_filter: str | None,
     source_id_filter: str | None,
     org_filter: str | None,
+    order_filter: str | None = None,
 ) -> JobFilter:
     return JobFilter.from_params({
         "status": status_filter or "new",
         "scenario": scenario_filter or "",
         "source_id": source_id_filter or "",
         "org": org_filter or "",
+        "order": order_filter or "",
     })
 
 
@@ -294,7 +317,12 @@ def job_feedback(
     row_html = _render_updated_job_html(conn, request, job_id, f, detail=detail)
     counts = _counts_for_filter(conn, f)
     counts_html = templates.get_template("jobs/_counts_oob.html").render(request=request, counts=counts)
-    return HTMLResponse(content=row_html + counts_html)
+    headers = {}
+    if not detail:
+        decided = q.get_job(conn, job_id)
+        if decided is not None and _stale_badge(conn, decided, f) is not None:
+            headers["HX-Reswap"] = "outerHTML swap:0.35s"
+    return HTMLResponse(content=row_html + counts_html, headers=headers)
 
 
 @router.post("/jobs/{job_id}/scenario-feedback", response_class=HTMLResponse)
@@ -502,12 +530,13 @@ def job_bulk_feedback(
     scenario_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
     org_filter: str | None = Form(None),
+    order_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
         q.update_job_feedback(conn, job_id, status, note)
 
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter)
     jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     matched_ids = {j["id"] for j in jobs}
 
@@ -528,11 +557,7 @@ def job_bulk_feedback(
         job["stale_badge"] = badge
         stale_jobs.append(job)
     stale_jobs = _enrich_jobs(conn, stale_jobs)
-    jobs = sorted(
-        jobs + stale_jobs,
-        key=lambda j: (j["fit_score"] if j["fit_score"] is not None else float("-inf"), j["fetched_at"] or ""),
-        reverse=True,
-    )
+    jobs = sorted(jobs + stale_jobs, key=_sort_key(f.order), reverse=True)
     return templates.TemplateResponse(
         request, "jobs/_content.html", _content_context(conn, f, jobs=jobs)
     )
@@ -555,10 +580,11 @@ def job_bulk_delete(
     scenario_filter: str | None = Form(None),
     source_id_filter: str | None = Form(None),
     org_filter: str | None = Form(None),
+    order_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter)
     return templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
 
 
@@ -726,7 +752,7 @@ def _task_job_add_listing_source(conn, client, model, config, params):
 
     source_id = q.insert_source(conn, name, url, fetcher_type)
     source = q.get_source(conn, source_id)
-    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir, task_id=params["_task_id"])
     fetch_result = None
     try:
         while True:

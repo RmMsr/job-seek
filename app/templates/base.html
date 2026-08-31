@@ -286,8 +286,18 @@
       0% { background: var(--warning-tint); }
       100% { background: transparent; }
     }
+    .job-row-expanded.htmx-swapping {
+      overflow: hidden;
+      animation: job-fold 0.35s ease forwards;
+    }
+    @keyframes job-fold {
+      from { max-height: 2000px; opacity: 1; }
+      to { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0;
+           margin-top: 0; margin-bottom: 0; }
+    }
     @media (prefers-reduced-motion: reduce) {
       ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+      .job-row-expanded.htmx-swapping { animation: none; }
     }
     .job-details { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
     .decision-panel { grid-template-columns: 1fr minmax(180px, auto); gap: 0.5rem 1rem; }
@@ -372,6 +382,19 @@
       margin-top: 0.45rem; }
     .task-li-actions form { display: inline; margin: 0; }
     .task-li-actions .btn { font-size: 0.9rem; }
+    .task-history-table td { padding: 0.4rem 0.5rem; }
+    .task-grp-toggle { position: absolute; opacity: 0; width: 0; height: 0; }
+    .task-grp-caret { cursor: pointer; display: inline-block; width: 1rem; color: var(--text-muted); }
+    .task-grp-caret::before { content: "▸"; }
+    .task-grp-toggle:checked + .task-grp-caret::before { content: "▾"; }
+    .task-child-row { display: none; }
+    .task-grp-toggle:checked ~ .task-child-row,
+    .task-group:has(.task-grp-toggle:checked) .task-child-row { display: table-row; }
+    .task-child-cell { padding-left: 2rem !important; }
+    .url-expand-wrap { display: inline-flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+    .url-expand { display: inline; }
+    .url-expand summary { cursor: pointer; color: var(--text-secondary); list-style: revert; }
+    .url-open { white-space: nowrap; }
     .actionable-block { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
       margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 

@@ -64,3 +64,40 @@ def test_with_helpers_set_one_filter():
     assert base.with_scenario_id("4").scenario_none is False
     assert base.with_source_id(9).source_id == 9
     assert base.with_org("Globex").org == "Globex"
+
+
+def test_order_defaults_to_change_and_is_omitted():
+    f = JobFilter.from_params({})
+    assert f.order == "change"
+    assert "order" not in f.query_params()
+    assert not f.is_narrowed
+
+
+def test_order_roundtrips_when_non_default():
+    f = JobFilter.from_params({"order": "score"})
+    assert f.order == "score"
+    assert f.query_params()["order"] == "score"
+
+
+def test_unknown_order_falls_back_to_change():
+    assert JobFilter.from_params({"order": "bogus"}).order == "change"
+
+
+def test_cleared_keeps_order():
+    f = JobFilter.from_params({"status": "accepted", "org": "Acme", "order": "age"})
+    c = f.cleared()
+    assert c.order == "age" and not c.is_narrowed and c.status_tab == "accepted"
+
+
+def test_for_status_keeps_order():
+    assert JobFilter.from_params({"order": "age"}).for_status("trash").order == "age"
+
+
+def test_org_none_sentinel():
+    f = JobFilter.from_params({"org": "none"})
+    assert f.org_none is True and f.org is None and f.is_narrowed
+    assert f.query_params()["org"] == "none"
+
+
+def test_org_none_cleared():
+    assert JobFilter.from_params({"org": "none"}).cleared().org_none is False

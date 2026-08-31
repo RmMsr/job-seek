@@ -26,8 +26,19 @@
           <a href="/sources#source-row-{{ source.id }}"><strong>{{ source.name }}</strong></a>
         </td>
         <td style="padding:0.5rem;">
-          <span style="white-space:nowrap;"{% if stats and stats.last_success_at %} title="{{ stats.last_success_at }} UTC"{% endif %}>{% if stats and stats.last_success_at %}{{ stats.last_success_at | age }}{% else %}—{% endif %}</span>
-          {% if run and run.error %}<br><span style="color:#dc3545;">⚠ {{ run.error }}</span>{% endif %}
+          {% if run %}
+            {% set ok = not run.error %}
+            <span aria-hidden="true" style="color:{{ '#198754' if ok else '#dc3545' }};">{{ '✓' if ok else '✗' }}</span>
+            {% set when = run.completed_at or run.started_at %}
+            {% if run.task_id %}
+              <a href="/tasks/{{ run.task_id }}" style="white-space:nowrap;" title="{{ when }} UTC">{{ when | age }}</a>
+            {% else %}
+              <span style="white-space:nowrap;" title="{{ when }} UTC">{{ when | age }}</span>
+            {% endif %}
+            {% if run.error %}<br><span style="color:#dc3545;">⚠ {{ run.error }}</span>{% endif %}
+          {% else %}
+            <span>&mdash;</span>
+          {% endif %}
         </td>
         <td style="padding:0.5rem; white-space:nowrap;">
           {% if run %}{{ run.jobs_new }} / {{ run.jobs_found }}{% else %}—{% endif %}

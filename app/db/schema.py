@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     fit_score REAL,
     profile_version_hash TEXT,
     gate_override INTEGER NOT NULL DEFAULT 0,
-    evaluation_completed_at TEXT
+    evaluation_completed_at TEXT,
+    status_changed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_scores (
@@ -78,7 +79,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
     jobs_found INTEGER NOT NULL DEFAULT 0,
     jobs_new INTEGER NOT NULL DEFAULT 0,
     error TEXT,
-    auth_error INTEGER NOT NULL DEFAULT 0
+    auth_error INTEGER NOT NULL DEFAULT 0,
+    task_id INTEGER REFERENCES tasks(id)
 );
 
 CREATE TABLE IF NOT EXISTS scenario_feedback (
@@ -524,6 +526,18 @@ def _migrate_fetch_runs_add_auth_error(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_fetch_runs_add_task_id(conn: sqlite3.Connection) -> None:
+    # Purely additive. Links a fetch run to the task that produced it so the
+    # Fetch page's "Last run" health column can deep-link to that task.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='fetch_runs'"
+    ).fetchone()
+    if row is None or "task_id" in row[0]:
+        return
+    conn.execute("ALTER TABLE fetch_runs ADD COLUMN task_id INTEGER REFERENCES tasks(id)")
+    conn.commit()
+
+
 def _migrate_jobs_add_evaluation_completed_at(conn: sqlite3.Connection) -> None:
     # Purely additive column, same shape as the other jobs-table migrations
     # above. Backfilled to "now" for every already-classified job so existing
@@ -539,6 +553,19 @@ def _migrate_jobs_add_evaluation_completed_at(conn: sqlite3.Connection) -> None:
         "UPDATE jobs SET evaluation_completed_at = datetime('now') "
         "WHERE content_type IN ('job_posting', 'lead')"
     )
+    conn.commit()
+
+
+def _migrate_jobs_add_status_changed_at(conn: sqlite3.Connection) -> None:
+    # Purely additive. Records when a job's status last changed (feedback
+    # decision or gate override), for the Jobs-list "newest changes" sort.
+    # No backfill: NULL sorts as fetched_at via the query's MAX(...).
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "status_changed_at" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN status_changed_at TEXT")
     conn.commit()
 
 
@@ -697,7 +724,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_scenarios_gate_threshold(conn)
     _migrate_jobs_status_invalid_to_trash(conn)
     _migrate_fetch_runs_add_auth_error(conn)
+    _migrate_fetch_runs_add_task_id(conn)
     _migrate_jobs_add_evaluation_completed_at(conn)
+    _migrate_jobs_add_status_changed_at(conn)
     _migrate_jobs_canonicalize_urls(conn)
     _migrate_tasks_group_and_status(conn)
     _migrate_inbox_drop_task_id(conn)

@@ -47,3 +47,16 @@ def status_icon(status: str) -> str:
 
 
 templates.env.filters["status_icon"] = status_icon
+
+
+def short_url(url: str, limit: int = 50) -> str:
+    """host + path + query with the scheme stripped, truncated with an ellipsis."""
+    if not url:
+        return ""
+    stripped = url.split("://", 1)[-1]
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: limit - 1] + "…"
+
+
+templates.env.filters["short_url"] = short_url

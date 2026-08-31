@@ -1079,3 +1079,12 @@ def test_init_db_flips_existing_80k_generic_row_to_eawork(conn):
     rows = dict(conn.execute("SELECT name, fetcher_type FROM sources").fetchall())
     assert rows["80k"] == "eawork_listing"
     assert rows["other"] == "generic_listing"
+
+
+def test_status_changed_at_column_present_and_idempotent():
+    c = sqlite3.connect(":memory:")
+    init_db(c)
+    init_db(c)  # must not raise
+    cols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
+    assert "status_changed_at" in cols
+    c.close()

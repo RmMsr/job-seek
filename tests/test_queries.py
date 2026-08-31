@@ -1565,3 +1565,93 @@ def test_get_jobs_exposes_passed_scenario_ids(conn):
     names = job["passed_scenario_names"].split(", ")
     ids = [int(x) for x in job["passed_scenario_ids"].split(",")]
     assert dict(zip(names, ids)) == {"Alpha": a, "Beta": b}
+
+
+def test_update_job_feedback_stamps_status_changed_at(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/sca", title="A", company="", raw_text="")
+    assert conn.execute("SELECT status_changed_at FROM jobs WHERE id=?", (jid,)).fetchone()[0] is None
+    q.update_job_feedback(conn, jid, "accepted", "yep")
+    assert conn.execute("SELECT status_changed_at FROM jobs WHERE id=?", (jid,)).fetchone()[0] is not None
+
+
+def test_mark_job_gate_override_stamps_status_changed_at(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/scb", title="B", company="", raw_text="")
+    q.mark_job_gate_override(conn, jid)
+    assert conn.execute("SELECT status_changed_at FROM jobs WHERE id=?", (jid,)).fetchone()[0] is not None
+
+
+def _mk_job(conn, url, *, fetched, published=None, evaluated=None, changed=None, fit=None):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url=url, title=url, company="", raw_text="")
+    conn.execute(
+        "UPDATE jobs SET fetched_at=?, published_at=?, evaluation_completed_at=?, "
+        "status_changed_at=?, fit_score=?, content_type='job_posting' WHERE id=?",
+        (fetched, published, evaluated, changed, fit, jid),
+    )
+    conn.commit()
+    return jid
+
+
+def test_get_jobs_order_change_uses_latest_activity(conn):
+    a = _mk_job(conn, "https://x.test/a", fetched="2024-01-01T00:00:00", changed="2024-06-01T00:00:00")
+    b = _mk_job(conn, "https://x.test/b", fetched="2024-05-01T00:00:00")
+    ids = [j["id"] for j in q.get_jobs(conn, status="new", order="change")]
+    assert ids.index(a) < ids.index(b)
+
+
+def test_get_jobs_order_age_uses_published_then_fetched(conn):
+    a = _mk_job(conn, "https://x.test/a", fetched="2024-09-01T00:00:00", published="2024-01-01T00:00:00")
+    b = _mk_job(conn, "https://x.test/b", fetched="2024-02-01T00:00:00")
+    ids = [j["id"] for j in q.get_jobs(conn, status="new", order="age")]
+    assert ids.index(b) < ids.index(a)
+
+
+def test_get_jobs_order_score_matches_legacy(conn):
+    lo = _mk_job(conn, "https://x.test/lo", fetched="2024-01-01T00:00:00", fit=0.2)
+    hi = _mk_job(conn, "https://x.test/hi", fetched="2024-01-01T00:00:00", fit=0.9)
+    ids = [j["id"] for j in q.get_jobs(conn, status="new", order="score")]
+    assert ids.index(hi) < ids.index(lo)
+
+
+def test_start_fetch_run_records_task_id(conn):
+    sid = q.get_or_create_manual_source(conn)
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    run_id = q.start_fetch_run(conn, sid, task_id=task["id"])
+    assert conn.execute("SELECT task_id FROM fetch_runs WHERE id=?", (run_id,)).fetchone()[0] == task["id"]
+
+
+def test_start_fetch_run_task_id_optional(conn):
+    sid = q.get_or_create_manual_source(conn)
+    run_id = q.start_fetch_run(conn, sid)
+    assert conn.execute("SELECT task_id FROM fetch_runs WHERE id=?", (run_id,)).fetchone()[0] is None
+
+
+def test_get_jobs_org_none_matches_blank_company(conn):
+    sid = q.get_or_create_manual_source(conn)
+    blank = q.insert_job(conn, source_id=sid, url="https://x.test/blank", title="B", company="", raw_text="")
+    named = q.insert_job(conn, source_id=sid, url="https://x.test/named", title="N", company="Acme", raw_text="")
+    conn.execute("UPDATE jobs SET content_type='job_posting', gate_override=1, "
+                 "evaluation_completed_at=datetime('now') WHERE id IN (?,?)", (blank, named))
+    conn.commit()
+    ids = {j["id"] for j in q.get_jobs(conn, status="new", org_none=True)}
+    assert ids == {blank}
+    counts = q.get_job_counts(conn, org_none=True)
+    assert counts["new"] == 1
+
+
+def test_delete_scenario_cascades(conn):
+    sc = q.insert_scenario(conn, "S", "d")
+    q.insert_criterion(conn, sc, "must have X", "must")
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/j", title="J", company="", raw_text="")
+    conn.execute(
+        "INSERT INTO job_scores (job_id, scenario_id, relevance_score, scenario_version_hash) "
+        "VALUES (?,?,?,?)", (jid, sc, 0.8, "h"))
+    conn.commit()
+    assert q.count_job_scores_for_scenario(conn, sc) == 1
+    q.delete_scenario(conn, sc)
+    assert q.get_scenario(conn, sc) is None
+    assert conn.execute("SELECT COUNT(*) FROM criteria WHERE scenario_id=?", (sc,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM job_scores WHERE scenario_id=?", (sc,)).fetchone()[0] == 0

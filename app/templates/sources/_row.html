@@ -2,7 +2,15 @@
 <tr style="border-bottom:1px solid #eee;">
   <td style="padding:0.5rem;">
     <strong>{{ source.name }}</strong><br>
-    <small style="word-break:break-all;">{{ source.url }}</small>
+    {% if source.url %}
+    <span class="url-expand-wrap">
+      <details class="url-expand">
+        <summary><small>{{ source.url | short_url }}</small></summary>
+        <small style="word-break:break-all;">{{ source.url }}</small>
+      </details>
+      <a href="{{ source.url }}" target="_blank" rel="noopener" class="url-open"><small>open ↗</small></a>
+    </span>
+    {% endif %}
     {% if source.fetcher_type == "slack" %}
       {% if needs_login == "needs_login" %}
         <br><span style="color:#dc3545;">⚠ Needs Slack login before it can fetch.</span>

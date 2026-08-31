@@ -179,7 +179,7 @@ def _task_source_confirm(conn, client, model, config, params):
 
     source_id = q.insert_source(conn, name, url, fetcher_type)
     source = q.get_source(conn, source_id)
-    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir, task_id=params["_task_id"])
     fetch_result = None
     try:
         while True:

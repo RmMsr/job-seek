@@ -5,6 +5,7 @@ from typing import Mapping
 from urllib.parse import urlencode
 
 VALID_TABS = ("new", "lead", "accepted", "rejected", "not_relevant", "trash")
+VALID_ORDERS = ("change", "score", "age")
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,8 @@ class JobFilter:
     scenario_none: bool = False
     source_id: int | None = None
     org: str | None = None
+    org_none: bool = False
+    order: str = "change"
 
     @classmethod
     def from_params(cls, params: Mapping[str, str]) -> "JobFilter":
@@ -33,9 +36,15 @@ class JobFilter:
         raw_source = (get("source_id") or "").strip()
         source_id = int(raw_source) if raw_source.isdigit() else None
 
-        org = (get("org") or "").strip() or None
+        raw_org = (get("org") or "").strip()
+        org_none = raw_org == "none"
+        org = None if org_none else (raw_org or None)
 
-        return cls(tab, scenario_id, scenario_none, source_id, org)
+        order = (get("order") or "").strip()
+        if order not in VALID_ORDERS:
+            order = "change"
+
+        return cls(tab, scenario_id, scenario_none, source_id, org, org_none, order)
 
     @property
     def is_narrowed(self) -> bool:
@@ -44,6 +53,7 @@ class JobFilter:
             or self.scenario_none
             or self.source_id is not None
             or self.org is not None
+            or self.org_none
         )
 
     def query_params(self) -> dict[str, str]:
@@ -54,8 +64,12 @@ class JobFilter:
             out["scenario"] = str(self.scenario_id)
         if self.source_id is not None:
             out["source_id"] = str(self.source_id)
-        if self.org is not None:
+        if self.org_none:
+            out["org"] = "none"
+        elif self.org is not None:
             out["org"] = self.org
+        if self.order != "change":
+            out["order"] = self.order
         return out
 
     def query_suffix(self, *, detail: bool = False) -> str:
@@ -64,7 +78,7 @@ class JobFilter:
         return "?" + urlencode(self.query_params())
 
     def cleared(self) -> "JobFilter":
-        return JobFilter(status_tab=self.status_tab)
+        return JobFilter(status_tab=self.status_tab, order=self.order)
 
     def for_status(self, tab: str) -> "JobFilter":
         return replace(self, status_tab=tab)

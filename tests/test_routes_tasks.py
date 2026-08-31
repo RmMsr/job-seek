@@ -453,3 +453,24 @@ def test_history_pagination(client, conn):
     page2 = client.get("/tasks?page=2").text
     assert "page=2" in page1
     assert page1 != page2
+
+
+def test_task_history_nests_children_under_root(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1},
+                           parent_task_id=root["id"])
+    for tid in (root["id"], child["id"]):
+        conn.execute(
+            "UPDATE tasks SET status='done', finished_at=datetime('now') WHERE id=?", (tid,))
+    conn.commit()
+    html = client.get("/tasks").text
+    assert "task-child-row" in html
+    assert f'task-grp-{root["id"]}' in html
+
+
+def test_task_history_standalone_task_has_no_toggle(client, conn):
+    t = q.enqueue_task(conn, kind="job_reset", params={"job_id": 1})
+    conn.execute("UPDATE tasks SET status='done', finished_at=datetime('now') WHERE id=?", (t["id"],))
+    conn.commit()
+    html = client.get("/tasks").text
+    assert f'task-grp-{t["id"]}' not in html

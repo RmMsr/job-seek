@@ -60,6 +60,25 @@ def test_fetch_table_last_run_shows_relative_age_not_raw_timestamp(client, conn)
     assert f">{raw_ts}<" not in html
 
 
+def test_last_run_links_to_task_with_success_glyph(client, conn):
+    sid = q.insert_source(conn, "S", "https://s.test", "generic_listing")
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    run_id = q.start_fetch_run(conn, sid, task_id=task["id"])
+    q.complete_fetch_run(conn, run_id, jobs_found=3, jobs_new=1)
+    html = client.get("/fetch").text
+    assert f'/tasks/{task["id"]}' in html
+    assert "✓" in html
+
+
+def test_last_run_shows_failure_glyph(client, conn):
+    sid = q.insert_source(conn, "S2", "https://s2.test", "generic_listing")
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    run_id = q.start_fetch_run(conn, sid, task_id=task["id"])
+    q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error="boom")
+    html = client.get("/fetch").text
+    assert "✗" in html
+
+
 def test_fetch_table_links_source_name_to_sources_page(client, conn):
     src_id = q.insert_source(conn, "Acme Board", "https://acme.example/jobs", "generic_listing")
     html = client.get("/fetch").text

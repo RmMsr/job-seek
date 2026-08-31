@@ -39,7 +39,7 @@ def _task_fetch_source(conn, client, model, config, params):
     source = q.get_source(conn, params["source_id"])
     if source is None:
         return {"html_chunks": [], "notices": []}
-    gen = run_fetch(source, conn, client, model, config.browser_profile_dir)
+    gen = run_fetch(source, conn, client, model, config.browser_profile_dir, task_id=params["_task_id"])
     fetch_result = None
     try:
         while True:
