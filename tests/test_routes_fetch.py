@@ -221,3 +221,24 @@ def test_post_fetch_all_with_no_sources_is_skipped(client, conn):
     resp = client.post("/fetch/all")
     assert resp.status_code == 200
     assert resp.json()["skipped"] is True
+
+
+def test_revisit_all_skipped_when_nothing_eligible(client, conn):
+    r = client.post("/revisit/all")
+    assert r.json() == {"skipped": True, "message": "No jobs to revisit."}
+
+
+def test_revisit_all_enqueues_sweep(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                 company="", raw_text="b")
+    r = client.post("/revisit/all")
+    body = r.json()
+    assert "task_id" in body
+    task = q.get_task(conn, body["task_id"])
+    assert task["kind"] == "jobs_revisit" and task["params"] == {}
+
+
+def test_fetch_panel_has_revisit_button(client, conn):
+    html = client.get("/fetch").text
+    assert 'data-progress-url="/revisit/all"' in html

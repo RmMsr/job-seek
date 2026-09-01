@@ -6,7 +6,10 @@ from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.job_filter import JobFilter, VALID_TABS
-from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
+from app.pipeline import (
+    run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch,
+    run_revisit_job,
+)
 from app.fetchers.content import (
     FetchError, NoContentError, extract_text_or_raise, extract_page_title,
 )
@@ -311,6 +314,11 @@ def job_feedback(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.update_job_feedback(conn, job_id, status, note)
+    if status in ("accepted", "rejected"):
+        j = q.get_job(conn, job_id)
+        if j is not None and j["source_fetcher_type"] != "slack":
+            q.enqueue_task(conn, kind="jobs_revisit",
+                           params={"job_ids": [job_id], "trigger": "status_change"})
     if redirect:
         return HTMLResponse(content="", headers={"HX-Redirect": redirect})
     f = _filter_from_request(request)
@@ -416,6 +424,96 @@ def _task_job_reevaluate(conn, client, model, config, params):
         request=None, counts=_counts_for_filter(conn, f)
     )
     return {"html_chunks": [html, counts_html], "notices": []}
+
+
+_REVISIT_NOTICE = {
+    "closed": ("warning", "Moved to Trash — {reason}."),
+    "changed": ("info", "Still open, but the posting changed since we saved it — re-scored."),
+    "unchanged": ("info", "Checked just now — still open."),
+    "skipped": ("info", "This job was posted via Slack and can't be re-checked automatically."),
+}
+
+_REVISIT_SWEEP_CAP = 200
+
+
+@register_task_kind("jobs_revisit")
+def _task_jobs_revisit(conn, client, model, config, params):
+    trigger = params.get("trigger", "sweep")
+    job_ids = params.get("job_ids")
+    if job_ids:
+        jobs = [j for j in (q.get_job(conn, i) for i in job_ids) if j is not None]
+    else:
+        jobs = q.get_revisitable_jobs(conn)
+        if len(jobs) > _REVISIT_SWEEP_CAP:
+            yield f"Revisiting the first {_REVISIT_SWEEP_CAP} of {len(jobs)} eligible jobs"
+            jobs = jobs[:_REVISIT_SWEEP_CAP]
+
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+    outcomes = []
+    for i, job in enumerate(jobs, start=1):
+        prefix = f"[{i}/{len(jobs)}] " if len(jobs) > 1 else ""
+        gen = run_revisit_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
+        outcome = None
+        try:
+            while True:
+                yield next(gen)
+        except StopIteration as stop:
+            outcome = stop.value
+        outcomes.append((job, outcome))
+
+    closed = [j for j, o in outcomes if o and o.verdict == "closed"]
+    changed = sum(1 for _, o in outcomes if o and o.verdict == "changed")
+
+    if trigger == "status_change" and closed:
+        if len(closed) == 1:
+            j = closed[0]
+            q.create_inbox_item(
+                conn, "job_closed",
+                f"'{j['title'] or j['url']}' was moved to Trash — the posting is no longer "
+                f"available, checked right after you decided on it.",
+                f"/jobs/{j['id']}",
+            )
+        else:
+            q.create_inbox_item(
+                conn, "job_closed",
+                f"{len(closed)} jobs you just decided on were moved to Trash — their postings "
+                f"are no longer available.",
+                "/jobs?status=trash",
+            )
+
+    result = {"html_chunks": [], "notices": []}
+    if job_ids and len(outcomes) == 1 and outcomes[0][1] is not None:
+        job, outcome = outcomes[0]
+        level, tmpl = _REVISIT_NOTICE[outcome.verdict]
+        f, detail = _filter_from_task_params(params)
+        row_html = _render_updated_job_html(conn, None, job["id"], f, detail=detail)
+        counts_html = templates.get_template("jobs/_counts_oob.html").render(
+            request=None, counts=_counts_for_filter(conn, f)
+        )
+        notice_html = templates.get_template("jobs/_revisit_notice.html").render(
+            request=None, level=level,
+            message=tmpl.format(reason=outcome.reason or ""),
+        )
+        result["html_chunks"] = [notice_html, row_html, counts_html]
+    else:
+        yield (
+            f"Revisited {len(outcomes)} · closed {len(closed)} · changed {changed}"
+        )
+    return result
+
+
+@router.post("/jobs/{job_id}/revisit")
+def job_revisit(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    job = q.get_job(conn, job_id)
+    if job is None or job["source_fetcher_type"] == "slack":
+        return {"skipped": True,
+                "message": "This job can't be revisited automatically."}
+    task = q.enqueue_task(
+        conn, kind="jobs_revisit",
+        params={"job_ids": [job_id], "trigger": "manual", **_filter_task_params(request)},
+    )
+    return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
 @router.post("/jobs/{job_id}/reset")
@@ -540,6 +638,15 @@ def job_bulk_feedback(
 ):
     for job_id in job_ids:
         q.update_job_feedback(conn, job_id, status, note)
+
+    if status in ("accepted", "rejected"):
+        revisitable = [
+            jid for jid in job_ids
+            if (j := q.get_job(conn, jid)) is not None and j["source_fetcher_type"] != "slack"
+        ]
+        if revisitable:
+            q.enqueue_task(conn, kind="jobs_revisit",
+                           params={"job_ids": revisitable, "trigger": "status_change"})
 
     f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter)
     jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))

@@ -81,6 +81,14 @@ def trigger_fetch_all(conn: sqlite3.Connection = Depends(get_db)):
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
+@router.post("/revisit/all")
+def trigger_revisit_all(conn: sqlite3.Connection = Depends(get_db)):
+    if not q.get_revisitable_jobs(conn):
+        return {"skipped": True, "message": "No jobs to revisit."}
+    task = q.enqueue_task(conn, kind="jobs_revisit", params={})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
+
+
 @router.post("/fetch/{source_id}")
 def trigger_fetch(source_id: int, conn: sqlite3.Connection = Depends(get_db)):
     source = q.get_source(conn, source_id)

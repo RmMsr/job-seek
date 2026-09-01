@@ -854,3 +854,26 @@ def test_run_fetch_dedups_against_canonical_known_url(conn):
         _drain(pipeline.run_fetch(src, conn, MagicMock(), "m", "/tmp"))
 
     ingest.assert_not_called()
+
+
+def test_evaluate_posting_scores_without_touching_status(conn, source):
+    from app.pipeline import _evaluate_posting
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/x",
+                       title="orig", company="", raw_text="raw")
+    q.update_job_feedback(conn, jid, "accepted", None)
+    client = _mock_client(
+        classify_resp='{"type": "job_posting", "reason": "ok"}',
+        summarize_resp='{"title": "ML Engineer", "headline": "h", "summary": "s", "company": "Acme", "posted_date": ""}',
+        evaluate_resp='{"score": 0.9, "reasoning": "great"}',
+    )
+    _drain(_evaluate_posting(
+        conn, client, "llama3.2", jid, simplified="clean text",
+        content_type="job_posting", fallback_title="orig", is_slack=False,
+        profile=q.get_profile(conn), scenarios=q.get_scenarios(conn),
+        url="http://example.com/x",
+    ))
+    row = q.get_job(conn, jid)
+    assert row["status"] == "accepted"          # untouched
+    assert row["summary"] == "s"
+    assert row["evaluation_completed_at"] is not None
+    assert q.get_job_scores(conn, jid)[0]["relevance_score"] == 0.9

@@ -2,11 +2,13 @@
 {% block title %}Fetch — Job Seek{% endblock %}
 {% block content %}
 <h1>Fetch</h1>
-{% if sources %}
 <div style="margin-bottom:1rem;">
+  {% if sources %}
   <button class="btn" data-progress-url="/fetch/all">Fetch all</button>
+  {% endif %}
+  <button class="btn" data-progress-url="/revisit/all">Revisit open jobs</button>
+  <p class="hint">Re-checks every open job's original posting; anything that can no longer be reached is moved to Trash.</p>
 </div>
-{% endif %}
 <div id="fetch-content">
   {% include "fetch/_table.html" %}
 </div>

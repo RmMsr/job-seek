@@ -2601,3 +2601,99 @@ def test_clear_all_filters_is_plain_navigation(client, conn):
     anchor = html.split(">Clear all filters<")[0].rsplit("<a ", 1)[1]
     assert "hx-get" not in anchor and "hx-target" not in anchor and "hx-push-url" not in anchor
     assert 'href="/jobs?status=new"' in anchor
+
+
+def _fake_revisit_closed(conn, client, model, job, scenarios, profile, progress_prefix=""):
+    from app.pipeline import RevisitOutcome
+    q.mark_job_closed(conn, job["id"], "this job can no longer be found")
+    yield f"{progress_prefix}Closed: {job['url']}"
+    return RevisitOutcome("closed", "this job can no longer be found")
+
+
+def test_revisit_route_enqueues_task(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/x", title="X",
+                       company="", raw_text="b")
+    r = client.post(f"/jobs/{jid}/revisit")
+    assert r.status_code == 200
+    task = q.get_task(conn, r.json()["task_id"])
+    assert task["kind"] == "jobs_revisit"
+    assert task["params"]["job_ids"] == [jid]
+    assert task["params"]["trigger"] == "manual"
+
+
+def test_revisit_route_skips_slack_job(client, conn):
+    sid = q.insert_source(conn, "slk", "http://x.slack.com/c", "slack")
+    jid = q.insert_job(conn, source_id=sid, url="http://x.slack.com/c#1", title="t",
+                       company="", raw_text="b")
+    r = client.post(f"/jobs/{jid}/revisit")
+    assert r.json().get("skipped") is True
+    assert not [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
+
+
+def test_revisit_task_execution_closes_and_renders_row(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/x", title="X",
+                       company="", raw_text="b")
+    task = q.enqueue_task(conn, kind="jobs_revisit",
+                          params={"job_ids": [jid], "trigger": "manual"})
+    with patch("app.routes.jobs.run_revisit_job", side_effect=_fake_revisit_closed):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    assert q.get_job(conn, jid)["status"] == "trash"
+    result = q.get_task(conn, task["id"])["result"]
+    assert any("Trash" in c for c in result["html_chunks"])
+
+
+def test_accept_enqueues_status_change_revisit(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/j", title="J",
+                       company="", raw_text="b")
+    client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
+    tasks = [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
+    assert len(tasks) == 1
+    assert tasks[0]["params"] == {"job_ids": [jid], "trigger": "status_change"}
+
+
+def test_slack_job_accept_does_not_enqueue_revisit(client, conn):
+    sid = q.insert_source(conn, "slk", "http://x.slack.com/c", "slack")
+    jid = q.insert_job(conn, source_id=sid, url="http://x.slack.com/c#1", title="t",
+                       company="", raw_text="b")
+    client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
+    assert not [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
+
+
+def test_status_change_revisit_close_creates_inbox_item(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/j", title="J",
+                       company="", raw_text="b")
+    task = q.enqueue_task(conn, kind="jobs_revisit",
+                          params={"job_ids": [jid], "trigger": "status_change"})
+    with patch("app.routes.jobs.run_revisit_job", side_effect=_fake_revisit_closed):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    assert any(i["kind"] == "job_closed" for i in q.get_unresolved_inbox_items(conn))
+
+
+def test_bulk_accept_enqueues_single_revisit_task(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    ids = [q.insert_job(conn, source_id=sid, url=f"http://example.com/{n}", title=str(n),
+                        company="", raw_text="b") for n in range(3)]
+    client.post("/jobs/bulk-feedback", data={"job_ids": ids, "status": "rejected", "note": ""})
+    tasks = [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
+    assert len(tasks) == 1
+    assert sorted(tasks[0]["params"]["job_ids"]) == sorted(ids)
+
+
+def test_job_card_shows_revisit_button_for_non_slack(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="b")
+    html = client.get(f"/jobs/{jid}").text
+    assert f'/jobs/{jid}/revisit' in html
+
+
+def test_job_card_hides_revisit_button_for_slack(client, conn):
+    sid = q.insert_source(conn, "slk", "http://x.slack.com/c", "slack")
+    jid = q.insert_job(conn, source_id=sid, url="http://x.slack.com/c#1", title="A",
+                       company="", raw_text="b")
+    html = client.get(f"/jobs/{jid}").text
+    assert f'/jobs/{jid}/revisit' not in html

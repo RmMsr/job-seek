@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from datetime import datetime, timezone
 from app.url_canon import canonicalize_url
 
 # Letters + digits, no underscore — keeps Unicode words (Norwegian "ø/æ/å",
@@ -396,6 +397,36 @@ def mark_job_gate_override(conn: sqlite3.Connection, job_id: int) -> None:
     conn.commit()
 
 
+def update_job_raw_text(conn: sqlite3.Connection, job_id: int, raw_text: str) -> None:
+    conn.execute("UPDATE jobs SET raw_text = ? WHERE id = ?", (raw_text, job_id))
+    conn.commit()
+
+
+def get_revisitable_jobs(conn: sqlite3.Connection) -> list[dict]:
+    sql = f"""SELECT {_GATE_SELECT} {_GATE_JOIN}
+        WHERE jobs.status IN ('new', 'accepted', 'rejected')
+          AND (SELECT fetcher_type FROM sources WHERE sources.id = jobs.source_id) != 'slack'
+        ORDER BY jobs.id"""
+    return _rows_to_dicts(conn.execute(sql).fetchall())
+
+
+def mark_job_closed(conn: sqlite3.Connection, job_id: int, reason: str) -> None:
+    row = conn.execute("SELECT feedback_note FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return
+    today = datetime.now(timezone.utc).date().isoformat()
+    line = f"[{today}] Moved to trash on revisit — {reason}."
+    old = (row["feedback_note"] or "").strip()
+    note = f"{old}\n\n{line}" if old else line
+    conn.execute(
+        "UPDATE jobs SET status = 'trash', feedback_note = ?, "
+        "feedback_handled_at = datetime('now'), status_changed_at = datetime('now') "
+        "WHERE id = ?",
+        (note, job_id),
+    )
+    conn.commit()
+
+
 def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
     conn.execute(
         "UPDATE jobs SET status = ?, feedback_note = ?, feedback_handled_at = NULL, "
@@ -432,6 +463,7 @@ def mark_profile_feedback_handled(conn: sqlite3.Connection, job_ids: list[int]) 
 
 _GATE_SELECT = """
     jobs.*,
+    (SELECT fetcher_type FROM sources WHERE sources.id = jobs.source_id) AS source_fetcher_type,
     gate.passed_count AS passed_gate_count,
     gate.passed_scenario_names AS passed_scenario_names,
     gate.passed_scenario_ids AS passed_scenario_ids,

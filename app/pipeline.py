@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import sqlite3
+import time
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Generator
@@ -8,9 +9,14 @@ import openai
 from app.db import queries as q
 from app.ai.simplify import simplify
 from app.ai.classify import classify
+from app.ai.revisit_check import revisit_check
 from app.ai.summarize import summarize
 from app.ai.evaluate import evaluate
 from app.ai.assess_fit import assess_fit
+from app.fetchers.content import (
+    fetch_url_html, extract_text, has_enough_text, FetchError,
+)
+from app.fetchers.playwright_pool import render_html
 from app.fetchers.base import RawJob
 from app.fetchers.slack import SlackFetcher, SlackAuthRequired
 from app.fetchers.finn import FinnListingFetcher
@@ -55,6 +61,59 @@ def _progress(msg: str) -> str:
     return msg
 
 
+def _evaluate_posting(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job_id: int,
+    *,
+    simplified: str,
+    content_type: str,
+    fallback_title: str,
+    is_slack: bool,
+    profile: str,
+    scenarios: list[dict],
+    url: str,
+    progress_prefix: str = "",
+    preserve_existing_metadata: bool = False,
+) -> Generator[str, None, None]:
+    job_summary = summarize(
+        client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
+        today=datetime.now(timezone.utc).date(),
+    )
+    q.update_job_pipeline(
+        conn, job_id,
+        simplified_content=simplified,
+        content_type=content_type,
+        title=job_summary.title or fallback_title,
+        headline=job_summary.headline,
+        summary=job_summary.summary,
+        company="" if preserve_existing_metadata else job_summary.company,
+        published_at="" if preserve_existing_metadata else job_summary.posted_date,
+    )
+    passed_gate = False
+    for scenario in scenarios:
+        criteria = q.get_criteria(conn, scenario["id"])
+        score, reasoning = evaluate(client, model, scenario, criteria, job_summary.summary)
+        version_hash = compute_version_hash(scenario, criteria)
+        q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
+        if score >= scenario["gate_threshold"]:
+            passed_gate = True
+        yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {url}")
+    if passed_gate:
+        result = assess_fit(client, model, profile, job_summary.summary)
+        q.update_job_fit(
+            conn, job_id,
+            result["interest"], result["interest_reasoning"],
+            result["attainability"], result["attainability_reasoning"],
+            compute_profile_hash(profile),
+        )
+        yield _progress(
+            f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {url}"
+        )
+    q.mark_job_evaluation_complete(conn, job_id)
+
+
 def _ingest_posting(
     conn: sqlite3.Connection,
     client: openai.OpenAI,
@@ -75,45 +134,116 @@ def _ingest_posting(
     yield _progress(f"{progress_prefix}Classified as {content_type}: {url}")
 
     if content_type in ("job_posting", "lead"):
-        job_summary = summarize(
-            client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
-            today=datetime.now(timezone.utc).date(),
+        yield from _evaluate_posting(
+            conn, client, model, job_id,
+            simplified=simplified, content_type=content_type,
+            fallback_title=fallback_title, is_slack=is_slack,
+            profile=profile, scenarios=scenarios, url=url,
+            progress_prefix=progress_prefix,
+            preserve_existing_metadata=preserve_existing_metadata,
         )
-        q.update_job_pipeline(
-            conn, job_id,
-            simplified_content=simplified,
-            content_type=content_type,
-            title=job_summary.title or fallback_title,
-            headline=job_summary.headline,
-            summary=job_summary.summary,
-            company="" if preserve_existing_metadata else job_summary.company,
-            published_at="" if preserve_existing_metadata else job_summary.posted_date,
-        )
-        passed_gate = False
-        for scenario in scenarios:
-            criteria = q.get_criteria(conn, scenario["id"])
-            score, reasoning = evaluate(client, model, scenario, criteria, job_summary.summary)
-            version_hash = compute_version_hash(scenario, criteria)
-            q.upsert_job_score(conn, job_id, scenario["id"], score, reasoning, version_hash)
-            if score >= scenario["gate_threshold"]:
-                passed_gate = True
-            yield _progress(f"{progress_prefix}Scored {score} for '{scenario['name']}': {url}")
-        if passed_gate:
-            result = assess_fit(client, model, profile, job_summary.summary)
-            q.update_job_fit(
-                conn, job_id,
-                result["interest"], result["interest_reasoning"],
-                result["attainability"], result["attainability_reasoning"],
-                compute_profile_hash(profile),
-            )
-            yield _progress(
-                f"{progress_prefix}Fit {result['interest']:.2f}/{result['attainability']:.2f}: {url}"
-            )
-        q.mark_job_evaluation_complete(conn, job_id)
     elif content_type == "irrelevant":
         q.delete_job(conn, job_id)
     else:
         q.update_job_pipeline(conn, job_id, simplified_content=simplified, content_type=content_type)
+
+
+@dataclass
+class RevisitOutcome:
+    verdict: str          # "closed" | "changed" | "unchanged" | "skipped"
+    reason: str | None = None
+
+
+_REVISIT_RETRY_DELAY_SECONDS = 3.0
+
+_REVISIT_CLOSED_REASON = {
+    "gone": "this job posting is no longer available",
+    "closed": "this job is no longer accepting applications",
+}
+
+
+def _closed_reason_for_fetch_error(exc: FetchError) -> str:
+    msg = str(exc)
+    if "404" in msg or "410" in msg:
+        return "this job can no longer be found"
+    return "this job posting could no longer be reached"
+
+
+def run_revisit_job(
+    conn: sqlite3.Connection,
+    client: openai.OpenAI,
+    model: str,
+    job: dict,
+    scenarios: list[dict],
+    profile: str,
+    *,
+    progress_prefix: str = "",
+) -> Generator[str, None, RevisitOutcome]:
+    url = job["url"]
+    if job.get("source_fetcher_type") == "slack":
+        yield _progress(f"{progress_prefix}Skipping (Slack post, not re-fetchable): {url}")
+        return RevisitOutcome("skipped")
+
+    yield _progress(f"{progress_prefix}Revisiting: {url}")
+
+    try:
+        html = fetch_url_html(url)
+    except FetchError:
+        time.sleep(_REVISIT_RETRY_DELAY_SECONDS)
+        try:
+            html = fetch_url_html(url)
+        except FetchError as exc:
+            reason = _closed_reason_for_fetch_error(exc)
+            q.mark_job_closed(conn, job["id"], reason)
+            yield _progress(f"{progress_prefix}Closed ({exc}) — moved to Trash: {url}")
+            return RevisitOutcome("closed", reason)
+
+    text = extract_text(html)
+    if not has_enough_text(text):
+        rendered = render_html(url)
+        if rendered:
+            text = extract_text(rendered)
+        if not has_enough_text(text):
+            reason = "this job posting no longer shows any content"
+            q.mark_job_closed(conn, job["id"], reason)
+            yield _progress(f"{progress_prefix}Closed (no content) — moved to Trash: {url}")
+            return RevisitOutcome("closed", reason)
+
+    simplified = simplify(text)
+    reference = (job["summary"] or job["simplified_content"] or "").strip()
+    if not reference:
+        # Nothing on file to compare against (an unprocessed / error job):
+        # the page is reachable and has content, so treat it as still there.
+        yield _progress(f"{progress_prefix}Still reachable (nothing on file to compare): {url}")
+        return RevisitOutcome("unchanged")
+
+    state, reason_detail = revisit_check(client, model, simplified, reference)
+
+    if state in ("gone", "closed"):
+        reason = _REVISIT_CLOSED_REASON[state]
+        q.mark_job_closed(conn, job["id"], reason)
+        yield _progress(
+            f"{progress_prefix}Closed ({state}: {reason_detail or 'no detail'}) — moved to Trash: {url}"
+        )
+        return RevisitOutcome("closed", reason)
+
+    if state == "changed":
+        yield _progress(
+            f"{progress_prefix}Still open, posting changed ({reason_detail or 'no detail'}) — re-evaluating: {url}"
+        )
+        q.update_job_raw_text(conn, job["id"], text)
+        content_type = job["content_type"] if job["content_type"] in ("job_posting", "lead") else "job_posting"
+        yield from _evaluate_posting(
+            conn, client, model, job["id"],
+            simplified=simplified, content_type=content_type,
+            fallback_title=job["title"], is_slack=False,
+            profile=profile, scenarios=scenarios, url=url,
+            progress_prefix=progress_prefix, preserve_existing_metadata=True,
+        )
+        return RevisitOutcome("changed")
+
+    yield _progress(f"{progress_prefix}Still open, unchanged: {url}")
+    return RevisitOutcome("unchanged")
 
 
 def run_fetch(

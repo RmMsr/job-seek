@@ -1793,3 +1793,58 @@ def test_search_jobs_tabs_excludes_trash_unless_asked(conn):
     assert got == {keep}
     got2 = {j["id"] for j in q.search_jobs(conn, "rust", tabs=["new", "trash"])}
     assert trash in got2
+
+
+def test_get_job_exposes_source_fetcher_type(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="x")
+    assert q.get_job(conn, jid)["source_fetcher_type"] == "generic_listing"
+
+
+def test_update_job_raw_text_replaces_only_raw_text(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="Acme", raw_text="old")
+    q.update_job_raw_text(conn, jid, "new body")
+    row = q.get_job(conn, jid)
+    assert row["raw_text"] == "new body"
+    assert row["title"] == "A" and row["company"] == "Acme"
+
+
+def test_get_revisitable_jobs_excludes_slack_and_trash(conn):
+    gid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    slk = q.insert_source(conn, "slk", "http://x.slack.com/c", "slack")
+    keep = q.insert_job(conn, source_id=gid, url="http://example.com/keep", title="",
+                        company="", raw_text="x")
+    q.insert_job(conn, source_id=slk, url="http://x.slack.com/c#1", title="",
+                 company="", raw_text="x")
+    trashed = q.insert_job(conn, source_id=gid, url="http://example.com/t", title="",
+                           company="", raw_text="x")
+    q.update_job_feedback(conn, trashed, "trash", None)
+    ids = [j["id"] for j in q.get_revisitable_jobs(conn)]
+    assert ids == [keep]
+
+
+def test_mark_job_closed_appends_note_and_trashes(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="x")
+    q.update_job_feedback(conn, jid, "accepted", "Loved the mission")
+    q.mark_job_closed(conn, jid, "this job can no longer be found")
+    row = q.get_job(conn, jid)
+    assert row["status"] == "trash"
+    assert row["feedback_note"].startswith("Loved the mission\n\n[")
+    assert row["feedback_note"].rstrip().endswith(
+        "Moved to trash on revisit — this job can no longer be found.")
+    assert row["feedback_handled_at"] is not None
+    assert row["status_changed_at"] is not None
+
+
+def test_mark_job_closed_with_no_existing_note(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="x")
+    q.mark_job_closed(conn, jid, "this page is no longer a job posting")
+    note = q.get_job(conn, jid)["feedback_note"]
+    assert note.startswith("[") and "no longer a job posting." in note

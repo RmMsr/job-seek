@@ -112,6 +112,15 @@
       title="Wipe the simplified content, classification, summary and scores, then immediately rerun the full pipeline from the original posting text.">
       Reset to new
     </button>
+    {% if job.source_fetcher_type != "slack" %}
+    <button type="button" class="btn"
+      data-progress-url="/jobs/{{ job.id }}/revisit{{ macros.qsuffix(filter, detail=is_detail_page|default(false)) }}"
+      data-progress-oob="1"
+      data-progress-display="#reset-progress-{{ job.id }}"
+      title="Re-fetch the original posting. If it can no longer be reached, this job moves to Trash.">
+      Revisit
+    </button>
+    {% endif %}
   </details>
   <div class="reset-progress" id="reset-progress-{{ job.id }}" aria-live="polite"></div>
 </article>
