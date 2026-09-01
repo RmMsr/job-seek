@@ -9,18 +9,21 @@
 {% endif %}
 {% endmacro %}
 
-{% macro status_badge(job) %}
-{% if job.status == "accepted" %}
-<span class="score-badge score-high">Accepted</span>
-{% elif job.status == "rejected" %}
-<span class="score-badge score-low">Rejected</span>
-{% elif job.status == "trash" %}
-<span class="score-badge score-neutral">Trash</span>
+{% macro status_pill(job) %}
+{% if job.status == "accepted" %}<span class="status-pill status-pill-accepted">Accepted</span>
+{% elif job.status == "rejected" %}<span class="status-pill status-pill-rejected">Rejected</span>
+{% elif job.status == "trash" %}<span class="status-pill status-pill-trash">Trash</span>
+{% elif job.content_type == "lead" %}<span class="status-pill status-pill-lead">Lead</span>
+{% elif job.content_type == "job_posting" and (job.passed_gate_count or job.gate_override) %}<span class="status-pill status-pill-new">New</span>
+{% elif job.content_type == "job_posting" %}<span class="status-pill status-pill-plain">Not relevant</span>
+{% else %}<span class="status-pill status-pill-plain">{{ job.content_type or "unknown" }}</span>
 {% endif %}
 {% endmacro %}
 
 {% macro meta_tags(job, filter=none) %}
 <dl class="job-tags">
+  <dt class="sr-only">Status</dt>
+  <dd>{{ status_pill(job) }}</dd>
   {% if job.passed_scenario_names %}
   <dt class="sr-only">Matched scenarios</dt>
   {% set sc_ids = (job.passed_scenario_ids or '').split(',') %}
@@ -30,10 +33,6 @@
       hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ name }}</a>
     {% else %}<span class="tag tag-accent">{{ name }}</span>{% endif %}</dd>
   {% endfor %}
-  {% endif %}
-  {% if job.status == "accepted" or job.status == "rejected" or job.status == "trash" %}
-  <dt class="sr-only">Status</dt>
-  <dd>{{ status_badge(job) }}</dd>
   {% endif %}
   <dt class="sr-only">Content type</dt>
   <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>

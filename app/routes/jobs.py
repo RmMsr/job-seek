@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
-from app.job_filter import JobFilter
+from app.job_filter import JobFilter, VALID_TABS
 from app.pipeline import run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch
 from app.fetchers.content import (
     FetchError, NoContentError, extract_text_or_raise, extract_page_title,
@@ -43,30 +43,30 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
     return jobs
 
 
-# status tab -> base kwargs for get_jobs (before scenario/source/org narrowing)
-_BASE_KWARGS_FOR_TAB = {
-    "new": {"status": "new", "content_type": "job_posting", "gate_status": "passed"},
-    "lead": {"status": "new", "content_type": "lead"},
-    "accepted": {"status": "accepted"},
-    "rejected": {"status": "rejected"},
-    "not_relevant": {"status": "new", "content_type": "job_posting", "gate_status": "failed"},
-    "trash": {"status": "trash"},
-}
+_SEARCH_SEED_TABS = ("new", "lead", "accepted", "rejected")
+
+
+def _effective_tabs(f: JobFilter) -> list[str]:
+    if f.searching and not f.is_multi:
+        seed = set(f.statuses) | set(_SEARCH_SEED_TABS)
+        return [t for t in VALID_TABS if t in seed]
+    return list(f.statuses)
 
 
 def _jobs_for_filter(conn: sqlite3.Connection, f: JobFilter) -> list[dict]:
-    kwargs = dict(_BASE_KWARGS_FOR_TAB[f.status_tab])
-    if f.source_id is not None:
-        kwargs["source_id"] = f.source_id
-    if f.org_none:
-        kwargs["org_none"] = True
-    elif f.org is not None:
-        kwargs["org"] = f.org
-    if f.scenario_id is not None:
-        kwargs["scenario_id"] = f.scenario_id
-    if f.scenario_none:
-        kwargs["scenario_gate"] = "none"
-    return q.get_jobs(conn, order=f.order, **kwargs)
+    tabs = _effective_tabs(f)
+    if f.searching:
+        return q.search_jobs(
+            conn, f.q, tabs=tabs,
+            source_id=f.source_id, scenario_id=f.scenario_id,
+            org=f.org, org_none=f.org_none,
+        )
+    return q.get_jobs_for_tabs(
+        conn, tabs,
+        source_id=f.source_id, scenario_id=f.scenario_id,
+        org=f.org, org_none=f.org_none, scenario_none=f.scenario_none,
+        order=f.order,
+    )
 
 
 def _sort_key(order: str):
@@ -192,6 +192,7 @@ def _content_context(conn: sqlite3.Connection, f: JobFilter, *, jobs: list[dict]
         "sources": q.get_sources(conn),
         "companies": q.get_distinct_companies(conn),
         "status": f.status_tab,
+        "active_tabs": _effective_tabs(f),
     }
 
 
@@ -315,8 +316,12 @@ def job_feedback(
     f = _filter_from_request(request)
     detail = _is_detail_page_request(request)
     row_html = _render_updated_job_html(conn, request, job_id, f, detail=detail)
-    counts = _counts_for_filter(conn, f)
-    counts_html = templates.get_template("jobs/_counts_oob.html").render(request=request, counts=counts)
+    counts_html = ""
+    if not f.searching:
+        counts = _counts_for_filter(conn, f)
+        counts_html = templates.get_template("jobs/_counts_oob.html").render(
+            request=request, counts=counts
+        )
     headers = {}
     if not detail:
         decided = q.get_job(conn, job_id)

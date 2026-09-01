@@ -101,3 +101,79 @@ def test_org_none_sentinel():
 
 def test_org_none_cleared():
     assert JobFilter.from_params({"org": "none"}).cleared().org_none is False
+
+
+def test_filter_parses_and_strips_query():
+    f = JobFilter.from_params({"q": "  senior python  "})
+    assert f.q == "senior python"
+    assert f.searching is True
+
+
+def test_filter_blank_query_is_not_searching():
+    f = JobFilter.from_params({"status": "new"})
+    assert f.q == ""
+    assert f.searching is False
+    assert "q" not in f.query_params()
+
+
+def test_filter_query_params_roundtrip_keeps_status_and_q():
+    f = JobFilter.from_params({"status": "accepted", "q": "acme"})
+    assert f.query_params() == {"status": "accepted", "q": "acme"}
+
+
+def test_statuses_default_is_single_new():
+    f = JobFilter.from_params({})
+    assert f.statuses == ("new",)
+    assert f.status_tab == "new"
+    assert f.is_multi is False
+
+
+def test_statuses_comma_list_kept_in_order_and_deduped():
+    f = JobFilter.from_params({"status": "accepted,new,accepted,bogus,trash"})
+    assert f.statuses == ("accepted", "new", "trash")
+    assert f.is_multi is True
+    assert f.status_tab == "accepted"
+
+
+def test_statuses_all_junk_falls_back_to_new():
+    assert JobFilter.from_params({"status": "bogus, ,"}).statuses == ("new",)
+
+
+def test_query_params_joins_statuses():
+    assert JobFilter.from_params({"status": "new,accepted"}).query_params()["status"] == "new,accepted"
+
+
+def test_for_status_is_exclusive():
+    f = JobFilter.from_params({"status": "new,accepted"}).for_status("rejected")
+    assert f.statuses == ("rejected",)
+
+
+def test_with_status_toggled_adds_in_valid_tabs_order():
+    f = JobFilter.from_params({"status": "accepted"}).with_status_toggled("new")
+    assert f.statuses == ("new", "accepted")
+
+
+def test_with_status_toggled_removes_present_tab():
+    f = JobFilter.from_params({"status": "new,accepted"}).with_status_toggled("new")
+    assert f.statuses == ("accepted",)
+
+
+def test_with_status_toggled_never_empties():
+    assert JobFilter.from_params({"status": "new"}).with_status_toggled("new").statuses == ("new",)
+
+
+def test_is_narrowed_true_when_only_query_set():
+    f = JobFilter.from_params({"q": "rust"})
+    assert f.is_narrowed is True
+    assert not JobFilter.from_params({"status": "new,accepted"}).is_narrowed
+
+
+def test_cleared_drops_query_and_filters_keeps_statuses_and_order():
+    f = JobFilter.from_params(
+        {"status": "new,accepted", "q": "rust", "scenario": "3", "source_id": "5",
+         "org": "Acme", "order": "score"}
+    )
+    c = f.cleared()
+    assert c.statuses == ("new", "accepted") and c.order == "score"
+    assert c.q == "" and not c.is_narrowed
+    assert "q" not in c.query_params()

@@ -1,7 +1,13 @@
 from __future__ import annotations
 import json
+import re
 import sqlite3
 from app.url_canon import canonicalize_url
+
+# Letters + digits, no underscore — keeps Unicode words (Norwegian "ø/æ/å",
+# etc.) whole. The FTS index is unicode61, so it tokenises these fine; only
+# this query-parser needs to stop splitting them at the accent.
+_FTS_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
@@ -485,6 +491,123 @@ _ORDER_BY = {
 }
 
 
+def _fts_match_query(raw: str) -> str | None:
+    """User text -> FTS5 MATCH string. Tokens AND-ed, last token is a prefix."""
+    tokens = _FTS_TOKEN_RE.findall(raw or "")
+    if not tokens:
+        return None
+    quoted = [f'"{t}"' for t in tokens]
+    quoted[-1] = quoted[-1] + "*"
+    return " ".join(quoted)
+
+
+def _composable_clauses(
+    *,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
+    org: str | None = None,
+    org_none: bool = False,
+) -> tuple[list[str], list]:
+    clauses, params = [], []
+    if source_id is not None:
+        clauses.append("jobs.source_id = ?")
+        params.append(source_id)
+    if org_none:
+        clauses.append("jobs.company = ''")
+    elif org is not None:
+        clauses.append("jobs.company = ?")
+        params.append(org)
+    if scenario_id is not None:
+        clauses.append(
+            """EXISTS (
+                SELECT 1 FROM job_scores js JOIN scenarios s ON s.id = js.scenario_id
+                WHERE js.job_id = jobs.id AND js.scenario_id = ? AND js.relevance_score >= s.gate_threshold
+            )"""
+        )
+        params.append(scenario_id)
+    return clauses, params
+
+
+# bm25 column order matches the jobs_fts definition:
+# title, company, headline, summary, simplified_content. Lower bm25 = better.
+_SEARCH_RANK = "bm25(jobs_fts, 10.0, 10.0, 3.0, 3.0, 1.0)"
+
+
+def search_jobs(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    tabs: list[str] | None = None,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
+    org: str | None = None,
+    org_none: bool = False,
+) -> list[dict]:
+    match = _fts_match_query(query)
+    if match is None:
+        return []
+    clauses, params = _composable_clauses(
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+    )
+    if tabs:
+        clauses = [_tabs_clause(tabs), *clauses]
+    sql = (
+        f"SELECT {_GATE_SELECT}, {_SEARCH_RANK} AS search_rank {_GATE_JOIN} "
+        "JOIN jobs_fts ON jobs_fts.rowid = jobs.id WHERE jobs_fts MATCH ?"
+    )
+    sql_params = [match, *params]
+    if clauses:
+        sql += " AND " + " AND ".join(clauses)
+    sql += " ORDER BY search_rank"
+    return _rows_to_dicts(conn.execute(sql, sql_params).fetchall())
+
+
+_TAB_PREDICATE: dict[str, str] = {
+    "new": f"(jobs.status = 'new' AND jobs.content_type = 'job_posting' AND ({_GATE_PASSED_CLAUSE}))",
+    "lead": "(jobs.status = 'new' AND jobs.content_type = 'lead')",
+    "accepted": "(jobs.status = 'accepted')",
+    "rejected": "(jobs.status = 'rejected')",
+    "not_relevant": f"(jobs.status = 'new' AND jobs.content_type = 'job_posting' AND ({_GATE_FAILED_CLAUSE}))",
+    "trash": "(jobs.status = 'trash')",
+}
+
+
+def _tabs_clause(tabs: list[str]) -> str:
+    parts = [_TAB_PREDICATE[t] for t in tabs if t in _TAB_PREDICATE]
+    if not parts:
+        parts = [_TAB_PREDICATE["new"]]
+    return "(" + " OR ".join(parts) + ")"
+
+
+def get_jobs_for_tabs(
+    conn: sqlite3.Connection,
+    tabs: list[str],
+    *,
+    source_id: int | None = None,
+    scenario_id: int | None = None,
+    org: str | None = None,
+    org_none: bool = False,
+    scenario_none: bool = False,
+    order: str = "change",
+) -> list[dict]:
+    clauses = [_tabs_clause(tabs)]
+    _c, params = _composable_clauses(
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+    )
+    clauses += _c
+    if scenario_none:
+        clauses.append(
+            "(scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0))"
+        )
+    sql = (
+        f"SELECT {_GATE_SELECT} {_GATE_JOIN} WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY "
+        + _ORDER_BY.get(order, _ORDER_BY["change"])
+    )
+    return _rows_to_dicts(conn.execute(sql, params).fetchall())
+
+
 def get_jobs(
     conn: sqlite3.Connection,
     *,
@@ -499,32 +622,21 @@ def get_jobs(
     order: str = "change",
 ) -> list[dict]:
     clauses, params = [], []
+    _c, _p = _composable_clauses(
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+    )
+    clauses += _c
+    params += _p
     if status is not None:
         clauses.append("jobs.status = ?")
         params.append(status)
     if content_type is not None:
         clauses.append("jobs.content_type = ?")
         params.append(content_type)
-    if source_id is not None:
-        clauses.append("jobs.source_id = ?")
-        params.append(source_id)
-    if org_none:
-        clauses.append("jobs.company = ''")
-    elif org is not None:
-        clauses.append("jobs.company = ?")
-        params.append(org)
     if scenario_gate == "none":
         clauses.append(
             "(scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0))"
         )
-    if scenario_id is not None:
-        clauses.append(
-            """EXISTS (
-                SELECT 1 FROM job_scores js JOIN scenarios s ON s.id = js.scenario_id
-                WHERE js.job_id = jobs.id AND js.scenario_id = ? AND js.relevance_score >= s.gate_threshold
-            )"""
-        )
-        params.append(scenario_id)
     if gate_status == "passed":
         clauses.append(_GATE_PASSED_CLAUSE)
     elif gate_status == "failed":

@@ -7,4 +7,3 @@ Known gaps, not yet scheduled.
   (JS-driven pagination, not hyperlink pagers — needs Playwright click/scroll)
 - integration: mcp server
 - doc: Create a list of supported job board examples for user documentation and regression testing.
-- ux: Full text search on job page. Role and org matches rank higher than description.

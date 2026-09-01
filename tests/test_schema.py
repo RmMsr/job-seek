@@ -1,6 +1,6 @@
 import sqlite3
 import pytest
-from app.db.schema import init_db
+from app.db.schema import init_db, _migrate_add_jobs_fts
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def conn():
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    return {r["name"] for r in rows}
+    return {r["name"] for r in rows if not r["name"].startswith("jobs_fts")}
 
 
 def test_init_db_creates_all_tables(conn):
@@ -1079,6 +1079,59 @@ def test_init_db_flips_existing_80k_generic_row_to_eawork(conn):
     rows = dict(conn.execute("SELECT name, fetcher_type FROM sources").fetchall())
     assert rows["80k"] == "eawork_listing"
     assert rows["other"] == "generic_listing"
+
+
+def test_init_db_creates_jobs_fts(conn):
+    init_db(conn)
+    assert conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs_fts'"
+    ).fetchone() is not None
+
+
+def test_jobs_fts_triggers_sync_on_write(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, company, raw_text) "
+        "VALUES (1, 'http://job/1', 'Kubernetes Platform Lead', 'Acme', 'r')"
+    )
+    hit = conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Kubernetes"',)
+    ).fetchall()
+    assert len(hit) == 1
+
+    conn.execute("UPDATE jobs SET title = 'Rust Compiler Engineer' WHERE id = 1")
+    assert conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Kubernetes"',)
+    ).fetchall() == []
+    assert len(conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Rust"',)
+    ).fetchall()) == 1
+
+    conn.execute("DELETE FROM jobs WHERE id = 1")
+    assert conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Rust"',)
+    ).fetchall() == []
+
+
+def test_jobs_fts_backfills_existing_rows(conn):
+    init_db(conn)
+    # Simulate a pre-FTS database: drop the FTS artifacts, insert a job with the
+    # triggers gone, then re-run the migration.
+    conn.executescript(
+        "DROP TRIGGER jobs_fts_ai; DROP TRIGGER jobs_fts_ad; DROP TRIGGER jobs_fts_au; "
+        "DROP TABLE jobs_fts;"
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, company, raw_text) "
+        "VALUES (1, 'http://job/1', 'Backfilled Staff Role', 'Acme', 'r')"
+    )
+    _migrate_add_jobs_fts(conn)
+    hit = conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Backfilled"',)
+    ).fetchall()
+    assert len(hit) == 1
 
 
 def test_status_changed_at_column_present_and_idempotent():

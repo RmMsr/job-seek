@@ -75,11 +75,11 @@ def test_job_list_filter_bar_shows_counts(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert '<span id="count-new">1</span>' in resp.text
-    assert '<span id="count-accepted">0</span>' in resp.text
-    assert '<span id="count-rejected">0</span>' in resp.text
-    assert '<span id="count-trash">0</span>' in resp.text
-    assert '<span id="count-lead">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-new">1</span>' in resp.text
+    assert '<span class="tab-count" id="count-accepted">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-rejected">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-trash">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-lead">0</span>' in resp.text
 
 
 def test_job_list_nav_tabs_have_explanatory_tooltips(client, conn):
@@ -161,7 +161,9 @@ def test_job_list_falls_back_to_summary_when_no_headline(client, conn):
 def test_job_list_row_and_expand_both_show_company(client, conn):
     sid, jid, scenario_id = _seed(conn)  # _seed sets company="Acme"
     resp = client.get("/jobs")
-    assert '<span class="job-company">Acme</span>' in resp.text
+    # the row shows the org as the clickable tag-org in the tag list (the
+    # redundant after-title .job-company span was dropped)
+    assert '<a class="tag tag-org"' in resp.text and ">Acme</a>" in resp.text
     resp2 = client.get(f"/jobs/{jid}/expand")
     assert "Acme" in resp2.text
 
@@ -493,7 +495,7 @@ def test_job_delete_response_includes_updated_trash_count(client, conn):
     q.update_job_feedback(conn, jid, "trash", None)
     resp = client.delete(f"/jobs/{jid}")
     assert resp.status_code == 200
-    assert '<span id="count-trash" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-trash" hx-swap-oob="true">0</span>' in resp.text
 
 
 def test_job_delete_rejects_non_trash_job(client, conn):
@@ -641,7 +643,7 @@ def test_job_reset_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
@@ -654,7 +656,7 @@ def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_reset_task_execution_with_filter_forwards_it_into_rendered_row(conn):
@@ -814,7 +816,7 @@ def test_bulk_reset_task_execution_produces_chunk_per_job_plus_counts(conn):
     assert len(chunks) == 3  # 2 job rows + counts
     assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
     assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
-    assert '<span id="count-new" hx-swap-oob="true">' in chunks[2]
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
 def test_bulk_reset_task_execution_with_filter_shows_moved_marker_per_job(conn):
@@ -885,7 +887,7 @@ def test_bulk_reevaluate_task_execution_produces_chunk_per_job_plus_counts(conn)
     assert len(chunks) == 3  # 2 job rows + counts
     assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
     assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
-    assert '<span id="count-new" hx-swap-oob="true">' in chunks[2]
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
 def test_bulk_reevaluate_task_execution_preserves_status(conn):
@@ -991,7 +993,7 @@ def test_job_reevaluate_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):
@@ -1396,7 +1398,7 @@ def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
     resp = client.get("/jobs?status=lead")
     assert "Accepted Lead" not in resp.text
     assert "Rejected Lead" not in resp.text
-    assert '<span id="count-lead">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-lead">0</span>' in resp.text
 
 
 def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
@@ -1424,21 +1426,23 @@ def test_job_list_shows_status_badge_for_accepted_rejected_trash(client, conn):
     q.update_job_feedback(conn, jid_trash, "trash", "")
 
     resp = client.get("/jobs?status=accepted")
-    assert '<span class="score-badge score-high">Accepted</span>' in resp.text
+    assert '<span class="status-pill status-pill-accepted">Accepted</span>' in resp.text
 
     resp = client.get("/jobs?status=rejected")
-    assert '<span class="score-badge score-low">Rejected</span>' in resp.text
+    assert '<span class="status-pill status-pill-rejected">Rejected</span>' in resp.text
 
     resp = client.get("/jobs?status=trash")
-    assert '<span class="score-badge score-neutral">Trash</span>' in resp.text
+    assert '<span class="status-pill status-pill-trash">Trash</span>' in resp.text
 
 
 def test_job_list_new_tab_shows_no_status_badge(client, conn):
     _seed(conn)
     resp = client.get("/jobs")
-    assert "score-badge score-high\">Accepted" not in resp.text
-    assert "score-badge score-low\">Rejected" not in resp.text
-    assert "score-badge score-neutral\">Trash" not in resp.text
+    # the New tab's rows carry the "New" pill, not an accepted/rejected/trash one
+    assert '<span class="status-pill status-pill-new">' in resp.text
+    assert '<span class="status-pill status-pill-accepted">' not in resp.text
+    assert '<span class="status-pill status-pill-rejected">' not in resp.text
+    assert '<span class="status-pill status-pill-trash">' not in resp.text
 
 
 def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
@@ -1451,7 +1455,7 @@ def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
 
     resp = client.get("/jobs")
 
-    assert '<span id="count-not_relevant">1</span>' in resp.text
+    assert '<span class="tab-count" id="count-not_relevant">1</span>' in resp.text
     assert 'href="/jobs?status=not_relevant"' in resp.text
     assert "Show filtered" not in resp.text
     assert 'name="show_filtered_filter"' not in resp.text
@@ -1461,9 +1465,9 @@ def test_job_feedback_updates_counts_oob(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
     assert resp.status_code == 200
-    assert '<span id="count-new" hx-swap-oob="true">0</span>' in resp.text
-    assert '<span id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
-    assert '<span id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span class="tab-count" id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
 
 
 def test_job_detail_returns_200_with_job_content(client, conn):
@@ -1564,7 +1568,7 @@ def test_job_accept_from_new_tab_shows_stale_short_row(client, conn):
     assert "Moved to Accepted" in resp.text
     assert f'href="/jobs?status=accepted#job-{jid}"' in resp.text
     # Nav counts still update alongside the stale row.
-    assert '<span id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span class="tab-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
 
 
 def test_job_reject_from_not_relevant_tab_shows_stale_short_row(client, conn):
@@ -2169,8 +2173,8 @@ def test_job_list_source_id_keeps_status_tabs_visible(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     resp = client.get(f"/jobs?source_id={sid}")
     assert resp.status_code == 200
-    assert "New Jobs (" in resp.text
-    assert "Accepted (" in resp.text
+    assert 'New Jobs<span class="tab-count"' in resp.text
+    assert 'Accepted<span class="tab-count"' in resp.text
     # the source select reflects the active narrowing
     assert f'<option value="{sid}" selected' in resp.text
 
@@ -2240,7 +2244,7 @@ def test_scenario_filter_composes_with_accepted_tab(client, conn):
     resp = client.get(f"/jobs?status=accepted&scenario={a}")
     assert "Matches Alpha" in resp.text
     assert "No Match" not in resp.text
-    assert '<span id="count-accepted">1</span>' in resp.text
+    assert '<span class="tab-count" id="count-accepted">1</span>' in resp.text
 
 
 def test_scenario_none_filter(client, conn):
@@ -2266,7 +2270,7 @@ def test_source_filter_via_query_keeps_tabs(client, conn):
     resp = client.get(f"/jobs?source_id={sid}")
     assert "From S" in resp.text
     assert "From O" not in resp.text
-    assert "New Jobs (" in resp.text and "Accepted (" in resp.text
+    assert 'New Jobs<span class="tab-count"' in resp.text and 'Accepted<span class="tab-count"' in resp.text
 
 
 def test_org_filter_via_query(client, conn):
@@ -2392,3 +2396,208 @@ def test_feedback_that_keeps_job_has_no_reswap(client, conn):
     conn.commit()
     r = client.post(f"/jobs/{jid}/feedback?status=accepted", data={"status": "accepted", "note": "still yes"})
     assert "HX-Reswap" not in r.headers
+
+
+def _seed_searchable(conn, sid, url, title, *, company="", status="new"):
+    jid = q.insert_job(conn, source_id=sid, url=url, title=title, company=company, raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting",
+                          title=title, summary="")
+    q.mark_job_evaluation_complete(conn, jid)
+    if status != "new":
+        q.update_job_feedback(conn, jid, status, "note")
+    return jid
+
+
+def test_search_returns_matches_across_statuses(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer", company="Acme")
+    _seed_searchable(conn, sid, "http://s/2", "Rust Developer", company="Beta", status="rejected")
+    html = client.get("/jobs?q=rust").text
+    assert "Rust Engineer" in html
+    assert "Rust Developer" in html
+    assert 'class="filter-links' in html                # status tabs stay visible during search
+    assert 'name="order"' not in html                   # sort control hidden
+
+
+def test_search_blank_query_is_normal_tabbed_view(client, conn):
+    _seed(conn)
+    html = client.get("/jobs?q=").text
+    assert 'class="filter-links"' in html
+    assert 'name="order"' in html
+
+
+def test_search_respects_source_filter(client, conn):
+    s1 = q.insert_source(conn, "s1", "https://s1", "generic_listing")
+    s2 = q.insert_source(conn, "s2", "https://s2", "generic_listing")
+    _seed_searchable(conn, s1, "http://s1/1", "Rust Engineer")
+    _seed_searchable(conn, s2, "http://s2/1", "Rust Analyst")
+    html = client.get(f"/jobs?q=rust&source_id={s1}").text
+    assert "Rust Engineer" in html
+    assert "Rust Analyst" not in html
+
+
+def test_search_box_present_in_normal_view(client, conn):
+    _seed(conn)
+    html = client.get("/jobs").text
+    assert 'name="q"' in html
+
+
+def test_search_rows_show_status_pill(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    new_job = q.insert_job(conn, source_id=sid, url="http://s/1", title="Go Engineer",
+                           company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, new_job, simplified_content="c", content_type="job_posting",
+                          title="Go Engineer", summary="")
+    scn = q.insert_scenario(conn, "Backend", "")
+    q.upsert_job_score(conn, new_job, scn, 0.95, "m", "h")
+    q.mark_job_evaluation_complete(conn, new_job)
+
+    _seed_searchable(conn, sid, "http://s/2", "Go Developer", company="Beta", status="accepted")
+
+    html = client.get("/jobs?q=go").text
+    assert ">New</span>" in html
+    assert ">Accepted</span>" in html
+
+
+def test_search_rows_have_no_bulk_checkbox(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Go Engineer")
+    html = client.get("/jobs?q=go").text
+    # base.html's stylesheet/scripts reference input[name="job_ids"], so assert
+    # on the per-row checkbox's own class instead of the bare name= attribute.
+    assert 'class="job-select"' not in html
+
+
+def test_job_list_multi_status_shows_union(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    new_j = q.insert_job(conn, source_id=sid, url="http://s/1", title="Alpha Role", company="A", raw_text="r")
+    q.update_job_pipeline(conn, new_j, simplified_content="c", content_type="job_posting", title="Alpha Role", summary="")
+    scn = q.insert_scenario(conn, "S", "")
+    q.upsert_job_score(conn, new_j, scn, 0.95, "m", "h")
+    q.mark_job_evaluation_complete(conn, new_j)
+    acc_j = q.insert_job(conn, source_id=sid, url="http://s/2", title="Beta Role", company="B", raw_text="r")
+    q.update_job_pipeline(conn, acc_j, simplified_content="c", content_type="job_posting", title="Beta Role", summary="")
+    q.mark_job_evaluation_complete(conn, acc_j)
+    q.update_job_feedback(conn, acc_j, "accepted", "y")
+
+    only_new = client.get("/jobs?status=new").text
+    assert "Alpha Role" in only_new and "Beta Role" not in only_new
+
+    both = client.get("/jobs?status=new,accepted").text
+    assert "Alpha Role" in both and "Beta Role" in both
+
+
+def test_search_seeds_the_real_buckets(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    live = q.insert_job(conn, source_id=sid, url="http://s/1", title="Rust Engineer", company="A", raw_text="r")
+    q.update_job_pipeline(conn, live, simplified_content="c", content_type="job_posting", title="Rust Engineer", summary="")
+    q.mark_job_evaluation_complete(conn, live)
+    tr = q.insert_job(conn, source_id=sid, url="http://s/2", title="Rust Engineer Two", company="B", raw_text="r")
+    q.update_job_pipeline(conn, tr, simplified_content="c", content_type="job_posting", title="Rust Engineer Two", summary="")
+    q.mark_job_evaluation_complete(conn, tr)
+    q.update_job_feedback(conn, tr, "trash", "spam")
+
+    seeded = client.get("/jobs?q=rust&status=new").text
+    assert "Rust Engineer" in seeded
+    assert "Rust Engineer Two" not in seeded          # trash excluded from the seed
+
+    with_trash = client.get("/jobs?q=rust&status=new,lead,accepted,rejected,trash").text
+    assert "Rust Engineer Two" in with_trash
+
+
+def test_every_row_shows_a_status_pill_in_normal_view(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    j = q.insert_job(conn, source_id=sid, url="http://s/1", title="Alpha Role", company="A", raw_text="r")
+    q.update_job_pipeline(conn, j, simplified_content="c", content_type="job_posting", title="Alpha Role", summary="")
+    scn = q.insert_scenario(conn, "S", "")
+    q.upsert_job_score(conn, j, scn, 0.95, "m", "h")
+    q.mark_job_evaluation_complete(conn, j)
+    html = client.get("/jobs?status=new").text
+    assert "status-pill status-pill-new" in html
+
+
+def test_accepted_row_pill_in_accepted_tab(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    j = q.insert_job(conn, source_id=sid, url="http://s/1", title="Beta Role", company="B", raw_text="r")
+    q.update_job_pipeline(conn, j, simplified_content="c", content_type="job_posting", title="Beta Role", summary="")
+    q.mark_job_evaluation_complete(conn, j)
+    q.update_job_feedback(conn, j, "accepted", "y")
+    html = client.get("/jobs?status=accepted").text
+    assert "status-pill status-pill-accepted" in html
+
+
+def test_no_after_title_badge(client, conn):
+    _seed_searchable(conn, q.insert_source(conn, "s", "https://s", "generic_listing"), "http://s/1", "Gamma Engineer")
+    html = client.get("/jobs?q=gamma").text
+    # the pill lives in the tag list <dl>, not loose in the <h3> header row
+    assert 'class="job-row-header"' in html
+    header = html.split('class="job-row-header"', 1)[1].split("</div>", 1)[0]
+    assert "status-pill" not in header
+
+
+def test_tab_checkbox_link_toggles_one_status(client, conn):
+    _seed(conn)
+    html = client.get("/jobs?status=new").text
+    # every tab renders its marker, even in single-status mode (no hover reveal)
+    assert html.count('class="tab-check"') == 6
+    # an "add Accepted to the view" control pointing at status=new,accepted
+    assert "status=new%2Caccepted" in html or "status=new,accepted" in html
+
+
+def test_search_view_keeps_tab_bar(client, conn):
+    _seed_searchable(conn, q.insert_source(conn, "s", "https://s", "generic_listing"), "http://s/1", "Delta Engineer")
+    html = client.get("/jobs?q=delta").text
+    # tabs stay visible during search, and render with checkboxes (is-multi)
+    # so the seeded scope is visible and toggleable
+    assert 'class="filter-links is-multi"' in html
+    assert 'name="order"' not in html                # sort still hidden while searching
+
+
+def test_search_tab_bar_shows_seeded_scope(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer")
+    html = client.get("/jobs?q=kappa").text
+    # the seeded buckets (new/lead/accepted/rejected) render active
+    assert html.count('class="tab-item active"') == 4
+    # a checkbox toggle to add Trash carries the whole seeded scope + the query
+    assert ("status=new%2Clead%2Caccepted%2Crejected%2Ctrash" in html
+            or "status=new,lead,accepted,rejected,trash" in html)
+    assert "q=kappa" in html
+
+
+def test_status_marker_carries_full_set(client, conn):
+    _seed(conn)
+    html = client.get("/jobs?status=new,accepted").text
+    assert '<input type="hidden" id="jobs-status-marker" name="status" value="new,accepted"' in html
+
+
+def test_clear_all_filters_shows_during_plain_search(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer")
+    html = client.get("/jobs?q=rust").text
+    assert "Clear all filters" in html          # is_narrowed is true when only q is set
+
+
+def test_clear_all_filters_href_drops_query(client, conn):
+    from urllib.parse import urlencode
+    from app.job_filter import JobFilter
+
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer", company="Acme")
+    html = client.get("/jobs?q=rust&status=new,accepted&org=Acme").text
+
+    f = JobFilter.from_params({"q": "rust", "status": "new,accepted", "org": "Acme"})
+    expected = "/jobs?" + urlencode(f.cleared().query_params())
+    assert expected == "/jobs?status=new%2Caccepted"       # keeps statuses, drops q + org
+    assert f'href="{expected}"' in html
+
+
+def test_clear_all_filters_is_plain_navigation(client, conn):
+    # The search <input> lives outside #jobs-content, so "Clear all filters"
+    # must be a full-page load (no hx-*) to re-render it empty.
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer", company="Acme")
+    html = client.get("/jobs?q=rust&org=Acme").text
+    anchor = html.split(">Clear all filters<")[0].rsplit("<a ", 1)[1]
+    assert "hx-get" not in anchor and "hx-target" not in anchor and "hx-push-url" not in anchor
+    assert 'href="/jobs?status=new"' in anchor

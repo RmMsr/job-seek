@@ -10,20 +10,25 @@ VALID_ORDERS = ("change", "score", "age")
 
 @dataclass(frozen=True)
 class JobFilter:
-    status_tab: str = "new"
+    statuses: tuple[str, ...] = ("new",)
     scenario_id: int | None = None
     scenario_none: bool = False
     source_id: int | None = None
     org: str | None = None
     org_none: bool = False
     order: str = "change"
+    q: str = ""
 
     @classmethod
     def from_params(cls, params: Mapping[str, str]) -> "JobFilter":
         get = params.get
-        tab = get("status") or "new"
-        if tab not in VALID_TABS:
-            tab = "new"
+        raw_status = get("status") or ""
+        picked: list[str] = []
+        for part in raw_status.split(","):
+            part = part.strip()
+            if part in VALID_TABS and part not in picked:
+                picked.append(part)
+        statuses = tuple(picked) or ("new",)
 
         raw_scenario = (get("scenario") or get("scenario_id") or "").strip()
         scenario_id: int | None = None
@@ -44,20 +49,27 @@ class JobFilter:
         if order not in VALID_ORDERS:
             order = "change"
 
-        return cls(tab, scenario_id, scenario_none, source_id, org, org_none, order)
+        query = (get("q") or "").strip()
+
+        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order, query)
 
     @property
     def is_narrowed(self) -> bool:
         return bool(
-            self.scenario_id is not None
+            self.q
+            or self.scenario_id is not None
             or self.scenario_none
             or self.source_id is not None
             or self.org is not None
             or self.org_none
         )
 
+    @property
+    def searching(self) -> bool:
+        return bool(self.q)
+
     def query_params(self) -> dict[str, str]:
-        out = {"status": self.status_tab}
+        out = {"status": ",".join(self.statuses)}
         if self.scenario_none:
             out["scenario"] = "none"
         elif self.scenario_id is not None:
@@ -70,6 +82,8 @@ class JobFilter:
             out["org"] = self.org
         if self.order != "change":
             out["order"] = self.order
+        if self.q:
+            out["q"] = self.q
         return out
 
     def query_suffix(self, *, detail: bool = False) -> str:
@@ -78,10 +92,29 @@ class JobFilter:
         return "?" + urlencode(self.query_params())
 
     def cleared(self) -> "JobFilter":
-        return JobFilter(status_tab=self.status_tab, order=self.order)
+        """Drop the query and every scenario/source/org narrowing; keep statuses + order."""
+        return JobFilter(statuses=self.statuses, order=self.order)
+
+    @property
+    def status_tab(self) -> str:
+        return self.statuses[0]
+
+    @property
+    def is_multi(self) -> bool:
+        return len(self.statuses) > 1
 
     def for_status(self, tab: str) -> "JobFilter":
-        return replace(self, status_tab=tab)
+        return replace(self, statuses=(tab,))
+
+    def with_statuses(self, statuses) -> "JobFilter":
+        picked = tuple(s for s in VALID_TABS if s in set(statuses)) or ("new",)
+        return replace(self, statuses=picked)
+
+    def with_status_toggled(self, tab: str) -> "JobFilter":
+        if tab in self.statuses:
+            remaining = tuple(s for s in self.statuses if s != tab)
+            return replace(self, statuses=remaining or self.statuses)
+        return replace(self, statuses=tuple(s for s in VALID_TABS if s in self.statuses or s == tab))
 
     def with_scenario_id(self, sid) -> "JobFilter":
         return replace(self, scenario_id=int(sid), scenario_none=False)

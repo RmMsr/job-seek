@@ -50,6 +50,13 @@
 
       --font-serif: "Crimson Text", Georgia, serif;
       --font-sans: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.25rem;
+      --space-6: 1.5rem;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -212,7 +219,6 @@
     .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 2.4rem; line-height: 1.3; }
     .job-row-content:has(.job-select-wrap) .job-row-header { padding-right: 4.2rem; }
     .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; line-height: 1.3; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
-    .job-company { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
     .job-age { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
     .job-link-icon { position: absolute; top: 0.3rem; right: 0.5rem; z-index: 3;
       display: inline-flex; align-items: center; height: 1.6rem;
@@ -339,16 +345,135 @@
     textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
     .reset-progress { grid-column: 1 / -1; display: block; width: 100%; color: var(--text-muted); font-size: 0.85em; }
     .reset-progress:empty { display: none; }
-    .filter-bar { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
-    .filter-bar a { margin-right: 0.5rem; color: var(--text-secondary); text-decoration: none; }
-    .filter-bar a:hover { color: var(--accent); }
-    .filter-bar a.active { font-weight: 600; color: var(--text-primary); text-decoration: underline; text-decoration-color: var(--accent); }
-    .select-all { display: flex; align-items: center; gap: 0.4rem; color: var(--text-secondary); white-space: nowrap; }
-    .select-all input { width: 1.15rem; height: 1.15rem; margin: 0; cursor: pointer; }
-    .filter-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem; }
-    .filter-row label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.85em; color: var(--text-secondary); }
-    .filter-row select { font-family: var(--font-sans); font-size: 0.9em; padding: 2px 4px; }
-    .filter-clear { font-size: 0.85em; }
+    /* ---- Page head: heading + Add toolbar on one baseline row ------------- */
+    /* Left-aligned (never space-between). The closed .add-panel hugs the
+       title; opening it makes the panel claim its own full-width row so the
+       expand body has room. Shared by Jobs / Scenarios / Sources. */
+    .page-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.9rem;
+      margin: 0 0 0.85rem; }
+    .page-head h1 { margin: 0; }
+    .page-head .add-panel { margin: 0; }
+    .page-head .add-panel.add-panel-open { flex: 1 1 100%; }
+
+    /* ---- Jobs page toolbar ------------------------------------------------ */
+    /* Every band above the first job row — heading, Add, search, selects,
+       tab strip — is separated by roughly one text line so nothing reads as
+       a heavy panel. */
+
+    /* Search + filter selects are a light filter zone, NOT a raised card:
+       the search field carries a faint tint + a single hairline under it,
+       the selects row sits flush below with no border of its own. The empty
+       #jobs-add-result between them stays at zero height. */
+    .jobs-search {
+      margin: 0; padding: 0.3rem 0.5rem;
+      background: var(--ground);
+      border: none; border-bottom: 1px solid var(--border);
+      border-radius: 6px 6px 0 0;
+    }
+    .jobs-search:focus-within { border-bottom-color: var(--accent); }
+    .jobs-search input[type="search"] {
+      display: block; width: 100%; max-width: none;
+      border: none; background-color: transparent;
+      padding: 0.2rem 0.2rem 0.2rem 1.7rem;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b8680' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: left center; background-size: 0.95rem;
+    }
+    .jobs-search input[type="search"]:focus { outline: none; border: none; }
+
+    /* The three filter selects grow to fill the width (no dead gutter next to
+       a wrapped control); Sort + Select-all keep their natural size and sit
+       on their own right-aligned line below. */
+    .filter-row {
+      margin: 0 0 0.4rem;
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 1rem;
+      padding: 0.4rem 0.5rem;
+      background: var(--ground);
+      border: none;
+      border-radius: 0 0 6px 6px;
+    }
+    .filter-selects { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.35rem 0.9rem; min-width: 0; }
+    .filter-selects label { flex: 1 1 9rem; min-width: 0; }
+    .filter-row label { display: inline-flex; align-items: center; gap: var(--space-2);
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--text-muted); }
+    .filter-row select { font-family: var(--font-sans); font-size: 0.88rem; padding: 3px 6px;
+      color: var(--text-primary); flex: 1 1 auto; min-width: 0; }
+    .filter-selects .filter-clear { flex: 0 0 auto; margin-left: 0.2rem; }
+
+    .filter-tools { flex: 0 0 auto; margin-left: auto; display: flex; align-items: center;
+      gap: var(--space-4); }
+    .filter-tools label { flex: 0 0 auto; }
+    .filter-tools select { flex: 0 0 auto; }
+
+    /* Status tab strip — sits directly above the job list, one hairline under it.
+       Each tab is [marker][label]: the marker toggles that bucket in/out of the
+       view, the label switches to that bucket exclusively. Both are always
+       visible and independently tappable — no hover-only affordances (the
+       marker reveal used to be hover-gated, which was dead on touch). */
+    .filter-bar { margin: 0 0 0.35rem; display: flex; align-items: flex-end;
+      flex-wrap: wrap; gap: 0.5rem var(--space-4); border-bottom: 1px solid var(--border); }
+    .filter-links { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.9rem var(--space-4); }   /* row-gap clears the markers' tall tap targets when wrapped */
+
+    .tab-item { position: relative; display: inline-flex; align-items: center; gap: 0.4rem;
+      white-space: nowrap; border-bottom: 2px solid transparent; border-radius: 4px; }
+    .tab-item.active { border-bottom-color: var(--accent); }
+    .tab-item.tab-item-pulse { animation: tab-pulse 0.16s ease; }
+    @keyframes tab-pulse { 50% { box-shadow: 0 0 0 4px var(--accent-tint); } }
+
+    .tab-label { display: inline-flex; align-items: baseline; padding: 0.45rem 0.15rem;
+      color: var(--text-secondary); text-decoration: none; font-weight: 500;
+      transition: color 0.12s; -webkit-tap-highlight-color: transparent; }
+    .tab-label:hover { color: var(--accent); }
+    .tab-item.active .tab-label { color: var(--text-primary); font-weight: 600; }
+    .tab-count { margin-left: 0.3rem; font-size: 0.88em; font-weight: 500;
+      color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .tab-item.active .tab-count { color: var(--accent); }
+
+    /* Toggle marker — always visible, no hover reveal. The chip itself stays a
+       compact ~1.5rem square (outlined faint "+" = bucket not in view, filled
+       accent "✓" = in view); an invisible ::after gives it a ~2.75rem tap
+       target that extends left + vertically, not rightward into the label, so
+       marker and label stay independently tappable. Colour-only transition —
+       state changes never shift layout. */
+    .tab-check {
+      position: relative; flex: none;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.4rem; height: 1.4rem; box-sizing: border-box;
+      font-size: 0.75rem; font-weight: 700; line-height: 1;
+      border: 1.5px solid currentColor; border-radius: 4px;
+      color: var(--text-muted); text-decoration: none; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .tab-check::after {
+      content: ""; position: absolute; top: 50%; right: -0.3rem;
+      width: 2.75rem; height: 2.75rem; transform: translateY(-50%);
+    }
+    .tab-check:hover { color: var(--accent); }
+    .tab-item.active .tab-check { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .tab-item.active .tab-check:hover { background: var(--accent-light); border-color: var(--accent-light); }
+
+    .filter-clear { font-size: 0.8rem; color: var(--text-secondary); text-decoration: none;
+      white-space: nowrap; }
+    .filter-clear:hover { color: var(--accent); }
+    .select-all { white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center;
+      gap: var(--space-2); font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--text-muted); }
+    .select-all input { width: 1rem; height: 1rem; margin: 0; cursor: pointer; accent-color: var(--accent); }
+
+    /* Per-row status pill in search results — deliberately distinct from the
+       numeric score badge: smaller, uppercase, one hue per status. */
+    .status-pill { display: inline-block; padding: 1px 7px; border-radius: 4px;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+      line-height: 1.5; white-space: nowrap; }
+    .status-pill-new { background: var(--accent-tint); color: var(--accent); }
+    .status-pill-accepted { background: var(--success-tint); color: var(--success-strong); }
+    .status-pill-rejected { background: var(--alert-tint); color: var(--alert); }
+    .status-pill-lead { background: var(--warning-tint); color: var(--warning); }
+    .status-pill-trash { background: var(--score-neutral-tint); color: var(--text-muted); }
+    .status-pill-plain { background: var(--score-neutral-tint); color: var(--text-secondary); }
     body:has(input[name="job_ids"]:checked) { padding-bottom: calc(var(--status-bar-h, 0px) + var(--bulk-bar-h, 9rem) + 4rem); }
     .bulk-bar { display: none; position: fixed; bottom: var(--status-bar-h, 0px); left: 50%; transform: translateX(-50%);
       width: 100%; max-width: 880px; box-sizing: border-box; z-index: 10;
@@ -516,7 +641,7 @@
       .job-row-content:has(.job-select-wrap) .job-link-icon,
       .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: auto; }
       .job-row-header, .job-detail-title-row { display: block; padding-right: 0; }
-      .job-row-header .job-company, .job-row-header .job-age { margin-right: 0.6rem; }
+      .job-row-header .job-age { margin-right: 0.6rem; }
     }
   </style>
 </head>
@@ -1143,6 +1268,64 @@ document.body.addEventListener('click', function (e) {
   var form = panel.querySelector('form');
   if (form) form.reset();
 });
+  </script>
+  <script>
+(function () {
+  // Touch/pen only: long-press a status tab = toggle that bucket in/out of the
+  // view (same effect as tapping the tab's marker). Extra path for small
+  // screens; the always-visible +/✓ markers keep it discoverable. Mouse users
+  // just click the marker. A short tap is unchanged: label = exclusive nav,
+  // marker = toggle. The move-threshold guard keeps scrolling / quick taps clear.
+  var LONG_PRESS_MS = 500;
+  var MOVE_CANCEL_PX = 10;
+  var timer = null, startX = 0, startY = 0, activeItem = null, fired = false;
+
+  function cancel() {
+    // Only clear `fired` when a pending press is aborted before it fires — a
+    // press that already fired is waiting for its one trailing click to be
+    // swallowed (see the capture-phase 'click' listener below).
+    if (timer) { clearTimeout(timer); timer = null; fired = false; }
+    activeItem = null;
+  }
+
+  document.body.addEventListener('pointerdown', function (e) {
+    fired = false;  // every fresh interaction starts clean (a prior fire whose
+                    // trailing click never arrived must not swallow this tap)
+    if (e.pointerType === 'mouse') return;  // touch/pen only — mouse users tap the marker
+    var item = e.target.closest('.tab-item');
+    if (!item || !item.querySelector('.tab-check')) return;
+    if (e.target.closest('.tab-check')) return;  // tapping the marker already toggles
+    activeItem = item;
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(function () {
+      timer = null;
+      var check = activeItem && activeItem.querySelector('.tab-check');
+      if (!check) return;
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch (err) {} }
+      var pulsed = activeItem;
+      pulsed.classList.add('tab-item-pulse');
+      setTimeout(function () { pulsed.classList.remove('tab-item-pulse'); }, 170);
+      check.click();   // synthetic click — htmx does the swap (fired still false, so
+      fired = true;    // the suppressor ignores it); now swallow the REAL release click
+    }, LONG_PRESS_MS);
+  });
+
+  document.body.addEventListener('pointermove', function (e) {
+    if (!timer) return;
+    if (Math.abs(e.clientX - startX) > MOVE_CANCEL_PX ||
+        Math.abs(e.clientY - startY) > MOVE_CANCEL_PX) cancel();
+  });
+  document.body.addEventListener('pointerup', cancel);
+  document.body.addEventListener('pointercancel', cancel);
+
+  // Swallow the click that fires on release after a long-press fired, so the
+  // label's exclusive-nav doesn't run on top of the toggle.
+  document.body.addEventListener('click', function (e) {
+    if (!fired) return;
+    fired = false;
+    if (e.target.closest('.tab-item')) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+})();
   </script>
   <script>
     (function () {

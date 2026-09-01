@@ -6,7 +6,7 @@
   hx-trigger="click, keyup[key=='Enter']">
   <div class="job-row-score">{% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}</div>
   <div class="job-row-content">
-    {% if not is_detail_page %}
+    {% if not is_detail_page and not (filter and filter.searching) %}
     <label class="job-select-wrap">
       <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
         id="job-select-{{ job.id }}" hx-preserve="true"
@@ -15,7 +15,6 @@
     {% endif %}
     <div class="job-row-header">
       <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
-      {% if job.company %}<span class="job-company">{{ job.company }}</span>{% endif %}
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
     </div>
     <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink

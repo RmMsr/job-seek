@@ -64,3 +64,8 @@ This is the default; skip steps only when the user explicitly asks for something
 This is a personal app running on only one or a very few instances, all kept up to date with development. Backwards compatibility and uninterrupted operation are **not** priorities.
 
 Prefer a simple hard-downtime migration (drop/rebuild, accept a brief outage, edit the row data directly) over conditional upgrade paths, dual-schema compatibility shims, or migration chains that branch on "which old shape is this DB in." If a schema change needs data carried forward, write the one migration that assumes the current known shape — don't build in defensive handling for hypothetical older shapes that don't exist in practice.
+
+The `jobs_fts` FTS5 index is kept in sync by triggers on the `jobs` table. Any
+migration that rebuilds `jobs` (drop/recreate) drops those triggers with it —
+follow such a migration with `INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')`
+and recreate the triggers (see `_migrate_add_jobs_fts`).

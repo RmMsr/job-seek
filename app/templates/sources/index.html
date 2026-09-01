@@ -2,11 +2,13 @@
 {% block title %}Sources — Job Seek{% endblock %}
 {% block content %}
 {% include "setup/_subnav.html" %}
-<h1>Sources</h1>
 {% from "_add_panel.html" import add_panel %}
+<div class="page-head">
+<h1>Sources</h1>
 {% call add_panel("Add") %}
 {% include "sources/_add_form.html" %}
 {% endcall %}
+</div>
 <div id="sources-add-result" data-add-result></div>
 {% include "sources/_table.html" %}
 {% endblock %}

@@ -7,75 +7,94 @@
   ("not_relevant", "Not relevant", "count-not_relevant", counts.not_relevant, "Real job postings that didn't pass any scenario's relevance gate — not a match for your current scenarios."),
   ("trash", "Trash", "count-trash", counts.trash, "Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily."),
 ] %}
-<input type="hidden" name="status_filter" value="{{ filter.status_tab }}" form="bulk-form">
+<input type="hidden" id="jobs-status-marker" name="status" value="{{ filter.statuses | join(',') }}">
+<input type="hidden" name="status_filter" value="{{ filter.statuses | join(',') }}" form="bulk-form">
 <input type="hidden" name="scenario_filter" value="{{ filter.query_params().get('scenario', '') }}" form="bulk-form">
 <input type="hidden" name="source_id_filter" value="{{ filter.source_id or '' }}" form="bulk-form">
 <input type="hidden" name="org_filter" value="{% if filter.org_none %}none{% else %}{{ filter.org or '' }}{% endif %}" form="bulk-form">
 <input type="hidden" name="order_filter" value="{{ filter.order }}" form="bulk-form">
-<div class="filter-bar">
-  <div class="filter-links">
-    {% for tab, label, count_id, count, tip in tab_defs %}
-    {% set target = filter.for_status(tab).query_params() | urlencode %}
-    <a href="/jobs?{{ target }}"
-       hx-get="/jobs?{{ target }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
-       {% if status == tab %}class="active"{% endif %}
-       title="{{ tip | safe }}">{{ label }} (<span id="{{ count_id }}">{{ count }}</span>)</a>
-    {% endfor %}
+{% set scope_tabs = active_tabs if active_tabs is defined else filter.statuses %}
+<div class="filter-row">
+  <div class="filter-selects">
+    <label>Scenario
+      <select name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+              hx-include="[name='source_id'],[name='org'],[name='order'],[name='q']">
+        <option value="">(All)</option>
+        <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
+        {% for s in scenarios %}
+          <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Source
+      <select name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+              hx-include="[name='scenario'],[name='org'],[name='order'],[name='q']">
+        <option value="">(All)</option>
+        {% for s in sources %}
+          <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Organization
+      <select name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+              hx-include="[name='scenario'],[name='source_id'],[name='order'],[name='q']">
+        <option value="">(All)</option>
+        <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
+        {% for c in companies %}
+          <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if filter.is_narrowed %}
+    {# Plain full-page navigation on purpose: the search <input> lives in
+       list.html outside #jobs-content, so an hx swap would leave its typed
+       text in place. A full load re-renders it empty. #}
+    <a class="filter-clear" href="/jobs?{{ filter.cleared().query_params() | urlencode }}">Clear all filters</a>
+    {% endif %}
   </div>
-  {% if jobs %}
+  {% if not filter.searching %}
+  <div class="filter-tools">
+    <label>Sort
+      <select name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+              hx-include="[name='scenario'],[name='source_id'],[name='org']">
+        <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
+        <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
+        <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
+      </select>
+    </label>
+    {% if jobs %}
     <label class="select-all">
       <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
       Select all
     </label>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
-<div class="filter-row">
-  <label>Scenario
-    <select name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='source_id'],[name='org'],[name='order']">
-      <option value="">(All)</option>
-      <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
-      {% for s in scenarios %}
-        <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>Source
-    <select name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='scenario'],[name='org'],[name='order']">
-      <option value="">(All)</option>
-      {% for s in sources %}
-        <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>Organization
-    <select name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='scenario'],[name='source_id'],[name='order']">
-      <option value="">(All)</option>
-      <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
-      {% for c in companies %}
-        <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
-      {% endfor %}
-    </select>
-  </label>
-  <label>Sort
-    <select name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-            hx-push-url="true" hx-vals='{"status": "{{ status }}"}'
-            hx-include="[name='scenario'],[name='source_id'],[name='org']">
-      <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
-      <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
-      <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
-    </select>
-  </label>
-  {% if filter.is_narrowed %}
-    <a class="filter-clear" href="/jobs?status={{ status }}"
-       hx-get="/jobs?status={{ status }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">Clear all filters</a>
-  {% endif %}
+<div class="filter-bar">
+  {% set scope_filter = filter.with_statuses(scope_tabs) if filter.searching else filter %}
+  <div class="filter-links{% if filter.is_multi or filter.searching %} is-multi{% endif %}">
+    {% for tab, label, count_id, count, tip in tab_defs %}
+    {% set active = tab in scope_tabs %}
+    {% set toggle = scope_filter.with_status_toggled(tab).query_params() | urlencode %}
+    {% set solo = filter.for_status(tab).query_params() | urlencode %}
+    <span class="tab-item{% if active %} active{% endif %}">
+      <a class="tab-check" href="/jobs?{{ toggle }}"
+         hx-get="/jobs?{{ toggle }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+         title="{{ 'Remove from view' if active else 'Add to view' }}"
+         aria-label="{{ 'Remove' if active else 'Add' }} {{ label }}">{{ '✓' if active else '+' }}</a>
+      <a class="tab-label" href="/jobs?{{ solo }}"
+         hx-get="/jobs?{{ solo }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+         title="{{ tip | safe }}">{{ label }}<span class="tab-count" id="{{ count_id }}">{{ count }}</span></a>
+    </span>
+    {% endfor %}
+  </div>
 </div>
+{% if not filter.searching %}
 <div class="bulk-bar decision-panel">
   <button type="button" class="bulk-clear bulk-clear-x" aria-label="Clear selection" title="Clear selection">×</button>
   <label class="decision-panel-note">Note (optional):
@@ -106,12 +125,13 @@
   <div class="reset-progress" id="bulk-reevaluate-progress" aria-live="polite"></div>
   <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>
 </div>
+{% endif %}
 {% if jobs %}
   {% for job in jobs %}
     {% include "jobs/_row.html" %}
   {% endfor %}
 {% elif not stale_jobs %}
-  <p>{% if filter.is_narrowed %}No jobs match these filters.{% else %}No jobs found.{% endif %}</p>
+  <p>{% if filter.searching %}No jobs match “{{ filter.q }}”.{% elif filter.is_narrowed %}No jobs match these filters.{% else %}No jobs found.{% endif %}</p>
 {% endif %}
 {% if stale_jobs %}
   {% for job in stale_jobs %}

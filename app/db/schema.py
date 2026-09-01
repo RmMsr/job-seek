@@ -704,6 +704,47 @@ def _migrate_tasks_group_to_parent(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_add_jobs_fts(conn: sqlite3.Connection) -> None:
+    # Create-once. Placed last in init_db so it runs after any table rebuild.
+    # A future migration that rebuilds the jobs table must follow itself with
+    #   INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs_fts'"
+    ).fetchone()
+    if row is not None:
+        return
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE jobs_fts USING fts5(
+            title, company, headline, summary, simplified_content,
+            content='jobs', content_rowid='id',
+            tokenize='porter unicode61'
+        );
+
+        CREATE TRIGGER jobs_fts_ai AFTER INSERT ON jobs BEGIN
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+
+        CREATE TRIGGER jobs_fts_ad AFTER DELETE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+        END;
+
+        CREATE TRIGGER jobs_fts_au AFTER UPDATE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+
+        INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            SELECT id, title, company, headline, summary, simplified_content FROM jobs;
+        """
+    )
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -731,3 +772,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_tasks_group_and_status(conn)
     _migrate_inbox_drop_task_id(conn)
     _migrate_tasks_group_to_parent(conn)
+    _migrate_add_jobs_fts(conn)

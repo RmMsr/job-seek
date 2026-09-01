@@ -1655,3 +1655,141 @@ def test_delete_scenario_cascades(conn):
     assert q.get_scenario(conn, sc) is None
     assert conn.execute("SELECT COUNT(*) FROM criteria WHERE scenario_id=?", (sc,)).fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM job_scores WHERE scenario_id=?", (sc,)).fetchone()[0] == 0
+
+
+def _seed_job(conn, sid, url, title, *, company="", summary="", body="", headline=""):
+    jid = q.insert_job(conn, source_id=sid, url=url, title=title, company=company, raw_text="r")
+    q.update_job_pipeline(
+        conn, jid, simplified_content=body, content_type="job_posting",
+        title=title, summary=summary, headline=headline,
+    )
+    return jid
+
+
+def test_search_jobs_ranks_title_above_body(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    body_hit = _seed_job(conn, sid, "http://s/1", "Office Manager",
+                         body="we use python and rust daily")
+    title_hit = _seed_job(conn, sid, "http://s/2", "Python Engineer", body="unrelated")
+    results = q.search_jobs(conn, "python")
+    assert [r["id"] for r in results] == [title_hit, body_hit]
+
+
+def test_search_jobs_prefix_matches_last_token(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    jid = _seed_job(conn, sid, "http://s/1", "Kubernetes Platform Lead")
+    assert [r["id"] for r in q.search_jobs(conn, "kube")] == [jid]
+
+
+def test_fts_match_query_keeps_unicode_words_whole():
+    assert q._fts_match_query("Dataplattformingeniør") == '"Dataplattformingeniør"*'
+    assert q._fts_match_query("Berlin Büro") == '"Berlin" "Büro"*'
+
+
+def test_search_jobs_finds_accented_words(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    hit = _seed_job(conn, sid, "http://s/1", "Dataplattformingeniør – Oslo")
+    _seed_job(conn, sid, "http://s/2", "Frontend Developer")
+    assert [r["id"] for r in q.search_jobs(conn, "dataplattformingeniør")] == [hit]
+    assert [r["id"] for r in q.search_jobs(conn, "Büro")] == []  # sanity: no false match
+
+
+def test_search_jobs_multi_term_is_and(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    _seed_job(conn, sid, "http://s/1", "Senior Java Developer")
+    want = _seed_job(conn, sid, "http://s/2", "Senior Python Developer")
+    assert [r["id"] for r in q.search_jobs(conn, "senior python")] == [want]
+
+
+def test_search_jobs_narrows_by_source_and_org(conn):
+    s1 = q.insert_source(conn, "s1", "http://s1", "generic_listing")
+    s2 = q.insert_source(conn, "s2", "http://s2", "generic_listing")
+    a = _seed_job(conn, s1, "http://s1/1", "Rust Engineer", company="Acme")
+    b = _seed_job(conn, s2, "http://s2/1", "Rust Engineer", company="Beta")
+    assert [r["id"] for r in q.search_jobs(conn, "rust", source_id=s1)] == [a]
+    assert [r["id"] for r in q.search_jobs(conn, "rust", org="Beta")] == [b]
+
+
+def test_search_jobs_narrows_by_scenario_gate(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    passed = _seed_job(conn, sid, "http://s/1", "Rust Engineer")
+    _seed_job(conn, sid, "http://s/2", "Rust Developer")
+    scn = q.insert_scenario(conn, "Backend", "")
+    q.upsert_job_score(conn, passed, scn, 0.95, "m", "h")
+    assert [r["id"] for r in q.search_jobs(conn, "rust", scenario_id=scn)] == [passed]
+
+
+def test_search_jobs_spans_statuses(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = _seed_job(conn, sid, "http://s/1", "Rust Engineer")
+    b = _seed_job(conn, sid, "http://s/2", "Rust Developer")
+    q.update_job_feedback(conn, b, "rejected", "no")
+    ids = {r["id"] for r in q.search_jobs(conn, "rust")}
+    assert ids == {a, b}
+
+
+def test_search_jobs_empty_query_returns_empty(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    _seed_job(conn, sid, "http://s/1", "Rust Engineer")
+    assert q.search_jobs(conn, "   ") == []
+    assert q.search_jobs(conn, "!!! ??") == []
+
+
+def _tab_job(conn, sid, url, *, title="T", status="new", content_type="job_posting",
+             scenario_id=None, score=0.9):
+    jid = q.insert_job(conn, source_id=sid, url=url, title=title, company="", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type=content_type,
+                          title=title, summary="")
+    if scenario_id is not None:
+        q.upsert_job_score(conn, jid, scenario_id, score, "m", "h")
+    q.mark_job_evaluation_complete(conn, jid)
+    if status != "new":
+        q.update_job_feedback(conn, jid, status, "n")
+    return jid
+
+
+def test_get_jobs_for_tabs_single_matches_get_jobs_accepted(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = _tab_job(conn, sid, "http://s/1", status="accepted")
+    _tab_job(conn, sid, "http://s/2", status="new")
+    assert [j["id"] for j in q.get_jobs_for_tabs(conn, ["accepted"])] == [a]
+
+
+def test_get_jobs_for_tabs_unions_buckets(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    new_job = _tab_job(conn, sid, "http://s/1", scenario_id=scn, score=0.95)  # passes gate -> New
+    acc = _tab_job(conn, sid, "http://s/2", status="accepted")
+    _tab_job(conn, sid, "http://s/3", status="rejected")
+    ids = {j["id"] for j in q.get_jobs_for_tabs(conn, ["new", "accepted"])}
+    assert ids == {new_job, acc}
+
+
+def test_get_jobs_for_tabs_splits_new_and_not_relevant_on_gate(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    passed = _tab_job(conn, sid, "http://s/1", scenario_id=scn, score=0.95)
+    failed = _tab_job(conn, sid, "http://s/2", scenario_id=scn, score=0.05)
+    assert [j["id"] for j in q.get_jobs_for_tabs(conn, ["new"])] == [passed]
+    assert [j["id"] for j in q.get_jobs_for_tabs(conn, ["not_relevant"])] == [failed]
+
+
+def test_get_jobs_for_tabs_applies_org_filter(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    a = q.insert_job(conn, source_id=sid, url="http://s/1", title="T", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, a, simplified_content="c", content_type="job_posting", title="T", summary="")
+    q.mark_job_evaluation_complete(conn, a)
+    b = q.insert_job(conn, source_id=sid, url="http://s/2", title="T", company="Beta", raw_text="r")
+    q.update_job_pipeline(conn, b, simplified_content="c", content_type="job_posting", title="T", summary="")
+    q.mark_job_evaluation_complete(conn, b)
+    assert [j["id"] for j in q.get_jobs_for_tabs(conn, ["new", "not_relevant"], org="Beta")] == [b]
+
+
+def test_search_jobs_tabs_excludes_trash_unless_asked(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    keep = _tab_job(conn, sid, "http://s/1", title="Rust Engineer")
+    trash = _tab_job(conn, sid, "http://s/2", title="Rust Engineer", status="trash")
+    got = {j["id"] for j in q.search_jobs(conn, "rust", tabs=["new", "accepted", "rejected"])}
+    assert got == {keep}
+    got2 = {j["id"] for j in q.search_jobs(conn, "rust", tabs=["new", "trash"])}
+    assert trash in got2

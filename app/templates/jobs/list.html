@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Jobs — Job Seek{% endblock %}
 {% block content %}
-<h1>Jobs</h1>
+<div class="jobs-page">
 <form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML"></form>
 {% from "_add_panel.html" import add_panel %}
+<div class="page-head">
+<h1>Jobs</h1>
 {% call add_panel("Add") %}
 <form class="add-job-by-url">
   <div style="display:flex; gap:0.5rem; align-items:center;">
@@ -19,8 +21,17 @@
   <span id="add-job-progress" class="reset-progress" aria-live="polite"></span>
 </form>
 {% endcall %}
+</div>
 <div id="jobs-add-result" data-add-result></div>
+<form class="jobs-search" role="search" onsubmit="return false">
+  <input type="search" name="q" value="{{ filter.q }}" id="job-search-input"
+         placeholder="Search jobs — title, organization, description…" aria-label="Search jobs"
+         hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+         hx-trigger="keyup changed delay:300ms, search"
+         hx-include="#jobs-status-marker, [name='scenario'], [name='source_id'], [name='org']">
+</form>
 <div id="jobs-content">
   {% include "jobs/_content.html" %}
+</div>
 </div>
 {% endblock %}
