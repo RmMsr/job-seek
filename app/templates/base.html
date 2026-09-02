@@ -214,6 +214,11 @@
 
     dl.job-tags { display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; margin:0.5rem 0 0; }
     dl.job-tags dt, dl.job-tags dd { margin:0; }
+    /* Normalize every pill/tag in the row to one height regardless of their
+       differing font sizes and vertical padding. */
+    dl.job-tags .tag, dl.job-tags .status-pill {
+      display:inline-flex; align-items:center; min-height:1.35rem;
+      padding-top:0; padding-bottom:0; line-height:1.2; box-sizing:border-box; }
 
     .job-row-content { flex: 1 1 auto; min-width: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; }
     .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 2.4rem; line-height: 1.3; }

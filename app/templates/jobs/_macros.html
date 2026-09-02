@@ -24,6 +24,8 @@
 <dl class="job-tags">
   <dt class="sr-only">Status</dt>
   <dd>{{ status_pill(job) }}</dd>
+  <dt class="sr-only">Content type</dt>
+  <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   {% if job.passed_scenario_names %}
   <dt class="sr-only">Matched scenarios</dt>
   {% set sc_ids = (job.passed_scenario_ids or '').split(',') %}
@@ -34,8 +36,6 @@
     {% else %}<span class="tag tag-accent">{{ name }}</span>{% endif %}</dd>
   {% endfor %}
   {% endif %}
-  <dt class="sr-only">Content type</dt>
-  <dd><span class="tag">{{ job.content_type or "unknown" }}</span></dd>
   {% if job.company %}
   <dt class="sr-only">Organization</dt>
   <dd>{% if filter %}<a class="tag tag-org" onclick="event.stopPropagation()"
