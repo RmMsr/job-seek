@@ -981,6 +981,30 @@ def dismiss_task(conn: sqlite3.Connection, task_id: int) -> None:
     conn.commit()
 
 
+def cancel_task(conn: sqlite3.Connection, task_id: int) -> None:
+    # finished_at is overwritten (not COALESCE'd): when a whole run is stopped
+    # its already-'done' container row is re-stamped so "Cancelled <age>" reads
+    # from the moment of the stop, not the kick-off.
+    conn.execute(
+        "UPDATE tasks SET status = 'cancelled', finished_at = datetime('now') WHERE id = ?",
+        (task_id,),
+    )
+    conn.commit()
+
+
+def cancel_queued_tasks(conn: sqlite3.Connection, task_ids: list[int]) -> int:
+    if not task_ids:
+        return 0
+    placeholders = ",".join("?" * len(task_ids))
+    cur = conn.execute(
+        f"UPDATE tasks SET status = 'cancelled', finished_at = datetime('now') "
+        f"WHERE status = 'queued' AND id IN ({placeholders})",
+        task_ids,
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def get_task_children(conn: sqlite3.Connection, root_id: int) -> list[dict]:
     """Every step-task pointing at this root, oldest first. Empty for a
     childless / non-root task."""
@@ -1004,7 +1028,7 @@ def get_dashboard_tasks(conn: sqlite3.Connection) -> list[dict]:
         """
         SELECT * FROM tasks
         WHERE status IN ('queued', 'running', 'needs_action')
-           OR (status IN ('done', 'failed', 'dismissed')
+           OR (status IN ('done', 'failed', 'dismissed', 'cancelled')
                AND finished_at IS NOT NULL
                AND finished_at >= datetime('now', ?))
         ORDER BY created_at ASC, id ASC

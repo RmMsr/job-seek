@@ -4,7 +4,7 @@
 <h1>Tasks</h1>
 <div class="filter-bar">
   <div>
-    {% for s in ["all", "active", "done", "failed"] %}
+    {% for s in ["all", "active", "done", "failed", "cancelled"] %}
     <a href="/tasks?status={{ s }}" class="{{ 'active' if status == s else '' }}">{{ s|capitalize }}</a>
     {% endfor %}
   </div>

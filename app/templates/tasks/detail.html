@@ -4,7 +4,7 @@
 {% if parent %}<p class="task-breadcrumb">Part of: <a href="/tasks/{{ parent.id }}">{{ parent.title }}</a></p>{% endif %}
 <h1>{{ pres.title }}</h1>
 {% if pres.goal %}<p class="resume-message">{{ pres.goal }}</p>{% endif %}
-<p class="resume-subtitle"><strong>{{ pres.next_step }}</strong></p>
+{% if not resolved_panel %}<p class="resume-subtitle"><strong>{{ pres.next_step }}</strong></p>{% endif %}
 
 <dl class="task-meta">
   <dt>State</dt><dd id="task-log-status">{{ pres.status if is_group else task.status }}{% if task.error and not is_group %} — {{ task.error }}{% endif %}</dd>
@@ -12,6 +12,13 @@
   {% if task.started_at %}<dt>Started</dt><dd>{{ task.started_at | age }}</dd>{% endif %}
   {% if task.finished_at and not is_group %}<dt>{{ 'Needs you since' if task.status == 'needs_action' else 'Finished' }}</dt><dd>{{ task.finished_at | age }}</dd>{% endif %}
 </dl>
+
+{% set _stoppable = (pres.status if is_group else task.status) in ("queued", "running") %}
+{% if _stoppable %}
+<form method="post" action="/tasks/{{ task.id }}/stop" style="margin:0.75rem 0;">
+  <button type="submit" class="btn">Stop</button>
+</form>
+{% endif %}
 
 {% if resume_html %}
 <div id="resume-page" data-task-id="{{ panel_task_id }}" style="margin:1.25rem 0;">{{ resume_html | safe }}</div>
@@ -30,15 +37,15 @@
 
 {% if is_group %}
 <h2>Steps</h2>
-<ol class="task-steps">
+<ul class="task-steps">
 {% for s in steps %}
-  <li>
+  <li{% if s.task.parent_task_id %} class="task-step-child"{% endif %}>
+    <span class="task-li-icon icon-{{ s.state }}" aria-hidden="true">{{ s.state | status_icon }}</span>
     <a href="/tasks/{{ s.task.id }}">{{ s.pres.title }}</a>
-    <span class="task-li-icon icon-{{ s.task.status }}" aria-hidden="true">{{ s.task.status | status_icon }}</span>
     <span class="task-step-note">{{ s.pres.next_step }}</span>
   </li>
 {% endfor %}
-</ol>
+</ul>
 {% endif %}
 
 {% if pres.results %}
@@ -66,7 +73,7 @@
     fetch("/tasks/{{ task.id }}/state").then(function (r) { return r.json(); }).then(function (t) {
       pre.textContent = (t.log || "").trim();
       statusEl.textContent = t.status;
-      if (["done", "failed", "needs_action", "dismissed"].indexOf(t.status) !== -1) location.reload();
+      if (["done", "failed", "needs_action", "dismissed", "cancelled"].indexOf(t.status) !== -1) location.reload();
     });
   }, 2000);
   {% endif %}

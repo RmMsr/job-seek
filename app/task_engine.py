@@ -36,6 +36,30 @@ def _sync_browser_missing_inbox(conn) -> None:
         q.resolve_inbox_item(conn, open_item["id"])
 
 
+class _TaskCancelled(Exception):
+    """Raised inside execute_task's loop when a stop was requested for the
+    running task."""
+
+
+_cancel_lock = threading.Lock()
+_cancel_requested: set[int] = set()
+
+
+def request_cancel(task_id: int) -> None:
+    with _cancel_lock:
+        _cancel_requested.add(task_id)
+
+
+def cancel_requested(task_id: int) -> bool:
+    with _cancel_lock:
+        return task_id in _cancel_requested
+
+
+def _clear_cancel(task_id: int) -> None:
+    with _cancel_lock:
+        _cancel_requested.discard(task_id)
+
+
 def register_task_kind(kind: str) -> Callable[[TaskKindFn], TaskKindFn]:
     def decorator(fn: TaskKindFn) -> TaskKindFn:
         TASK_KINDS[kind] = fn
@@ -62,16 +86,25 @@ def execute_task(
         gen = kind_fn(conn, client, model, config, call_params)
         result: dict = {}
         try:
+            if cancel_requested(task["id"]):
+                raise _TaskCancelled
             while True:
                 line = next(gen)
                 q.append_task_log(conn, task["id"], line)
+                if cancel_requested(task["id"]):
+                    raise _TaskCancelled
         except StopIteration as stop:
             result = stop.value or {}
+    except _TaskCancelled:
+        logger.info("Task %s (%s) cancelled by user", task["id"], task["kind"])
+        q.cancel_task(conn, task["id"])
+        return
     except Exception as exc:
         logger.exception("Task %s (%s) failed", task["id"], task["kind"])
         q.fail_task(conn, task["id"], str(exc))
         return
     finally:
+        _clear_cancel(task["id"])
         _sync_browser_missing_inbox(conn)
     # Sentinel substitution: a needs_action panel rendered by a kind fn can't
     # know its task's id, so it embeds "__ORIGIN_TASK__" in a hidden

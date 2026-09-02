@@ -1,5 +1,10 @@
 from app.db import queries as q
-from app.routes.tasks import task_presentation, root_presentation
+from app.routes.tasks import (
+    task_presentation,
+    root_presentation,
+    _subtree_status,
+    _next_step,
+)
 
 
 def test_presentation_fetch_source(conn):
@@ -59,7 +64,7 @@ def test_root_presentation_fetch_all_aggregates(conn):
     assert "2 sources" in p["next_step"]
     assert "1" in p["next_step"] and "fail" in p["next_step"].lower()
     assert p["status"] == "running"  # child a still queued
-    assert p["results"] == [{"label": "Fetch history", "href": "/fetch"}]
+    assert p["results"] == []
 
 
 def test_root_presentation_status_priority_needs_action(conn):
@@ -474,3 +479,172 @@ def test_task_history_standalone_task_has_no_toggle(client, conn):
     conn.commit()
     html = client.get("/tasks").text
     assert f'task-grp-{t["id"]}' not in html
+
+
+def test_cancel_queued_tasks_only_touches_queued(conn):
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2})
+    q.claim_next_task(conn)  # a -> running
+    n = q.cancel_queued_tasks(conn, [a["id"], b["id"]])
+    assert n == 1
+    assert q.get_task(conn, a["id"])["status"] == "running"
+    assert q.get_task(conn, b["id"])["status"] == "cancelled"
+    assert q.get_task(conn, b["id"])["finished_at"] is not None
+
+
+def test_next_step_cancelled(conn):
+    t = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.cancel_task(conn, t["id"])
+    assert _next_step(conn, q.get_task(conn, t["id"])) == "Cancelled"
+
+
+def test_subtree_status_cancelled(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1},
+                           parent_task_id=root["id"])
+    q.cancel_task(conn, child["id"])
+    subtree = [q.get_task(conn, root["id"]), q.get_task(conn, child["id"])]
+    assert _subtree_status(subtree) == "cancelled"
+
+
+def test_subtree_status_failed_beats_cancelled_when_later(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.cancel_task(conn, c1["id"])
+    c2 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.fail_task(conn, c2["id"], "boom")
+    subtree = [q.get_task(conn, root["id"]), q.get_task(conn, c1["id"]), q.get_task(conn, c2["id"])]
+    assert _subtree_status(subtree) == "failed"
+
+
+def test_stop_cancels_queued_task(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    r = client.post(f"/tasks/{t['id']}/stop", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, t["id"])["status"] == "cancelled"
+    assert q.claim_next_task(conn) is None  # worker won't pick it up
+
+
+def test_stop_on_root_cancels_subtree_and_signals_running(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    running = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    queued = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.claim_next_task(conn)  # running -> running
+
+    from app import task_engine as te
+    r = client.post(f"/tasks/{root['id']}/stop", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, queued["id"])["status"] == "cancelled"
+    assert te.cancel_requested(running["id"])
+    # Stopping the run re-marks the (finished) fetch_all container cancelled.
+    assert q.get_task(conn, root["id"])["status"] == "cancelled"
+    te._clear_cancel(running["id"])  # tidy up shared module state
+
+
+def test_stop_run_marks_root_cancelled_even_with_done_children(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    done_child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.complete_task(conn, done_child["id"], {"jobs_new": 3})
+    queued = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+
+    r = client.post(f"/tasks/{root['id']}/stop", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, root["id"])["status"] == "cancelled"
+    assert q.get_task(conn, queued["id"])["status"] == "cancelled"
+    assert q.get_task(conn, done_child["id"])["status"] == "done"  # already-finished child kept
+    subtree = [q.get_task(conn, root["id"]), q.get_task(conn, done_child["id"]),
+               q.get_task(conn, queued["id"])]
+    assert _subtree_status(subtree) == "cancelled"
+
+
+def test_stop_on_child_leaves_siblings_and_root_alone(client, conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    target = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    sibling = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    r = client.post(f"/tasks/{target['id']}/stop", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, target["id"])["status"] == "cancelled"
+    assert q.get_task(conn, sibling["id"])["status"] == "queued"  # sibling untouched
+    assert q.get_task(conn, root["id"])["status"] == "done"       # parent not propagated to
+
+
+def test_subtree_status_partial_cancel_stays_done(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    q.complete_task(conn, c1["id"], {"jobs_new": 1})
+    c2 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.cancel_task(conn, c2["id"])
+    subtree = [q.get_task(conn, root["id"]), q.get_task(conn, c1["id"]), q.get_task(conn, c2["id"])]
+    assert _subtree_status(subtree) == "done"
+
+
+def test_stop_on_terminal_task_is_noop(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, t["id"], {})
+    r = client.post(f"/tasks/{t['id']}/stop", follow_redirects=False)
+    assert r.status_code == 303
+    assert q.get_task(conn, t["id"])["status"] == "done"
+
+
+def test_stop_missing_task_404(client, conn):
+    r = client.post("/tasks/999/stop", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_detail_shows_stop_button_for_running(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.claim_next_task(conn)
+    html = client.get(f"/tasks/{t['id']}").text
+    assert f'action="/tasks/{t["id"]}/stop"' in html
+    assert ">Stop<" in html
+
+
+def test_detail_shows_stop_button_for_queued(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    html = client.get(f"/tasks/{t['id']}").text
+    assert f'action="/tasks/{t["id"]}/stop"' in html
+
+
+def test_detail_no_stop_button_for_done(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.complete_task(conn, t["id"], {})
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "/stop" not in html
+
+
+def test_detail_cancelled_task_says_cancelled(client, conn):
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
+    q.cancel_task(conn, t["id"])
+    html = client.get(f"/tasks/{t['id']}").text
+    assert "⊘ Cancelled" in html
+    assert "/stop" not in html
+    # The bold subtitle is suppressed once the resolved panel states the outcome.
+    assert "<strong>Cancelled</strong>" not in html
+
+
+def test_detail_stopped_run_shows_kickoff_done_but_overall_cancelled(client, conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid}, parent_task_id=root["id"])
+    client.post(f"/tasks/{root['id']}/stop", follow_redirects=False)
+
+    html = client.get(f"/tasks/{root['id']}").text
+    assert "⊘ Cancelled" in html                     # overall result
+    assert 'class="task-li-icon icon-done"' in html   # kick-off step still reads done
+    assert "Fetch history" not in html                # link removed
+
+
+def test_fetch_source_results_drop_fetch_history(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 1})
+    labels = [r["label"] for r in task_presentation(conn, q.get_task(conn, t["id"]))["results"]]
+    assert "Fetch history" not in labels
+    assert "Jobs from Cord" in labels

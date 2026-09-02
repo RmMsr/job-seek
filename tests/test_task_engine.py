@@ -27,6 +27,70 @@ def test_register_task_kind_adds_to_registry():
     del te.TASK_KINDS["test_kind_registration"]
 
 
+def test_cancel_task_sets_cancelled_and_finished(conn):
+    t = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.cancel_task(conn, t["id"])
+    got = q.get_task(conn, t["id"])
+    assert got["status"] == "cancelled"
+    assert got["finished_at"] is not None
+
+
+def test_execute_task_stops_when_cancel_requested(conn):
+    @te.register_task_kind("test_execute_cancel")
+    def fn(conn, client, model, config, params):
+        for i in range(10):
+            yield f"step {i}"
+        return {"html_chunks": []}
+
+    task = q.enqueue_task(conn, kind="test_execute_cancel", params={})
+    q.claim_next_task(conn)  # mark running, like the worker would
+
+    real_append = q.append_task_log
+
+    def append_and_maybe_cancel(c, tid, line):
+        real_append(c, tid, line)
+        if line == "step 0":
+            te.request_cancel(tid)
+
+    with patch("app.task_engine.q.append_task_log", side_effect=append_and_maybe_cancel):
+        te.execute_task(conn, None, None, None, q.get_task(conn, task["id"]))
+
+    got = q.get_task(conn, task["id"])
+    assert got["status"] == "cancelled"
+    assert got["error"] is None
+    assert "step 0" in got["log"]
+    assert "step 9" not in got["log"]
+    assert not te.cancel_requested(task["id"])  # cleared in finally
+    del te.TASK_KINDS["test_execute_cancel"]
+
+
+def test_execute_task_honors_pre_run_cancel_flag(conn):
+    @te.register_task_kind("test_execute_cancel_pre")
+    def fn(conn, client, model, config, params):
+        yield "only step"
+        return {}
+
+    task = q.enqueue_task(conn, kind="test_execute_cancel_pre", params={})
+    te.request_cancel(task["id"])  # request lands before the worker starts the run
+    te.execute_task(conn, None, None, None, q.get_task(conn, task["id"]))
+    assert q.get_task(conn, task["id"])["status"] == "cancelled"
+    assert not te.cancel_requested(task["id"])  # finally clears it
+    del te.TASK_KINDS["test_execute_cancel_pre"]
+
+
+def test_execute_task_clears_cancel_flag_on_normal_completion(conn):
+    @te.register_task_kind("test_execute_normal_clear")
+    def fn(conn, client, model, config, params):
+        yield "step"
+        return {}
+
+    task = q.enqueue_task(conn, kind="test_execute_normal_clear", params={})
+    te.execute_task(conn, None, None, None, task)
+    assert q.get_task(conn, task["id"])["status"] == "done"
+    assert not te.cancel_requested(task["id"])
+    del te.TASK_KINDS["test_execute_normal_clear"]
+
+
 def test_execute_task_runs_generator_and_stores_log_and_result(conn):
     @te.register_task_kind("test_execute_success")
     def fn(conn, client, model, config, params):

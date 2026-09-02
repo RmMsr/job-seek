@@ -1,6 +1,8 @@
 <div class="resolved-panel">
   {% if task.status == "dismissed" %}
     <p>✓ Dismissed <span class="task-age">{{ task.finished_at | age }}</span></p>
+  {% elif task.status == "cancelled" or pres.status == "cancelled" %}
+    <p>⊘ Cancelled <span class="task-age">{{ task.finished_at | age }}</span></p>
   {% else %}
     <p>✓ {{ pres.next_step }}</p>
     {% if pres.results %}

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.deps import get_db
 from app.db import queries as q
+from app import task_engine
 from app.template_env import templates
 
 router = APIRouter()
@@ -153,6 +154,8 @@ def _next_step(conn: sqlite3.Connection, task: dict) -> str:
         return (task["error"] or "Failed").strip().split("\n")[0]
     if status == "dismissed":
         return "Dismissed"
+    if status == "cancelled":
+        return "Cancelled"
     return _done_summary(conn, task)
 
 
@@ -166,7 +169,6 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
             src = q.get_source(conn, sid)
             label = f"Jobs from {src['name']}" if src else "Jobs from this source"
             out.append({"label": label, "href": f"/jobs?source_id={sid}"})
-        out.append({"label": "Fetch history", "href": "/fetch"})
     elif kind == "job_add_by_url" and r.get("job_id"):
         title = _job_title(conn, r["job_id"])
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{r['job_id']}"})
@@ -225,19 +227,42 @@ def _subtree_status(subtree: list[dict]) -> str:
     """Derived state of a root task from its whole subtree (root + children):
     1) anything still queued/running -> running
     2) else anything needs_action  -> needs you
-    3) else the latest-finished task failed -> failed
-    4) else -> done
+    3) else the root itself was cancelled (whole run stopped) -> cancelled
+    4) else the latest-finished task failed -> failed
+    5) else every child step was cancelled -> cancelled
+    6) else -> done
+
+    A single cancelled child does NOT make the run cancelled — cancellation
+    only propagates downward from where the stop was issued, so a run whose
+    other steps completed still reads as done.
     """
     if any(t["status"] in ("queued", "running") for t in subtree):
         return "running"
     if any(t["status"] == "needs_action" for t in subtree):
         return "needs_action"
+    root = next((t for t in subtree if not t["parent_task_id"]), subtree[0])
+    if root["status"] == "cancelled":
+        return "cancelled"
     finished = [t for t in subtree if t["finished_at"]]
     if finished:
         latest = max(finished, key=lambda t: (t["finished_at"], t["id"]))
         if latest["status"] == "failed":
             return "failed"
+    children = [t for t in subtree if t["parent_task_id"]]
+    if children and all(t["status"] == "cancelled" for t in children):
+        return "cancelled"
     return "done"
+
+
+def _step_state(task: dict) -> str:
+    """Per-step display status for the detail page's Steps list. A run's
+    container row is re-marked 'cancelled' when the whole run is stopped
+    (see task_stop); but its own kick-off work did finish, so show it as
+    'done'. Everything else shows its real status."""
+    if (task["parent_task_id"] is None and task["status"] == "cancelled"
+            and task["result"] is not None):
+        return "done"
+    return task["status"]
 
 
 def _child_step_counts(children: list[dict]) -> tuple[int, int, int]:
@@ -263,6 +288,8 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
     elif status == "failed":
         failed = [t for t in subtree if t["status"] == "failed"]
         next_step = (failed[-1]["error"] or "Failed").strip().split("\n")[0]
+    elif status == "cancelled":
+        next_step = "Cancelled"
     elif kind == "fetch_all":
         settled, total, failed = _child_step_counts(children)
         next_step = f"{total} source{'s' if total != 1 else ''} — {settled} done"
@@ -281,9 +308,9 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
         next_step = _done_summary(conn, last)
 
     if kind == "fetch_all":
-        # Per-source "Jobs from X" links would be a wall on one row; the fetch
-        # page covers the run. The detail page still lists every child.
-        results = [{"label": "Fetch history", "href": "/fetch"}]
+        # Per-source "Jobs from X" links would be a wall on one row; the child
+        # steps below cover the run. Nothing worth a top-level link.
+        results = []
     else:
         results, seen = [], set()
         for t in subtree:
@@ -448,10 +475,14 @@ def task_detail(task_id: int, request: Request, conn: sqlite3.Connection = Depen
     if children:
         subtree = [task, *children]
         pres = root_presentation(conn, task, children)
-        steps = [{"task": t, "pres": task_presentation(conn, t)} for t in subtree]
+        steps = []
+        for t in subtree:
+            state = _step_state(t)
+            pt = {**t, "status": "done"} if state != t["status"] else t
+            steps.append({"task": t, "pres": task_presentation(conn, pt), "state": state})
         na = next((t for t in subtree if t["status"] == "needs_action"), None)
         resume_html = (na.get("result") or {}).get("resume_html") if na else None
-        resolved_panel = (
+        resolved_panel = pres["status"] == "cancelled" or (
             pres["status"] == "done" and any(_was_needs_action(t) for t in subtree)
         )
         return templates.TemplateResponse(request, "tasks/detail.html", {
@@ -469,7 +500,10 @@ def task_detail(task_id: int, request: Request, conn: sqlite3.Connection = Depen
         (task.get("result") or {}).get("resume_html")
         if task["status"] == "needs_action" else None
     )
-    resolved_panel = task["status"] in ("done", "dismissed") and _was_needs_action(task)
+    resolved_panel = (
+        task["status"] == "cancelled"
+        or (task["status"] in ("done", "dismissed") and _was_needs_action(task))
+    )
     return templates.TemplateResponse(request, "tasks/detail.html", {
         "is_group": False, "task": task, "pres": pres, "lines": lines,
         "resume_html": resume_html, "panel_task_id": task_id,
@@ -484,6 +518,31 @@ def task_dismiss(task_id: int, request: Request, conn: sqlite3.Connection = Depe
     task = q.get_task(conn, task_id)
     if task is not None and task["status"] == "needs_action":
         q.dismiss_task(conn, task_id)
+    ref = request.headers.get("referer") or "/"
+    dest = ref if urlparse(ref).netloc == urlparse(str(request.url)).netloc else "/"
+    return RedirectResponse(dest, status_code=303)
+
+
+@router.post("/tasks/{task_id}/stop")
+def task_stop(task_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    task = q.get_task(conn, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Stop propagates DOWNWARD only: the clicked task plus its child steps —
+    # never its parent or siblings. (Chains are flattened, so a task's
+    # children are its whole downward set.)
+    children = q.get_task_children(conn, task_id)
+    subtree = [task, *children]
+    q.cancel_queued_tasks(conn, [t["id"] for t in subtree if t["status"] == "queued"])
+    for t in subtree:
+        if t["status"] == "running":
+            task_engine.request_cancel(t["id"])
+    if children and task["status"] not in ("queued", "running"):
+        # Stopping a whole run: mark the (already-finished) container row
+        # cancelled so the run reads as cancelled even if its kick-off step
+        # and some children had completed. The kick-off's own completion is
+        # still shown per-step.
+        q.cancel_task(conn, task_id)
     ref = request.headers.get("referer") or "/"
     dest = ref if urlparse(ref).netloc == urlparse(str(request.url)).netloc else "/"
     return RedirectResponse(dest, status_code=303)

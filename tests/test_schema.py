@@ -947,9 +947,33 @@ def test_tasks_table_has_parent_pointer_and_wide_status(conn):
     sql = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
     ).fetchone()[0]
-    for s in ("queued", "running", "needs_action", "done", "failed", "dismissed"):
+    for s in ("queued", "running", "needs_action", "done", "failed", "dismissed", "cancelled"):
         assert f"'{s}'" in sql
     assert "REFERENCES tasks(id)" in sql
+
+
+def test_migrate_tasks_add_cancelled_status(conn):
+    # DB left on the pre-cancelled shape.
+    conn.executescript(
+        """
+        CREATE TABLE tasks (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}',
+            parent_task_id INTEGER REFERENCES tasks(id),
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued','running','needs_action','done','failed','dismissed')),
+            log TEXT NOT NULL DEFAULT '', result TEXT, error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT);
+        INSERT INTO tasks (id, kind, status) VALUES (1, 'fetch_source', 'done');
+        INSERT INTO tasks (id, kind, status) VALUES (2, 'fetch_source', 'queued');
+        """
+    )
+    conn.commit()
+    init_db(conn)
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()[0]
+    assert "'cancelled'" in sql
+    assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 2
+    conn.execute("UPDATE tasks SET status='cancelled' WHERE id=2")  # must not raise
 
 
 def test_migrate_group_id_to_parent_task_id_hard_cutover(conn):

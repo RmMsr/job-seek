@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     params TEXT NOT NULL DEFAULT '{}',
     parent_task_id INTEGER REFERENCES tasks(id),
     status TEXT NOT NULL DEFAULT 'queued'
-        CHECK(status IN ('queued', 'running', 'needs_action', 'done', 'failed', 'dismissed')),
+        CHECK(status IN ('queued', 'running', 'needs_action', 'done', 'failed', 'dismissed', 'cancelled')),
     log TEXT NOT NULL DEFAULT '',
     result TEXT,
     error TEXT,
@@ -704,6 +704,40 @@ def _migrate_tasks_group_to_parent(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_tasks_add_cancelled(conn: sqlite3.Connection) -> None:
+    # Widen the tasks.status CHECK to allow 'cancelled' (user-stopped task).
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
+    ).fetchone()
+    if row is None or "'cancelled'" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE tasks_new (
+            id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            parent_task_id INTEGER REFERENCES tasks(id),
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued','running','needs_action','done','failed','dismissed','cancelled')),
+            log TEXT NOT NULL DEFAULT '',
+            result TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            started_at TEXT,
+            finished_at TEXT
+        );
+        INSERT INTO tasks_new (id, kind, params, parent_task_id, status, log, result, error, created_at, started_at, finished_at)
+            SELECT id, kind, params, parent_task_id, status, log, result, error, created_at, started_at, finished_at FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def _migrate_add_jobs_fts(conn: sqlite3.Connection) -> None:
     # Create-once. Placed last in init_db so it runs after any table rebuild.
     # A future migration that rebuilds the jobs table must follow itself with
@@ -772,4 +806,5 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_tasks_group_and_status(conn)
     _migrate_inbox_drop_task_id(conn)
     _migrate_tasks_group_to_parent(conn)
+    _migrate_tasks_add_cancelled(conn)
     _migrate_add_jobs_fts(conn)

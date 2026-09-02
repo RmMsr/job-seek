@@ -39,6 +39,7 @@ _STATUS_ICONS = {
     "done": "✓",
     "failed": "✗",
     "dismissed": "–",
+    "cancelled": "⊘",
 }
 
 
