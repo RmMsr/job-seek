@@ -213,8 +213,10 @@ def insert_job(
     published_at: str | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO jobs (source_id, url, title, company, raw_text, published_at) "
-        "VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))",
+        "INSERT INTO jobs (source_id, url, title, company, raw_text, published_at, "
+        "created_at, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')), "
+        "datetime('now'), datetime('now'))",
         (source_id, url, title, company, raw_text, published_at),
     )
     conn.commit()
@@ -463,11 +465,27 @@ def update_job_raw_text(conn: sqlite3.Connection, job_id: int, raw_text: str) ->
 
 
 def get_revisitable_jobs(conn: sqlite3.Connection) -> list[dict]:
+    # Only jobs that are genuinely "open" and worth re-checking: gate-passed
+    # inbox postings, leads, and accepted jobs (matching the new / lead /
+    # accepted tab predicates). Gate-failed "Not relevant", error rows, and
+    # rejected jobs are excluded. Stalest live-page pull first, so a capped
+    # sweep rotates through the backlog instead of re-checking the same head.
     sql = f"""SELECT {_GATE_SELECT} {_GATE_JOIN}
-        WHERE jobs.status IN ('new', 'accepted', 'rejected')
-          AND (SELECT fetcher_type FROM sources WHERE sources.id = jobs.source_id) != 'slack'
-        ORDER BY jobs.id"""
+        WHERE (SELECT fetcher_type FROM sources WHERE sources.id = jobs.source_id) != 'slack'
+          AND (
+            (jobs.status = 'new' AND jobs.content_type = 'job_posting' AND ({_GATE_PASSED_CLAUSE}))
+            OR (jobs.status = 'new' AND jobs.content_type = 'lead')
+            OR jobs.status = 'accepted'
+          )
+        ORDER BY COALESCE(jobs.fetched_at, jobs.created_at) ASC, jobs.id ASC"""
     return _rows_to_dicts(conn.execute(sql).fetchall())
+
+
+def mark_job_revisited(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute(
+        "UPDATE jobs SET fetched_at = datetime('now') WHERE id = ?", (job_id,)
+    )
+    conn.commit()
 
 
 def mark_job_closed(conn: sqlite3.Connection, job_id: int, reason: str) -> None:
@@ -579,11 +597,11 @@ _GATE_JOIN = """
 _ORDER_BY = {
     "change": (
         "MAX(COALESCE(jobs.status_changed_at, ''), "
-        "COALESCE(jobs.evaluation_completed_at, ''), jobs.fetched_at) "
+        "COALESCE(jobs.evaluation_completed_at, ''), jobs.created_at) "
         "DESC, jobs.id DESC"
     ),
-    "score": "jobs.fit_score DESC NULLS LAST, jobs.fetched_at DESC",
-    "age": "COALESCE(jobs.published_at, jobs.fetched_at) DESC, jobs.id DESC",
+    "score": "jobs.fit_score DESC NULLS LAST, jobs.created_at DESC",
+    "age": "COALESCE(jobs.published_at, jobs.created_at) DESC, jobs.id DESC",
 }
 
 

@@ -185,6 +185,9 @@ def run_revisit_job(
         return RevisitOutcome("skipped")
 
     yield _progress(f"{progress_prefix}Revisiting: {url}")
+    # Stamp now, before the outcome is known: every real revisit attempt advances
+    # fetched_at so a capped sweep rotates on, even past a job that keeps erroring.
+    q.mark_job_revisited(conn, job["id"])
 
     try:
         html = fetch_url_html(url)

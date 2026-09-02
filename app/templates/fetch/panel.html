@@ -6,8 +6,8 @@
   {% if sources %}
   <button class="btn" data-progress-url="/fetch/all">Fetch all</button>
   {% endif %}
-  <button class="btn" data-progress-url="/revisit/all">Revisit open jobs</button>
-  <p class="hint">Re-checks every open job's original posting; anything that can no longer be reached is moved to Trash.</p>
+  <button class="btn" data-progress-url="/revisit/all" data-progress-oob
+    title="Re-checks each open job's live posting; anything no longer reachable moves to Trash.">Refresh open jobs</button>
 </div>
 <div id="fetch-content">
   {% include "fetch/_table.html" %}

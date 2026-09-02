@@ -2644,6 +2644,28 @@ def test_revisit_task_execution_closes_and_renders_row(conn):
     assert any("Trash" in c for c in result["html_chunks"])
 
 
+def _fake_revisit_unchanged(conn, client, model, job, scenarios, profile, progress_prefix=""):
+    from app.pipeline import RevisitOutcome
+    q.mark_job_revisited(conn, job["id"])
+    yield f"{progress_prefix}Unchanged: {job['url']}"
+    return RevisitOutcome("unchanged")
+
+
+def test_revisit_sweep_result_is_oob_notice_no_chunks(conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/x", title="X",
+                       company="", raw_text="b")
+    q.update_job_feedback(conn, jid, "accepted", None)
+    task = q.enqueue_task(conn, kind="jobs_revisit", params={})
+    with patch("app.routes.jobs.run_revisit_job", side_effect=_fake_revisit_unchanged):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    result = q.get_task(conn, task["id"])["result"]
+    assert result["html_chunks"] == []
+    assert result["notices"] == [
+        {"level": "info", "html": "<p>Revisited 1 · closed 0 · changed 0</p>"}
+    ]
+
+
 def test_accept_enqueues_status_change_revisit(client, conn):
     sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/j", title="J",

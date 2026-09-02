@@ -108,6 +108,32 @@ def test_unchanged_leaves_job_untouched(conn, board):
     assert q.get_job_scores(conn, job["id"])[0]["relevance_score"] == 0.4
 
 
+def test_revisit_bumps_fetched_at_not_created_at(conn, board):
+    job = _job(conn, board)
+    conn.execute(
+        "UPDATE jobs SET created_at='2024-01-01T00:00:00', fetched_at='2024-01-01T00:00:00' "
+        "WHERE id=?", (job["id"],),
+    )
+    conn.commit()
+    with patch("app.pipeline.fetch_url_html", return_value=_LONG), \
+         patch("app.pipeline.revisit_check", return_value=("unchanged", "same")):
+        _run(conn, job)
+    row = q.get_job(conn, job["id"])
+    assert row["created_at"] == "2024-01-01T00:00:00"
+    assert row["fetched_at"] > "2024-01-01T00:00:00"
+
+
+def test_revisit_bumps_fetched_at_even_when_closed(conn, board):
+    job = _job(conn, board)
+    conn.execute("UPDATE jobs SET fetched_at='2024-01-01T00:00:00' WHERE id=?", (job["id"],))
+    conn.commit()
+    with patch("app.pipeline.fetch_url_html", side_effect=FetchError("HTTP 404")), \
+         patch("app.pipeline.time.sleep"):
+        _, outcome = _run(conn, job)
+    assert outcome.verdict == "closed"
+    assert q.get_job(conn, job["id"])["fetched_at"] > "2024-01-01T00:00:00"
+
+
 def test_changed_rescored_status_preserved(conn, board):
     job = _job(conn, board, status="accepted")
     client = _mock_client(

@@ -53,7 +53,7 @@ def test_fetch_table_last_run_shows_relative_age_not_raw_timestamp(client, conn)
     raw_ts = q.get_fetch_stats_by_source(conn)[sid]["last_success_at"]
 
     html = client.get("/fetch").text
-    # The "Last run" column renders the coarse `age` filter as its text …
+    # The "Last fetch" column renders the coarse `age` filter as its text …
     assert "just now" in html or "ago" in html
     # … and keeps the exact timestamp only on hover, never as displayed text.
     assert f'title="{raw_ts} UTC"' in html
@@ -230,8 +230,9 @@ def test_revisit_all_skipped_when_nothing_eligible(client, conn):
 
 def test_revisit_all_enqueues_sweep(client, conn):
     sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
-    q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
-                 company="", raw_text="b")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="b")
+    q.update_job_feedback(conn, jid, "accepted", None)
     r = client.post("/revisit/all")
     body = r.json()
     assert "task_id" in body
@@ -242,3 +243,7 @@ def test_revisit_all_enqueues_sweep(client, conn):
 def test_fetch_panel_has_revisit_button(client, conn):
     html = client.get("/fetch").text
     assert 'data-progress-url="/revisit/all"' in html
+    # Renamed, tooltip'd, and oob so a refresh doesn't reload the panel.
+    assert "Refresh open jobs" in html
+    assert "data-progress-oob" in html
+    assert 'class="hint"' not in html

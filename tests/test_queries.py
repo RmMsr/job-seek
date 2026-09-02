@@ -1582,35 +1582,35 @@ def test_mark_job_gate_override_stamps_status_changed_at(conn):
     assert conn.execute("SELECT status_changed_at FROM jobs WHERE id=?", (jid,)).fetchone()[0] is not None
 
 
-def _mk_job(conn, url, *, fetched, published=None, evaluated=None, changed=None, fit=None):
+def _mk_job(conn, url, *, created, published=None, evaluated=None, changed=None, fit=None):
     sid = q.get_or_create_manual_source(conn)
     jid = q.insert_job(conn, source_id=sid, url=url, title=url, company="", raw_text="")
     conn.execute(
-        "UPDATE jobs SET fetched_at=?, published_at=?, evaluation_completed_at=?, "
+        "UPDATE jobs SET created_at=?, published_at=?, evaluation_completed_at=?, "
         "status_changed_at=?, fit_score=?, content_type='job_posting' WHERE id=?",
-        (fetched, published, evaluated, changed, fit, jid),
+        (created, published, evaluated, changed, fit, jid),
     )
     conn.commit()
     return jid
 
 
 def test_get_jobs_order_change_uses_latest_activity(conn):
-    a = _mk_job(conn, "https://x.test/a", fetched="2024-01-01T00:00:00", changed="2024-06-01T00:00:00")
-    b = _mk_job(conn, "https://x.test/b", fetched="2024-05-01T00:00:00")
+    a = _mk_job(conn, "https://x.test/a", created="2024-01-01T00:00:00", changed="2024-06-01T00:00:00")
+    b = _mk_job(conn, "https://x.test/b", created="2024-05-01T00:00:00")
     ids = [j["id"] for j in q.get_jobs(conn, status="new", order="change")]
     assert ids.index(a) < ids.index(b)
 
 
-def test_get_jobs_order_age_uses_published_then_fetched(conn):
-    a = _mk_job(conn, "https://x.test/a", fetched="2024-09-01T00:00:00", published="2024-01-01T00:00:00")
-    b = _mk_job(conn, "https://x.test/b", fetched="2024-02-01T00:00:00")
+def test_get_jobs_order_age_uses_published_then_created(conn):
+    a = _mk_job(conn, "https://x.test/a", created="2024-09-01T00:00:00", published="2024-01-01T00:00:00")
+    b = _mk_job(conn, "https://x.test/b", created="2024-02-01T00:00:00")
     ids = [j["id"] for j in q.get_jobs(conn, status="new", order="age")]
     assert ids.index(b) < ids.index(a)
 
 
 def test_get_jobs_order_score_matches_legacy(conn):
-    lo = _mk_job(conn, "https://x.test/lo", fetched="2024-01-01T00:00:00", fit=0.2)
-    hi = _mk_job(conn, "https://x.test/hi", fetched="2024-01-01T00:00:00", fit=0.9)
+    lo = _mk_job(conn, "https://x.test/lo", created="2024-01-01T00:00:00", fit=0.2)
+    hi = _mk_job(conn, "https://x.test/hi", created="2024-01-01T00:00:00", fit=0.9)
     ids = [j["id"] for j in q.get_jobs(conn, status="new", order="score")]
     assert ids.index(hi) < ids.index(lo)
 
@@ -1812,18 +1812,61 @@ def test_update_job_raw_text_replaces_only_raw_text(conn):
     assert row["title"] == "A" and row["company"] == "Acme"
 
 
-def test_get_revisitable_jobs_excludes_slack_and_trash(conn):
+def _revisit_job(conn, source_id, url, *, content_type="job_posting", evaluated=True,
+                 status="new", gate_override=0):
+    jid = q.insert_job(conn, source_id=source_id, url=url, title="", company="", raw_text="x")
+    conn.execute(
+        "UPDATE jobs SET content_type=?, evaluation_completed_at=?, gate_override=? WHERE id=?",
+        (content_type, "2024-01-01T00:00:00" if evaluated else None, gate_override, jid),
+    )
+    conn.commit()
+    if status != "new":
+        q.update_job_feedback(conn, jid, status, None)
+    return jid
+
+
+def test_get_revisitable_jobs_scope(conn):
     gid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
     slk = q.insert_source(conn, "slk", "http://x.slack.com/c", "slack")
-    keep = q.insert_job(conn, source_id=gid, url="http://example.com/keep", title="",
-                        company="", raw_text="x")
-    q.insert_job(conn, source_id=slk, url="http://x.slack.com/c#1", title="",
-                 company="", raw_text="x")
-    trashed = q.insert_job(conn, source_id=gid, url="http://example.com/t", title="",
-                           company="", raw_text="x")
-    q.update_job_feedback(conn, trashed, "trash", None)
-    ids = [j["id"] for j in q.get_revisitable_jobs(conn)]
-    assert ids == [keep]
+
+    gate_passed = _revisit_job(conn, gid, "http://example.com/passed")
+    lead = _revisit_job(conn, gid, "http://example.com/lead", content_type="lead")
+    accepted = _revisit_job(conn, gid, "http://example.com/acc", status="accepted")
+
+    # Excluded: gate-failed "Not relevant", error rows, rejected, trash, slack, unevaluated.
+    _revisit_job(conn, gid, "http://example.com/notrel", evaluated=False)
+    _revisit_job(conn, gid, "http://example.com/err", content_type="error")
+    _revisit_job(conn, gid, "http://example.com/rej", status="rejected")
+    _revisit_job(conn, gid, "http://example.com/trash", status="trash")
+    _revisit_job(conn, slk, "http://x.slack.com/c#1")
+
+    ids = {j["id"] for j in q.get_revisitable_jobs(conn)}
+    assert ids == {gate_passed, lead, accepted}
+
+
+def test_get_revisitable_jobs_orders_by_stalest_fetch_first(conn):
+    gid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    a = _revisit_job(conn, gid, "http://example.com/a")
+    b = _revisit_job(conn, gid, "http://example.com/b")
+    conn.execute("UPDATE jobs SET fetched_at='2024-06-01T00:00:00' WHERE id=?", (a,))
+    conn.execute("UPDATE jobs SET fetched_at='2024-01-01T00:00:00' WHERE id=?", (b,))
+    conn.commit()
+    assert [j["id"] for j in q.get_revisitable_jobs(conn)] == [b, a]
+
+
+def test_mark_job_revisited_bumps_only_fetched_at(conn):
+    gid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = _revisit_job(conn, gid, "http://example.com/a")
+    conn.execute(
+        "UPDATE jobs SET created_at='2024-01-01T00:00:00', fetched_at='2024-01-01T00:00:00', "
+        "status_changed_at='2024-01-01T00:00:00' WHERE id=?", (jid,),
+    )
+    conn.commit()
+    q.mark_job_revisited(conn, jid)
+    row = q.get_job(conn, jid)
+    assert row["created_at"] == "2024-01-01T00:00:00"
+    assert row["status_changed_at"] == "2024-01-01T00:00:00"
+    assert row["fetched_at"] > "2024-01-01T00:00:00"
 
 
 def test_mark_job_closed_trashes_and_logs_event(conn):

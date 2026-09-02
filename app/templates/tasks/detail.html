@@ -4,7 +4,7 @@
 {% if parent %}<p class="task-breadcrumb">Part of: <a href="/tasks/{{ parent.id }}">{{ parent.title }}</a></p>{% endif %}
 <h1>{{ pres.title }}</h1>
 {% if pres.goal %}<p class="resume-message">{{ pres.goal }}</p>{% endif %}
-{% if not resolved_panel %}<p class="resume-subtitle"><strong>{{ pres.next_step }}</strong></p>{% endif %}
+{% if not resolved_panel %}<p class="resume-subtitle"><strong id="task-next-step">{{ pres.next_step }}</strong></p>{% endif %}
 
 <dl class="task-meta">
   <dt>State</dt><dd id="task-log-status">{{ pres.status if is_group else task.status }}{% if task.error and not is_group %} — {{ task.error }}{% endif %}</dd>
@@ -69,10 +69,12 @@
   {% else %}
   var pre = document.getElementById("task-log-lines");
   var statusEl = document.getElementById("task-log-status");
+  var stepEl = document.getElementById("task-next-step");
   setInterval(function () {
     fetch("/tasks/{{ task.id }}/state").then(function (r) { return r.json(); }).then(function (t) {
       pre.textContent = (t.log || "").trim();
       statusEl.textContent = t.status;
+      if (stepEl && t.next_step) stepEl.textContent = t.next_step;
       if (["done", "failed", "needs_action", "dismissed", "cancelled"].indexOf(t.status) !== -1) location.reload();
     });
   }, 2000);

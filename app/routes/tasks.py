@@ -55,6 +55,16 @@ _SINGLE_JOB_KINDS = {"job_reset", "job_pass_as_new", "job_reevaluate"}
 _JOB_LINK_KINDS = _SINGLE_JOB_KINDS
 
 
+def _single_revisit_job_id(task: dict) -> int | None:
+    """A jobs_revisit task that targets exactly one job (the per-job Revisit
+    button, or a one-job status-change check) — worth a 'View job' link. A
+    multi-job sweep gets None."""
+    if task["kind"] != "jobs_revisit":
+        return None
+    ids = task["params"].get("job_ids")
+    return ids[0] if ids and len(ids) == 1 else None
+
+
 def _title(conn: sqlite3.Connection, task: dict) -> str:
     kind = task["kind"]
     params = task["params"]
@@ -175,6 +185,9 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
     elif kind in _SINGLE_JOB_KINDS and params.get("job_id"):
         title = _job_title(conn, params["job_id"])
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{params['job_id']}"})
+    elif (rjid := _single_revisit_job_id(task)) is not None:
+        title = _job_title(conn, rjid)
+        out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{rjid}"})
     elif kind in ("jobs_bulk_reset", "jobs_bulk_reevaluate"):
         out.append({"label": "Back to jobs", "href": "/jobs"})
     elif kind in ("source_confirm", "job_add_listing_source", "source_detect") and r.get("source_id"):
@@ -189,6 +202,8 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
 def _link(conn: sqlite3.Connection, task: dict) -> str | None:
     if task["kind"] in _SINGLE_JOB_KINDS and task["params"].get("job_id") is not None:
         return f"/jobs/{task['params']['job_id']}"
+    if (rjid := _single_revisit_job_id(task)) is not None:
+        return f"/jobs/{rjid}"
     r = task.get("result") or {}
     if task["kind"] == "job_add_by_url" and r.get("job_id"):
         return f"/jobs/{r['job_id']}"

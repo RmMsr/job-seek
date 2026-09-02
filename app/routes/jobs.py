@@ -77,15 +77,15 @@ def _sort_key(order: str):
     if order == "score":
         return lambda j: (
             j["fit_score"] if j["fit_score"] is not None else float("-inf"),
-            j["fetched_at"] or "",
+            j["created_at"] or "",
         )
     if order == "age":
-        return lambda j: (j["published_at"] or j["fetched_at"] or "",)
+        return lambda j: (j["published_at"] or j["created_at"] or "",)
     return lambda j: (
         max(
             j.get("status_changed_at") or "",
             j.get("evaluation_completed_at") or "",
-            j["fetched_at"] or "",
+            j["created_at"] or "",
         ),
     )
 
@@ -500,9 +500,9 @@ def _task_jobs_revisit(conn, client, model, config, params):
         )
         result["html_chunks"] = [notice_html, row_html, counts_html]
     else:
-        yield (
-            f"Revisited {len(outcomes)} · closed {len(closed)} · changed {changed}"
-        )
+        summary = f"Revisited {len(outcomes)} · closed {len(closed)} · changed {changed}"
+        yield summary
+        result["notices"] = [{"level": "info", "html": f"<p>{summary}</p>"}]
     return result
 
 

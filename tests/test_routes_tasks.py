@@ -46,6 +46,26 @@ def test_presentation_done_results_link_for_add_by_url(conn):
     assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
 
 
+def test_single_job_revisit_links_to_job(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="jobs_revisit", params={"job_ids": [jid], "trigger": "manual"})
+    q.complete_task(conn, t["id"], {"html_chunks": [], "notices": []})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+
+
+def test_multi_job_revisit_sweep_has_no_per_job_link(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    j1 = q.insert_job(conn, source_id=sid, url="https://e.com/1", title="A", company="", raw_text="")
+    j2 = q.insert_job(conn, source_id=sid, url="https://e.com/2", title="B", company="", raw_text="")
+    for params in ({}, {"job_ids": [j1, j2], "trigger": "status_change"}):
+        t = q.enqueue_task(conn, kind="jobs_revisit", params=params)
+        q.complete_task(conn, t["id"], {"html_chunks": [], "notices": []})
+        p = task_presentation(conn, q.get_task(conn, t["id"]))
+        assert p["results"] == []
+
+
 def test_presentation_failed_shows_error(conn):
     t = q.enqueue_task(conn, kind="fetch_source", params={})
     q.fail_task(conn, t["id"], "Slack auth expired\nstacktrace line\nmore")
@@ -440,6 +460,19 @@ def test_history_state_column_is_just_the_status(client, conn):
     # state cell shows the status word, not the next-step detail
     assert "running" in html
     assert "Step 2 of 5" not in html
+
+
+def test_running_detail_subtitle_is_pollable_and_state_carries_next_step(client, conn):
+    t = q.enqueue_task(conn, kind="jobs_revisit", params={})
+    q.claim_next_task(conn)
+    q.append_task_log(conn, t["id"], "[6/24] Revisiting: http://e.com/j")
+    html = client.get(f"/tasks/{t['id']}").text
+    # The subtitle the poll refreshes has a stable id, and starts on the live step.
+    assert 'id="task-next-step"' in html
+    assert "Step 6 of 24" in html
+    state = client.get(f"/tasks/{t['id']}/state").json()
+    assert state["status"] == "running"
+    assert state["next_step"] == "Step 6 of 24"
 
 
 def test_history_root_row_shows_derived_state(client, conn):

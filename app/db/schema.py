@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     headline TEXT NOT NULL DEFAULT '',
     published_at TEXT,
     content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash')),
     feedback_note TEXT,
@@ -567,13 +568,33 @@ def _migrate_jobs_add_evaluation_completed_at(conn: sqlite3.Connection) -> None:
 def _migrate_jobs_add_status_changed_at(conn: sqlite3.Connection) -> None:
     # Purely additive. Records when a job's status last changed (feedback
     # decision or gate override), for the Jobs-list "newest changes" sort.
-    # No backfill: NULL sorts as fetched_at via the query's MAX(...).
+    # No backfill: an unset value falls through to the row's creation time via
+    # the sort's MAX(...) over the (later-renamed) fetched_at/created_at column.
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
     ).fetchone()
     if row is None or "status_changed_at" in row[0]:
         return
     conn.execute("ALTER TABLE jobs ADD COLUMN status_changed_at TEXT")
+    conn.commit()
+
+
+def _migrate_jobs_split_created_fetched(conn: sqlite3.Connection) -> None:
+    # Split the old `fetched_at` (which was only ever a row-creation timestamp)
+    # into an immutable `created_at` — carrying every existing sort's semantics
+    # unchanged — and a new mutable `fetched_at` meaning "last time we pulled
+    # this job's live page", bumped by the revisit task. FTS triggers touch only
+    # text columns, so RENAME COLUMN leaves them intact — no rebuild needed.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "created_at" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs RENAME COLUMN fetched_at TO created_at")
+    # SQLite forbids a non-constant DEFAULT on ADD COLUMN, so add it nullable and
+    # backfill; insert_job writes fetched_at explicitly for new rows.
+    conn.execute("ALTER TABLE jobs ADD COLUMN fetched_at TEXT")
+    conn.execute("UPDATE jobs SET fetched_at = created_at")
     conn.commit()
 
 
@@ -810,6 +831,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_fetch_runs_add_task_id(conn)
     _migrate_jobs_add_evaluation_completed_at(conn)
     _migrate_jobs_add_status_changed_at(conn)
+    _migrate_jobs_split_created_fetched(conn)
     _migrate_jobs_canonicalize_urls(conn)
     _migrate_tasks_group_and_status(conn)
     _migrate_inbox_drop_task_id(conn)
