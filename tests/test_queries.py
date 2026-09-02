@@ -1826,7 +1826,7 @@ def test_get_revisitable_jobs_excludes_slack_and_trash(conn):
     assert ids == [keep]
 
 
-def test_mark_job_closed_appends_note_and_trashes(conn):
+def test_mark_job_closed_trashes_and_logs_event(conn):
     sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
                        company="", raw_text="x")
@@ -1834,11 +1834,11 @@ def test_mark_job_closed_appends_note_and_trashes(conn):
     q.mark_job_closed(conn, jid, "this job can no longer be found")
     row = q.get_job(conn, jid)
     assert row["status"] == "trash"
-    assert row["feedback_note"].startswith("Loved the mission\n\n[")
-    assert row["feedback_note"].rstrip().endswith(
-        "Moved to trash on revisit — this job can no longer be found.")
-    assert row["feedback_handled_at"] is not None
     assert row["status_changed_at"] is not None
+    # user's own note is left untouched
+    assert row["feedback_note"] == "Loved the mission"
+    messages = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert "Moved to Trash on revisit — this job can no longer be found" in messages
 
 
 def test_mark_job_closed_with_no_existing_note(conn):
@@ -1846,5 +1846,141 @@ def test_mark_job_closed_with_no_existing_note(conn):
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
                        company="", raw_text="x")
     q.mark_job_closed(conn, jid, "this page is no longer a job posting")
-    note = q.get_job(conn, jid)["feedback_note"]
-    assert note.startswith("[") and "no longer a job posting." in note
+    assert q.get_job(conn, jid)["feedback_note"] is None
+    assert q.get_job_events(conn, jid)[0]["message"] == (
+        "Moved to Trash on revisit — this page is no longer a job posting"
+    )
+
+
+# --- job_events / changelog ---
+
+def test_add_and_get_job_events_newest_first(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/ev", title="A", company="", raw_text="")
+    q.add_job_event(conn, jid, "status", "first")
+    conn.execute("UPDATE job_events SET created_at = '2020-01-01T00:00:00' WHERE message = 'first'")
+    q.add_job_event(conn, jid, "score", "second")
+    conn.commit()
+    events = q.get_job_events(conn, jid)
+    assert [e["message"] for e in events] == ["second", "first"]
+    assert events[0]["kind"] == "score"
+
+
+def test_get_job_events_empty_for_new_job(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/ev2", title="A", company="", raw_text="")
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_update_job_feedback_logs_status_change_with_note(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/fb1", title="A", company="", raw_text="")
+    q.update_job_feedback(conn, jid, "rejected", "role moved to London")
+    events = q.get_job_events(conn, jid)
+    assert len(events) == 1
+    assert events[0]["kind"] == "status"
+    assert events[0]["message"] == 'Status: new → rejected — "role moved to London"'
+
+
+def test_update_job_feedback_no_event_when_status_unchanged(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/fb2", title="A", company="", raw_text="")
+    q.update_job_feedback(conn, jid, "new", "just a note")
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_update_job_feedback_record_event_false_suppresses(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/fb3", title="A", company="", raw_text="")
+    q.update_job_feedback(conn, jid, "trash", "err", record_event=False)
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_update_job_feedback_logs_without_note(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/fb4", title="A", company="", raw_text="")
+    q.update_job_feedback(conn, jid, "accepted", None)
+    assert q.get_job_events(conn, jid)[0]["message"] == "Status: new → accepted"
+
+
+def test_mark_job_gate_override_logs_event(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/go", title="A", company="", raw_text="")
+    q.mark_job_gate_override(conn, jid)
+    assert q.get_job_events(conn, jid)[0]["message"] == "Filed as New — gate threshold bypassed"
+
+
+def test_reset_job_logs_status_change_when_not_new(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/rs", title="A", company="", raw_text="")
+    q.update_job_feedback(conn, jid, "rejected", None)
+    q.reset_job(conn, jid)
+    messages = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert "Status: rejected → new" in messages
+
+
+def test_reset_job_no_status_event_when_already_new(conn):
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="https://x.test/rs2", title="A", company="", raw_text="")
+    q.reset_job(conn, jid)
+    assert [e for e in q.get_job_events(conn, jid) if e["kind"] == "status"] == []
+
+
+def _score_job(conn, threshold=0.7):
+    sid = q.get_or_create_manual_source(conn)
+    scn = q.insert_scenario(conn, "AI Safety", "")
+    conn.execute("UPDATE scenarios SET gate_threshold = ? WHERE id = ?", (threshold, scn))
+    jid = q.insert_job(conn, source_id=sid, url=f"https://x.test/s{scn}", title="A", company="", raw_text="")
+    conn.commit()
+    return jid, scn
+
+
+def test_upsert_job_score_no_event_on_first_score(conn):
+    jid, scn = _score_job(conn)
+    q.upsert_job_score(conn, jid, scn, 0.4, "r", "h")
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_upsert_job_score_logs_meaningful_move(conn):
+    jid, scn = _score_job(conn)
+    q.upsert_job_score(conn, jid, scn, 0.40, "r", "h")
+    q.upsert_job_score(conn, jid, scn, 0.55, "r", "h")
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert msgs == ['Re-scored "AI Safety" 0.40 → 0.55']
+
+
+def test_upsert_job_score_ignores_tiny_move(conn):
+    jid, scn = _score_job(conn)
+    q.upsert_job_score(conn, jid, scn, 0.40, "r", "h")
+    q.upsert_job_score(conn, jid, scn, 0.43, "r", "h")
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_upsert_job_score_logs_gate_crossing_even_if_tiny(conn):
+    jid, scn = _score_job(conn, threshold=0.7)
+    q.upsert_job_score(conn, jid, scn, 0.69, "r", "h")
+    q.upsert_job_score(conn, jid, scn, 0.71, "r", "h")
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert msgs == ['Re-scored "AI Safety" 0.69 → 0.71 — now passes gate']
+
+
+def test_upsert_job_score_logs_gate_drop(conn):
+    jid, scn = _score_job(conn, threshold=0.7)
+    q.upsert_job_score(conn, jid, scn, 0.72, "r", "h")
+    q.upsert_job_score(conn, jid, scn, 0.68, "r", "h")
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert msgs == ['Re-scored "AI Safety" 0.72 → 0.68 — no longer passes gate']
+
+
+def test_update_job_fit_no_event_first_time(conn):
+    jid, scn = _score_job(conn)
+    q.update_job_fit(conn, jid, 0.6, "i", 0.6, "a", "p")
+    assert q.get_job_events(conn, jid) == []
+
+
+def test_update_job_fit_logs_meaningful_move(conn):
+    jid, scn = _score_job(conn)
+    q.update_job_fit(conn, jid, 0.6, "i", 0.6, "a", "p")   # fit_score = 0.60
+    q.update_job_fit(conn, jid, 0.8, "i", 0.8, "a", "p")   # fit_score = 0.80
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert msgs == ["Fit re-assessed 0.60 → 0.80"]

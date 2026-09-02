@@ -117,6 +117,14 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     resolved_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS job_events (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL
+);
 """
 
 

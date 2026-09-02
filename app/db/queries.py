@@ -2,7 +2,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import datetime, timezone
 from app.url_canon import canonicalize_url
 
 # Letters + digits, no underscore — keeps Unicode words (Norwegian "ø/æ/å",
@@ -236,6 +235,45 @@ def delete_job(conn: sqlite3.Connection, job_id: int) -> None:
     conn.commit()
 
 
+# --- Job events / changelog ---
+
+def add_job_event(conn: sqlite3.Connection, job_id: int, kind: str, message: str) -> None:
+    conn.execute(
+        "INSERT INTO job_events (job_id, kind, message) VALUES (?, ?, ?)",
+        (job_id, kind, message),
+    )
+    conn.commit()
+
+
+def get_job_events(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM job_events WHERE job_id = ? ORDER BY created_at DESC, id DESC",
+            (job_id,),
+        ).fetchall()
+    )
+
+
+def log_score_change(
+    conn: sqlite3.Connection,
+    job_id: int,
+    *,
+    label: str,
+    old: float | None,
+    new: float | None,
+    threshold: float | None = None,
+) -> None:
+    if old is None or new is None:
+        return
+    crossed = threshold is not None and (old >= threshold) != (new >= threshold)
+    if abs(new - old) < 0.05 and not crossed:
+        return
+    message = f"{label} {old:.2f} → {new:.2f}"
+    if crossed:
+        message += " — now passes gate" if new >= threshold else " — no longer passes gate"
+    add_job_event(conn, job_id, "score", message)
+
+
 def update_job_pipeline(
     conn: sqlite3.Connection,
     job_id: int,
@@ -271,6 +309,14 @@ def upsert_job_score(
     reasoning: str,
     version_hash: str,
 ) -> None:
+    prev = conn.execute(
+        "SELECT relevance_score FROM job_scores WHERE job_id = ? AND scenario_id = ?",
+        (job_id, scenario_id),
+    ).fetchone()
+    old_score = prev["relevance_score"] if prev is not None else None
+    scn = conn.execute(
+        "SELECT name, gate_threshold FROM scenarios WHERE id = ?", (scenario_id,)
+    ).fetchone()
     conn.execute(
         """INSERT INTO job_scores (job_id, scenario_id, relevance_score, score_reasoning, scenario_version_hash)
         VALUES (?, ?, ?, ?, ?)
@@ -282,6 +328,12 @@ def upsert_job_score(
         (job_id, scenario_id, score, reasoning, version_hash),
     )
     conn.commit()
+    if scn is not None:
+        log_score_change(
+            conn, job_id,
+            label=f'Re-scored "{scn["name"]}"',
+            old=old_score, new=score, threshold=scn["gate_threshold"],
+        )
 
 
 def update_job_fit(
@@ -293,6 +345,8 @@ def update_job_fit(
     attainability_reasoning: str,
     profile_version_hash: str,
 ) -> None:
+    prev = conn.execute("SELECT fit_score FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    old_fit = prev["fit_score"] if prev is not None else None
     fit_score = (interest_score + attainability_score) / 2
     conn.execute(
         """UPDATE jobs SET
@@ -306,6 +360,7 @@ def update_job_fit(
         (interest_score, interest_reasoning, attainability_score, attainability_reasoning, fit_score, profile_version_hash, job_id),
     )
     conn.commit()
+    log_score_change(conn, job_id, label="Fit re-assessed", old=old_fit, new=fit_score)
 
 
 def upsert_scenario_feedback(
@@ -358,6 +413,8 @@ def get_job_score_hashes(conn: sqlite3.Connection, scenario_id: int) -> dict[int
 
 
 def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
+    row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    old_status = row["status"] if row is not None else None
     conn.execute(
         """UPDATE jobs SET
             status = 'new',
@@ -380,6 +437,8 @@ def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
     conn.execute("DELETE FROM job_scores WHERE job_id = ?", (job_id,))
     conn.execute("DELETE FROM scenario_feedback WHERE job_id = ?", (job_id,))
     conn.commit()
+    if old_status is not None and old_status != "new":
+        add_job_event(conn, job_id, "status", f"Status: {old_status} → new")
 
 
 def mark_job_evaluation_complete(conn: sqlite3.Connection, job_id: int) -> None:
@@ -395,6 +454,7 @@ def mark_job_gate_override(conn: sqlite3.Connection, job_id: int) -> None:
         (job_id,),
     )
     conn.commit()
+    add_job_event(conn, job_id, "status", "Filed as New — gate threshold bypassed")
 
 
 def update_job_raw_text(conn: sqlite3.Connection, job_id: int, raw_text: str) -> None:
@@ -411,29 +471,33 @@ def get_revisitable_jobs(conn: sqlite3.Connection) -> list[dict]:
 
 
 def mark_job_closed(conn: sqlite3.Connection, job_id: int, reason: str) -> None:
-    row = conn.execute("SELECT feedback_note FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    row = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         return
-    today = datetime.now(timezone.utc).date().isoformat()
-    line = f"[{today}] Moved to trash on revisit — {reason}."
-    old = (row["feedback_note"] or "").strip()
-    note = f"{old}\n\n{line}" if old else line
     conn.execute(
-        "UPDATE jobs SET status = 'trash', feedback_note = ?, "
-        "feedback_handled_at = datetime('now'), status_changed_at = datetime('now') "
-        "WHERE id = ?",
-        (note, job_id),
+        "UPDATE jobs SET status = 'trash', status_changed_at = datetime('now') WHERE id = ?",
+        (job_id,),
     )
     conn.commit()
+    add_job_event(conn, job_id, "status", f"Moved to Trash on revisit — {reason}")
 
 
-def update_job_feedback(conn: sqlite3.Connection, job_id: int, status: str, note: str) -> None:
+def update_job_feedback(
+    conn: sqlite3.Connection, job_id: int, status: str, note: str, *, record_event: bool = True
+) -> None:
+    row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    old_status = row["status"] if row is not None else None
     conn.execute(
         "UPDATE jobs SET status = ?, feedback_note = ?, feedback_handled_at = NULL, "
         "status_changed_at = datetime('now') WHERE id = ?",
         (status, note, job_id),
     )
     conn.commit()
+    if record_event and old_status is not None and old_status != status:
+        message = f"Status: {old_status} → {status}"
+        if isinstance(note, str) and note.strip():
+            message += f' — "{note.strip()}"'
+        add_job_event(conn, job_id, "status", message)
 
 
 def get_unhandled_profile_notes(conn: sqlite3.Connection, limit: int = 30) -> list[dict]:

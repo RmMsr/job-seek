@@ -2697,3 +2697,26 @@ def test_job_card_hides_revisit_button_for_slack(client, conn):
                        company="", raw_text="b")
     html = client.get(f"/jobs/{jid}").text
     assert f'/jobs/{jid}/revisit' not in html
+
+
+def test_job_detail_shows_history_block(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "rejected", "not remote")
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert "History (1)" in resp.text
+    assert 'Status: new → rejected — &#34;not remote&#34;' in resp.text or "Status: new → rejected" in resp.text
+
+
+def test_job_detail_no_history_block_when_empty(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert 'class="job-history"' not in resp.text
+
+
+def test_job_expand_shows_data_age(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert "job-data-age" in resp.text

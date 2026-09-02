@@ -20,7 +20,7 @@ def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
         "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
-        "tasks", "inbox_items",
+        "tasks", "inbox_items", "job_events",
     }
 
 
@@ -29,8 +29,26 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)  # should not raise
     assert _tables(conn) == {
         "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
-        "tasks", "inbox_items",
+        "tasks", "inbox_items", "job_events",
     }
+
+
+def test_job_events_table_created(conn):
+    init_db(conn)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(job_events)").fetchall()}
+    assert cols == {"id", "job_id", "created_at", "kind", "message"}
+
+
+def test_job_events_cascade_delete_with_job(conn):
+    init_db(conn)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://job/1')")
+    conn.execute("INSERT INTO job_events (job_id, kind, message) VALUES (1, 'status', 'x')")
+    conn.commit()
+    conn.execute("DELETE FROM jobs WHERE id = 1")
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0] == 0
 
 
 def test_jobs_url_is_unique(conn):

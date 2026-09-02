@@ -231,6 +231,8 @@ def run_revisit_job(
         yield _progress(
             f"{progress_prefix}Still open, posting changed ({reason_detail or 'no detail'}) — re-evaluating: {url}"
         )
+        detail = f" — {reason_detail}" if reason_detail else ""
+        q.add_job_event(conn, job["id"], "revisit", f"Revisit: posting changed{detail}")
         q.update_job_raw_text(conn, job["id"], text)
         content_type = job["content_type"] if job["content_type"] in ("job_posting", "lead") else "job_posting"
         yield from _evaluate_posting(
@@ -332,6 +334,8 @@ def run_reprocess_job(
 ) -> Generator[str, None, None]:
     source = q.get_source(conn, job["source_id"])
     is_slack = bool(source and source["fetcher_type"] == "slack")
+    before_scores = {s["scenario_id"]: s["relevance_score"] for s in q.get_job_scores(conn, job["id"])}
+    before_fit = job["fit_score"]
     q.reset_job(conn, job["id"])
     yield _progress(f"{progress_prefix}Reprocessing: {job['url']}")
     yield from _ingest_posting(
@@ -340,6 +344,18 @@ def run_reprocess_job(
         preserve_existing_metadata=job["published_at"] is not None,
     )
     if q.job_exists(conn, job["id"]):
+        for s in q.get_job_scores(conn, job["id"]):
+            q.log_score_change(
+                conn, job["id"],
+                label=f'Re-scored "{s["scenario_name"]}"',
+                old=before_scores.get(s["scenario_id"]),
+                new=s["relevance_score"],
+                threshold=s["scenario_gate_threshold"],
+            )
+        q.log_score_change(
+            conn, job["id"], label="Fit re-assessed",
+            old=before_fit, new=q.get_job(conn, job["id"])["fit_score"],
+        )
         yield _progress(f"{progress_prefix}Reset complete: {job['url']}")
     else:
         yield _progress(f"{progress_prefix}Removed as not job-related: {job['url']}")

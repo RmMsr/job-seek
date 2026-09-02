@@ -41,6 +41,9 @@
   {% if job.summary %}
     <section aria-label="Summary" class="markdown-content">{{ job.summary | markdown }}</section>
   {% endif %}
+  {% if job.fetched_at %}
+    <p class="job-data-age">Fetched {{ job.fetched_at | time_ago }}</p>
+  {% endif %}
   {% if job_scores %}
     {% include "jobs/_score_tabs.html" %}
   {% endif %}
@@ -72,6 +75,16 @@
     <label><strong>Job note</strong> (optional, will also feed back into adjusting your profile):
       <textarea name="note" placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
     </label>
+    {% if job_events %}
+    <details class="job-history">
+      <summary>History ({{ job_events | length }})</summary>
+      <ul class="job-history-list">
+        {% for e in job_events %}
+        <li><time datetime="{{ e.created_at }}" title="{{ e.created_at }}">{{ e.created_at[:10] }}</time> {{ e.message }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
     <div class="actions" role="group" aria-label="Decision">
       <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
       <button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>

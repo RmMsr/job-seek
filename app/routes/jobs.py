@@ -29,7 +29,7 @@ def _insert_error_job(conn: sqlite3.Connection, url: str, reason: str) -> int:
     source_id = q.get_or_create_manual_source(conn)
     job_id = q.insert_job(conn, source_id=source_id, url=url, title=url, company="", raw_text="")
     q.update_job_pipeline(conn, job_id, simplified_content="", content_type="error")
-    q.update_job_feedback(conn, job_id, "trash", reason)
+    q.update_job_feedback(conn, job_id, "trash", reason, record_event=False)
     return job_id
 
 
@@ -177,9 +177,10 @@ def _render_updated_job_html(
 
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
+    job_events = q.get_job_events(conn, job_id)
     return templates.get_template("jobs/_feedback.html").render(
         request=request, job=job, scenarios=scenarios, job_scores=job_scores,
-        filter=f, is_detail_page=detail,
+        job_events=job_events, filter=f, is_detail_page=detail,
     )
 
 
@@ -233,10 +234,11 @@ def job_detail(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
+    job_events = q.get_job_events(conn, job_id)
     return templates.TemplateResponse(
         request, "jobs/detail.html",
         {"job": job, "scenarios": scenarios, "job_scores": job_scores,
-         "is_detail_page": True, "filter": None},
+         "job_events": job_events, "is_detail_page": True, "filter": None},
     )
 
 
@@ -247,6 +249,7 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
+    job_events = q.get_job_events(conn, job_id)
     detail = _is_detail_page_request(request)
     f = _filter_from_request(request)
     if not detail:
@@ -255,7 +258,7 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
             job["stale_badge"] = stale_badge
     context = {
         "job": job, "scenarios": scenarios, "job_scores": job_scores,
-        "filter": f, "is_detail_page": detail,
+        "job_events": job_events, "filter": f, "is_detail_page": detail,
     }
     return templates.TemplateResponse(request, "jobs/_feedback.html", context)
 

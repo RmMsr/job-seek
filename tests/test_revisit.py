@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import patch
 from app.db.schema import init_db
 from app.db import queries as q
-from app.pipeline import run_revisit_job, RevisitOutcome
+from app.pipeline import run_revisit_job, RevisitOutcome, run_reprocess_job
 from app.fetchers.content import FetchError
 from tests.test_pipeline import _mock_client, _drain
 
@@ -149,3 +149,35 @@ def test_slack_source_is_skipped(conn):
     assert outcome.verdict == "skipped"
     m.assert_not_called()
     assert q.get_job(conn, jid)["status"] == "new"
+
+
+def test_reprocess_logs_score_change_vs_pre_reset(conn, board):
+    jid = q.insert_job(conn, source_id=board["id"], url="http://example.com/rp",
+                       title="ML Engineer", company="Acme", raw_text="original posting body text " * 20)
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting",
+                          summary="An ML role.")
+    scn = q.get_scenarios(conn)[0]["id"]
+    q.upsert_job_score(conn, jid, scn, 0.30, "old", "h")   # pre-reset baseline
+    job = q.get_job(conn, jid)
+
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "ok"}',
+        '{"title": "ML Engineer", "headline": "h", "summary": "s", "company": "Acme", "posted_date": ""}',
+        '{"score": 0.90, "reasoning": "much better now"}')
+    _drain(run_reprocess_job(conn, client, "llama3.2", job, q.get_scenarios(conn), q.get_profile(conn)))
+
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert any(m.startswith('Re-scored "Remote ML" 0.30 → 0.90') for m in msgs)
+
+
+def test_changed_revisit_logs_event(conn, board):
+    job = _job(conn, board, status="accepted")
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "ok"}',
+        '{"title": "ML Engineer", "headline": "h2", "summary": "s2", "company": "Acme", "posted_date": ""}',
+        '{"score": 0.95, "reasoning": "now great"}')
+    with patch("app.pipeline.fetch_url_html", return_value=_LONG), \
+         patch("app.pipeline.revisit_check", return_value=("changed", "comp band moved")):
+        _run(conn, job, client)
+    msgs = [e["message"] for e in q.get_job_events(conn, job["id"])]
+    assert "Revisit: posting changed — comp band moved" in msgs
