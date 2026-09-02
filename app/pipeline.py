@@ -81,6 +81,13 @@ def _evaluate_posting(
         client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
         today=datetime.now(timezone.utc).date(),
     )
+    # `preserve_existing_metadata` guards the *date*: a fetcher-supplied
+    # published_at is authoritative and relative phrases must not be re-resolved
+    # against a fresh "now". Company is separate — only eawork supplies one, so
+    # finn/slack/generic jobs depend entirely on LLM extraction. Write the
+    # extracted company whenever we don't already have one, but never let it
+    # overwrite an existing value.
+    has_company = bool((q.get_job(conn, job_id) or {}).get("company"))
     q.update_job_pipeline(
         conn, job_id,
         simplified_content=simplified,
@@ -88,7 +95,7 @@ def _evaluate_posting(
         title=job_summary.title or fallback_title,
         headline=job_summary.headline,
         summary=job_summary.summary,
-        company="" if preserve_existing_metadata else job_summary.company,
+        company="" if has_company else job_summary.company,
         published_at="" if preserve_existing_metadata else job_summary.posted_date,
     )
     passed_gate = False

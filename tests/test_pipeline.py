@@ -260,6 +260,47 @@ def test_run_reprocess_job_does_not_overwrite_existing_published_at(conn, source
     assert updated["company"] == "Acme"
 
 
+def test_run_reprocess_job_backfills_company_when_empty(conn, source):
+    # A finn ad carries a published_at from the listing, but the fetcher never
+    # provides a company — it only ever comes from LLM extraction. Reprocessing
+    # a job whose company was never filled in must backfill it.
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1", title="T",
+        company="", raw_text="<p>desc</p>", published_at="2026-06-01",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="s", content_type="job_posting", summary="s")
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full"}',
+        '{"title": "T", "company": "Accenture", "headline": "H", "summary": "S", "posted_date": "2026-08-25"}',
+        '{"score": 0.9, "reasoning": "m"}',
+    )
+    job = q.get_job(conn, jid)
+    _drain(run_reprocess_job(conn, client, "llama3.2", job, q.get_scenarios(conn), q.get_profile(conn)))
+    updated = q.get_job(conn, jid)
+    assert updated["company"] == "Accenture"
+    assert updated["published_at"] == "2026-06-01"
+
+
+def test_run_fetch_extracts_company_when_fetcher_has_date_but_no_company(conn, source):
+    # finn/slack/generic fetchers provide published_at but leave company="".
+    raw_jobs = [RawJob(
+        url="http://example.com/job/1", title="T", company="", raw_text="<p>d</p>",
+        published_at="2026-07-01T00:00:00+00:00",
+    )]
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full"}',
+        '{"title": "T", "company": "Accenture", "headline": "H", "summary": "S", "posted_date": "2026-08-20"}',
+        '{"score": 0.9, "reasoning": "m"}',
+    )
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    job = q.get_jobs(conn)[0]
+    assert job["company"] == "Accenture"
+    # fetcher's authoritative date still wins over the LLM guess
+    assert job["published_at"] == "2026-07-01T00:00:00+00:00"
+
+
 def test_run_fetch_skips_existing_url(conn, source):
     q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
     raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="text")]
