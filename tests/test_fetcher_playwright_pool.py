@@ -29,7 +29,10 @@ def test_render_returns_page_content():
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com")
     assert html == "<html>rendered</html>"
-    page.goto.assert_called_once_with("https://example.com", wait_until="networkidle", timeout=30000)
+    page.goto.assert_called_once_with(
+        "https://example.com", wait_until="domcontentloaded", timeout=30000
+    )
+    page.wait_for_timeout.assert_called_once_with(2000)
 
 
 def test_render_reuses_browser_across_calls_within_idle_window():

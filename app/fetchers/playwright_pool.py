@@ -9,6 +9,8 @@ logger = logging.getLogger("job_seek")
 
 DEFAULT_IDLE_TIMEOUT_SECONDS = 10.0
 DEFAULT_TIMEOUT_MS = 30000
+SETTLE_MS = 2000  # fixed pause after domcontentloaded for client-side rendering to finish;
+                  # networkidle never settles on pages with analytics/consent beacons
 MAX_BROWSER_INSTANCES = 1  # single dedicated worker thread owns at most one browser at a time
 
 # Playwright's "the browser binary isn't downloaded" launch error — an operator
@@ -102,7 +104,8 @@ class BrowserPool:
         ctx = browser.new_context()
         try:
             page = ctx.new_page()
-            page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.wait_for_timeout(SETTLE_MS)
             return page.content()
         finally:
             ctx.close()

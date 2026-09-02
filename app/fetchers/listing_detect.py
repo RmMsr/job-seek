@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 import openai
-from app.fetchers.content import fetch_url_html, has_enough_content
+from app.fetchers.content import fetch_url_html, has_enough_content, is_substantially_richer
 from app.fetchers.links import extract_links
 from app.fetchers.playwright_pool import render_html
 from app.ai.detect_listing import detect_listing
@@ -32,7 +32,9 @@ def detect_listing_page(client: openai.OpenAI, model: str, url: str) -> ListingD
     the raw-HTML detection is not a listing or has fewer than ``MIN_JOB_LINKS``
     links — many careers pages are JS-rendered and their raw HTML carries enough
     boilerplate to look non-thin while containing no job links. The rendered
-    result is kept only if it yields strictly more job links.
+    result is kept if it yields strictly more job links, or if the page is not a
+    listing and the render has substantially more text than the raw HTML (a
+    JS-rendered single posting whose raw HTML is a nav-only shell).
 
     Raises ``FetchError`` if the initial HTTP fetch fails.
     """
@@ -52,7 +54,9 @@ def detect_listing_page(client: openai.OpenAI, model: str, url: str) -> ListingD
         rendered = None if render_tried else render_html(url)
         if rendered and has_enough_content(rendered):
             alt = _detect(client, model, rendered, url)
-            if len(alt["job_links"]) > len(result["job_links"]):
+            if len(alt["job_links"]) > len(result["job_links"]) or (
+                not alt["is_listing"] and is_substantially_richer(rendered, html)
+            ):
                 return ListingDetection(rendered, alt["is_listing"], alt["job_links"], True)
 
     return ListingDetection(html, result["is_listing"], result["job_links"], False)

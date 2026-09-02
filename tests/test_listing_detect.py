@@ -57,3 +57,41 @@ def test_fetch_error_propagates():
     with patch("app.fetchers.listing_detect.fetch_url_html", side_effect=FetchError("HTTP 503")):
         with pytest.raises(FetchError):
             detect_listing_page(object(), "m", "https://ex.com/careers")
+
+
+_POSTING = "<html><body><p>" + (
+    "We are hiring a Staff Engineer. You will own the platform roadmap, mentor "
+    "engineers, and ship reliability improvements across the fleet. " * 12
+) + "</p></body></html>"
+
+
+def test_nonlisting_render_kept_when_substantially_richer():
+    # raw HTML clears the 200-char floor (so the first block is skipped) but is a
+    # thin JS shell; the render is a full, link-free posting.
+    detect = [_dl(False, []), _dl(False, [])]
+    with patch("app.fetchers.listing_detect.fetch_url_html", return_value=_BOILERPLATE), \
+         patch("app.fetchers.listing_detect.render_html", return_value=_POSTING) as render, \
+         patch("app.fetchers.listing_detect.detect_listing", side_effect=detect):
+        out = detect_listing_page(object(), "m", "https://ex.com/job/1")
+    render.assert_called_once_with("https://ex.com/job/1")
+    assert out.rendered is True and out.is_listing is False
+    assert out.html == _POSTING and out.job_links == []
+
+
+def test_nonlisting_render_discarded_when_not_richer():
+    similar = "<html><body><nav>Home About Contact</nav><p>" + \
+        ("Roughly the same amount of words as the raw page here. " * 6) + "</p></body></html>"
+    detect = [_dl(False, []), _dl(False, [])]
+    with patch("app.fetchers.listing_detect.fetch_url_html", return_value=_BOILERPLATE), \
+         patch("app.fetchers.listing_detect.render_html", return_value=similar), \
+         patch("app.fetchers.listing_detect.detect_listing", side_effect=detect):
+        out = detect_listing_page(object(), "m", "https://ex.com/job/1")
+    assert out.rendered is False and out.html == _BOILERPLATE and out.is_listing is False
+
+
+def test_nonlisting_render_returns_none_keeps_raw():
+    with patch("app.fetchers.listing_detect.fetch_url_html", return_value=_BOILERPLATE), \
+         patch("app.fetchers.listing_detect.render_html", return_value=None), \
+         patch("app.fetchers.listing_detect.detect_listing", return_value=_dl(False, [])):
+        out = detect_listing_page(object(), "m", "https://ex.com/job/1")
+    assert out.rendered is False and out.html == _BOILERPLATE

@@ -19,7 +19,10 @@ _SOURCE = {"id": 1, "name": "Careers", "url": "https://example.com/careers", "fe
 # would themselves fall under the 200-char thin-content threshold and
 # unintentionally trigger the Playwright fallback in tests that aren't testing that.
 _JOB_DETAIL_HTML = (
-    "<html><body><p>" + ("We are hiring a Senior Software Engineer to join our team. " * 5) + "</p></body></html>"
+    "<html><body><p>"
+    + ("We are hiring a Senior Software Engineer to join our platform team. "
+       "You will design services, review code, and mentor other engineers. " * 12)
+    + "</p></body></html>"
 )
 
 
@@ -105,6 +108,35 @@ def test_generic_listing_fetcher_falls_back_when_detail_page_returns_nonempty_bu
         jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
     mock_render.assert_called_once_with("https://example.com/jobs/1")
     assert len(jobs) == 1 and "Full job description" in jobs[0].raw_text
+
+
+@respx.mock
+def test_generic_listing_renders_detail_page_that_is_a_js_shell_over_200_chars():
+    # ~640 chars of nav boilerplate + "needs JavaScript": clears has_enough_text
+    # (the old trigger) but is nowhere near a real posting's length.
+    shell = "<html><body><nav>" + ("Home Careers About Contact Privacy Terms " * 12) + \
+        "</nav><p>This site needs JavaScript enabled.</p></body></html>"
+    respx.get("https://example.com/jobs/1").mock(return_value=httpx.Response(200, text=shell))
+    rendered_detail = "<html><body><p>" + ("Full role description and requirements. " * 20) + "</p></body></html>"
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, ["https://example.com/jobs/1"])), \
+         patch("app.fetchers.generic_listing.render_html", return_value=rendered_detail) as mock_render:
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    mock_render.assert_called_once_with("https://example.com/jobs/1")
+    assert len(jobs) == 1 and "Full role description" in jobs[0].raw_text
+
+
+@respx.mock
+def test_generic_listing_keeps_raw_detail_when_render_not_richer():
+    shell = "<html><body><nav>" + ("Home Careers About Contact Privacy Terms " * 12) + \
+        "</nav><p>This site needs JavaScript enabled.</p></body></html>"
+    respx.get("https://example.com/jobs/1").mock(return_value=httpx.Response(200, text=shell))
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, ["https://example.com/jobs/1"])), \
+         patch("app.fetchers.generic_listing.render_html", return_value=shell):
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    # render was no richer than raw -> keep the raw HttpFetcher result
+    assert len(jobs) == 1 and "needs JavaScript" in jobs[0].raw_text
 
 
 @respx.mock

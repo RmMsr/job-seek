@@ -3,7 +3,9 @@ import logging
 import time
 import openai
 from app.fetchers.base import RawJob
-from app.fetchers.content import has_enough_content, has_enough_text, extract_text, FetchError
+from app.fetchers.content import (
+    MIN_CONTENT_LENGTH, MIN_ARTICLE_LENGTH, has_enough_content, extract_readable_text, FetchError,
+)
 from app.fetchers.http import HttpFetcher
 from app.fetchers.listing_detect import detect_listing_page, ListingDetection, MIN_JOB_LINKS
 from app.fetchers.pagination import next_page_url
@@ -56,12 +58,15 @@ class GenericListingFetcher:
         playwright_fallbacks_used = 0
         for href in job_links:
             page_jobs = HttpFetcher({"url": href}).fetch()
-            is_thin = not page_jobs or not has_enough_text(page_jobs[0].raw_text)
+            raw_text = page_jobs[0].raw_text if page_jobs else ""
+            is_thin = len(raw_text.strip()) < MIN_ARTICLE_LENGTH
             if is_thin and playwright_fallbacks_used < MAX_PLAYWRIGHT_FALLBACKS:
                 playwright_fallbacks_used += 1
                 rendered = render_html(href)
                 if rendered and has_enough_content(rendered):
-                    page_jobs = [RawJob(url=href, title="", company="", raw_text=extract_text(rendered))]
+                    rendered_text = extract_readable_text(rendered)
+                    if len(rendered_text.strip()) >= len(raw_text.strip()) + MIN_CONTENT_LENGTH:
+                        page_jobs = [RawJob(url=href, title="", company="", raw_text=rendered_text)]
             jobs.extend(page_jobs)
         return jobs
 
