@@ -137,6 +137,26 @@ def test_results_names_the_source(conn):
     assert {"label": "Jobs from Cord", "href": f"/jobs?source_id={sid}"} in p["results"]
 
 
+def test_presentation_scenario_reevaluate_one_names_the_scenario(conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    t = q.enqueue_task(conn, kind="scenario_reevaluate_one", params={"scenario_id": sid})
+    p = task_presentation(conn, t)
+    assert p["title"] == "Re-evaluate: Remote ML"
+    assert p["goal"] == "Re-score against your scenarios and profile"
+
+
+def test_presentation_scenario_reevaluate_one_falls_back_without_scenario(conn):
+    t = q.enqueue_task(conn, kind="scenario_reevaluate_one", params={"scenario_id": 999})
+    assert task_presentation(conn, t)["title"] == "Re-evaluate scenario"
+
+
+def test_presentation_profile_reassess_fit_has_label_and_goal(conn):
+    t = q.enqueue_task(conn, kind="profile_reassess_fit", params={})
+    p = task_presentation(conn, t)
+    assert p["title"] == "Recompute profile fit"
+    assert p["goal"] == "Recompute how well your profile fits each job"
+
+
 def test_tasks_active_lists_queued_and_running(client, conn):
     q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1})
     resp = client.get("/tasks/active")

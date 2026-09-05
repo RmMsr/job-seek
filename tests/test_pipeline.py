@@ -860,6 +860,39 @@ def test_run_reassess_fit_skips_already_current_profile_hash(conn, source):
     assert "skipping 1 already current" in "".join(messages)
 
 
+def test_run_reassess_fit_skips_jobs_without_summary(conn, source):
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting")  # no summary
+
+    client = MagicMock()
+    with patch("app.pipeline.assess_fit") as mock_assess:
+        messages, _ = _drain(run_reassess_fit(conn, client, "llama3.2"))
+
+    mock_assess.assert_not_called()
+    assert any("Skipped (no summary on file)" in m for m in messages)
+    assert q.get_job(conn, jid)["profile_version_hash"] is None
+
+
+def test_run_reevaluate_scores_stale_jobs_and_skips_current(conn, source):
+    from app.pipeline import run_reevaluate
+    scenario = q.get_scenarios(conn)[0]
+    q.insert_criterion(conn, scenario["id"], "Must be remote", "must")
+    scenario = q.get_scenario(conn, scenario["id"])
+    jid = q.insert_job(conn, source_id=source["id"], url="http://example.com/job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="a role")
+
+    client = MagicMock()
+    with patch("app.pipeline.evaluate", return_value=(0.8, "good")) as mock_eval:
+        msgs1, scored1 = _drain(run_reevaluate(conn, client, "llama3.2", scenario))
+        msgs2, scored2 = _drain(run_reevaluate(conn, client, "llama3.2", scenario))
+
+    assert scored1 == 1
+    assert scored2 == 0
+    assert mock_eval.call_count == 1
+    assert any("skipping 1 already current" in m for m in msgs2)
+    assert q.get_job_score(conn, jid, scenario["id"])["relevance_score"] == pytest.approx(0.8)
+
+
 def test_run_fetch_stores_canonical_job_urls(conn):
     from app import pipeline
 

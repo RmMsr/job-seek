@@ -453,37 +453,30 @@ def run_reevaluate(
     client: openai.OpenAI,
     model: str,
     scenario: dict,
-    *,
-    scenario_label: str = "",
 ) -> Generator[str, None, int]:
     to_evaluate, skipped, criteria, current_hash = _eligible_for_reevaluation(conn, scenario)
     total = len(to_evaluate)
 
-    msg = f"Re-evaluating {len(to_evaluate)} job(s) for scenario '{scenario['name']}'"
+    msg = f"Re-evaluating {total} job(s) for scenario '{scenario['name']}'"
     if skipped:
         msg += f", skipping {skipped} already current"
-    yield _progress(scenario_label + msg)
+    yield _progress(msg)
 
+    scored = 0
     for i, job in enumerate(to_evaluate, start=1):
-        if job["simplified_content"]:
-            s = summarize(client, model, job["simplified_content"], content_type=job["content_type"])
-            ai_title, headline, new_summary = s.title, s.headline, s.summary
-        else:
-            ai_title, headline, new_summary = job["title"], job["headline"], job["summary"]
-        score, reasoning = evaluate(client, model, scenario, criteria, new_summary)
-        q.update_job_pipeline(
-            conn, job["id"],
-            simplified_content=job["simplified_content"],
-            content_type=job["content_type"],
-            title=ai_title or job["title"],
-            headline=headline,
-            summary=new_summary,
-        )
+        if not job["summary"]:
+            # A summary-less job keeps its stale hash and is re-listed (and
+            # re-skipped) on every run — refreshing the summary is the job of
+            # the per-job "reset to new" action, not this path.
+            yield _progress(f"[{i}/{total}] Skipped (no summary on file): {job['title'] or job['url']}")
+            continue
+        score, reasoning = evaluate(client, model, scenario, criteria, job["summary"])
         q.upsert_job_score(conn, job["id"], scenario["id"], score, reasoning, current_hash)
-        yield _progress(f"{scenario_label}[{i}/{total}] Re-scored {score}: {job['title'] or job['url']}")
+        scored += 1
+        yield _progress(f"[{i}/{total}] Re-scored {score}: {job['title'] or job['url']}")
 
-    yield _progress(f"{scenario_label}Re-evaluation complete for '{scenario['name']}': {len(to_evaluate)} job(s) updated")
-    return len(to_evaluate)
+    yield _progress(f"Re-evaluation complete for '{scenario['name']}': {scored} job(s) updated")
+    return scored
 
 
 def run_reassess_fit(
@@ -504,6 +497,13 @@ def run_reassess_fit(
     yield _progress(msg)
 
     for i, job in enumerate(to_assess, start=1):
+        if not job["summary"]:
+            # Same as run_reevaluate: never feed an empty summary to the LLM.
+            # A summary-less job keeps its stale hash and is re-listed (and
+            # re-skipped) on every run — refreshing the summary is the job of
+            # the per-job "reset to new" action, not this path.
+            yield _progress(f"[{i}/{len(to_assess)}] Skipped (no summary on file): {job['title'] or job['url']}")
+            continue
         result = assess_fit(client, model, profile, job["summary"])
         q.update_job_fit(
             conn, job["id"],

@@ -1,4 +1,5 @@
 from unittest.mock import patch, MagicMock
+import pytest
 from app.db import queries as q
 from app.ai.refine_profile import ProfileProposal
 from app.task_engine import execute_task
@@ -409,3 +410,86 @@ def test_accept_profile_proposals_leaves_unhandled_when_not_submitted(client, co
     )
 
     assert len(q.get_unhandled_profile_notes(conn)) == 1
+
+
+def test_profile_reassess_fit_task_recomputes_stale_fit(conn):
+    q.upsert_profile(conn, "I am a senior ML engineer.")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="seed summary")
+
+    task = q.enqueue_task(conn, kind="profile_reassess_fit", params={})
+    with patch("app.pipeline.assess_fit", return_value={
+        "interest": 0.8, "interest_reasoning": "a",
+        "attainability": 0.6, "attainability_reasoning": "b",
+    }):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+
+    assert q.get_task(conn, task["id"])["status"] == "done"
+    assert q.get_job(conn, jid)["interest_score"] == pytest.approx(0.8)
+
+
+def test_profile_save_enqueues_fit_reassess_when_text_changed(client, conn):
+    q.upsert_profile(conn, "old profile")
+    client.post("/profile", data={"content": "new profile text"})
+    assert q.find_active_task(conn, "profile_reassess_fit", {}) is not None
+
+
+def test_profile_save_does_not_enqueue_when_text_unchanged(client, conn):
+    q.upsert_profile(conn, "same text")
+    client.post("/profile", data={"content": "same text"})
+    assert q.find_active_task(conn, "profile_reassess_fit", {}) is None
+
+
+def test_accept_profile_proposals_enqueues_fit_reassess_when_applied(client, conn):
+    q.upsert_profile(conn, "## Technologies\n\n- Python\n")
+    client.post(
+        "/profile/refine/accept",
+        data={"kind_0": "add", "section_0": "Technologies", "text_0": "AI/ML", "apply_0": "on"},
+    )
+    assert q.find_active_task(conn, "profile_reassess_fit", {}) is not None
+
+
+def test_accept_profile_proposals_no_enqueue_when_nothing_applied(client, conn):
+    q.upsert_profile(conn, "## Technologies\n\n- Python\n")
+    client.post("/profile/refine/accept", data={"job_ids": "1"})
+    assert q.find_active_task(conn, "profile_reassess_fit", {}) is None
+
+
+def test_profile_save_crlf_only_change_does_not_enqueue(client, conn):
+    q.upsert_profile(conn, "line one\nline two")
+    client.post("/profile", data={"content": "line one\r\nline two"})
+    assert q.get_profile(conn) == "line one\nline two"
+    assert q.find_active_task(conn, "profile_reassess_fit", {}) is None
+
+
+def test_profile_reassess_fit_reenqueues_when_profile_changed_mid_run(conn):
+    q.upsert_profile(conn, "profile A")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="seed")
+
+    task = q.enqueue_task(conn, kind="profile_reassess_fit", params={})
+
+    def assess_then_mutate_profile(*a, **kw):
+        q.upsert_profile(conn, "profile B")  # simulate a save landing mid-run
+        return {"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}
+
+    with patch("app.pipeline.assess_fit", side_effect=assess_then_mutate_profile):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+
+    followups = [t for t in q.get_active_tasks(conn) if t["kind"] == "profile_reassess_fit"]
+    assert len(followups) == 1
+
+
+def test_profile_reassess_fit_no_reenqueue_when_profile_stable(conn):
+    q.upsert_profile(conn, "stable profile")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting", summary="seed")
+
+    task = q.enqueue_task(conn, kind="profile_reassess_fit", params={})
+    with patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+
+    assert q.get_active_tasks(conn) == []

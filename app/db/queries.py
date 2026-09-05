@@ -1001,18 +1001,22 @@ def _decode_task(row: dict) -> dict:
     return row
 
 
-def find_active_task(conn: sqlite3.Connection, kind: str, params: dict) -> dict | None:
+def find_active_task(
+    conn: sqlite3.Connection, kind: str, params: dict, exclude_task_id: int | None = None
+) -> dict | None:
     params_json = json.dumps(params, sort_keys=True)
     row = conn.execute(
         "SELECT * FROM tasks WHERE kind = ? AND params = ? AND status IN ('queued', 'running') "
+        "AND id IS NOT ? "
         "ORDER BY created_at DESC LIMIT 1",
-        (kind, params_json),
+        (kind, params_json, exclude_task_id),
     ).fetchone()
     return _decode_task(_row_to_dict(row)) if row is not None else None
 
 
 def enqueue_task(
-    conn: sqlite3.Connection, kind: str, params: dict, parent_task_id: int | None = None
+    conn: sqlite3.Connection, kind: str, params: dict, parent_task_id: int | None = None,
+    exclude_task_id: int | None = None,
 ) -> dict:
     """Returns the task dict, with an extra (non-persisted) "already_active"
     key: True when an identical queued/running task was found and reused
@@ -1021,7 +1025,7 @@ def enqueue_task(
     A child step of a multi-step action passes `parent_task_id` = the id of
     the *root* task (chains are flattened — a step never points at another
     step)."""
-    existing = find_active_task(conn, kind, params)
+    existing = find_active_task(conn, kind, params, exclude_task_id=exclude_task_id)
     if existing is not None:
         existing["already_active"] = True
         return existing

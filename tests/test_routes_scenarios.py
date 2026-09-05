@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 from app.db import queries as q
 from app.ai.refine import CriterionProposal
-from app.ai.summarize import JobSummary
 from app.task_engine import execute_task
 
 
@@ -10,6 +9,16 @@ def _run_refine_one(conn, scenario_id):
     task = q.enqueue_task(conn, kind="scenario_refine_one", params={"scenario_id": scenario_id})
     execute_task(conn, MagicMock(), "model", MagicMock(), task)
     return q.get_task(conn, task["id"])
+
+
+def _drain_all_tasks(conn):
+    """Run every queued task to completion, worker-style, including children
+    spawned by fan-out roots."""
+    while True:
+        task = q.claim_next_task(conn)
+        if task is None:
+            return
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
 
 
 def test_scenarios_page_returns_200(client):
@@ -581,22 +590,20 @@ def test_reevaluate_task_execution_updates_jobs(conn):
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="original summary")
 
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
+    q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    with patch("app.pipeline.summarize") as mock_summarize, \
          patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+        _drain_all_tasks(conn)
 
-    fetched = q.get_task(conn, task["id"])
-    assert fetched["status"] == "done"
-    assert "Re-evaluating 1 job(s)" in fetched["log"]
-    assert "Re-evaluation complete" in fetched["log"]
     score = q.get_job_score(conn, job_id, sid)
     assert score["relevance_score"] == pytest.approx(0.75)
-    job = q.get_job(conn, job_id)
-    assert job["summary"] == "Updated summary"
+    # summary + title unchanged proves run_reevaluate called neither summarize() nor update_job_pipeline()
+    assert q.get_job(conn, job_id)["summary"] == "original summary"
+    assert q.get_job(conn, job_id)["title"] == "ML Eng"
+    mock_summarize.assert_not_called()
 
 
 def test_reevaluate_includes_accepted_jobs(conn):
@@ -604,19 +611,15 @@ def test_reevaluate_includes_accepted_jobs(conn):
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="seed summary")
     q.update_job_feedback(conn, job_id, "accepted", "")
 
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+    q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    with patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+        _drain_all_tasks(conn)
 
-    fetched = q.get_task(conn, task["id"])
-    assert "Re-evaluating 1 job(s)" in fetched["log"]
-    score = q.get_job_score(conn, job_id, sid)
-    assert score["relevance_score"] == pytest.approx(0.75)
+    assert q.get_job_score(conn, job_id, sid)["relevance_score"] == pytest.approx(0.75)
 
 
 def test_reevaluate_excludes_rejected_and_trash_jobs(conn):
@@ -624,137 +627,98 @@ def test_reevaluate_excludes_rejected_and_trash_jobs(conn):
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     rejected_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="A", company="C", raw_text="r")
-    q.update_job_pipeline(conn, rejected_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_pipeline(conn, rejected_id, simplified_content="clean", content_type="job_posting", summary="seed")
     q.update_job_feedback(conn, rejected_id, "rejected", "")
     trash_id = q.insert_job(conn, source_id=source_id, url="http://job/2", title="B", company="C", raw_text="r")
-    q.update_job_pipeline(conn, trash_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_pipeline(conn, trash_id, simplified_content="clean", content_type="job_posting", summary="seed")
     q.update_job_feedback(conn, trash_id, "trash", "")
 
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="Title", headline="Hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+    q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    with patch("app.pipeline.evaluate", return_value=(0.75, "x")) as mock_evaluate, \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+        _drain_all_tasks(conn)
 
-    fetched = q.get_task(conn, task["id"])
-    assert "Re-evaluating 0 job(s)" in fetched["log"]
+    mock_evaluate.assert_not_called()
+
+
+def test_reevaluate_skips_jobs_without_summary(conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid, "Must be remote", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="clean", content_type="job_posting")
+
+    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    with patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate, \
+         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
+        _drain_all_tasks(conn)
+
+    mock_evaluate.assert_not_called()
+    kids = q.get_task_children(conn, task["id"])
+    child = next(k for k in kids if k["kind"] == "scenario_reevaluate_one")
+    assert "Skipped (no summary on file)" in child["log"]
+    assert q.get_job_score(conn, jid, sid) is None
 
 
 def test_reevaluate_skips_jobs_already_current(conn):
     sid = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid, "Must be remote", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
-    q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    job_id = q.get_jobs(conn)[0]["id"]
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="seed summary")
 
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate, \
+    with patch("app.pipeline.evaluate", return_value=(0.75, "Good match")) as mock_evaluate, \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        task1 = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-        execute_task(conn, MagicMock(), "model", MagicMock(), task1)
-        # A fresh enqueue after the first task has finished is not deduped
-        # (enqueue_task only dedupes against a still-queued/running task).
-        task2 = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-        execute_task(conn, MagicMock(), "model", MagicMock(), task2)
+        q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+        _drain_all_tasks(conn)
+        q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+        _drain_all_tasks(conn)
 
     assert mock_evaluate.call_count == 1
-    fetched2 = q.get_task(conn, task2["id"])
-    assert "skipping 1 already current" in fetched2["log"]
-    assert "Re-evaluating 0 job(s)" in fetched2["log"]
 
 
-def test_reevaluate_all_scenarios_combined_progress(conn):
+def test_reevaluate_all_fans_out_one_child_per_scenario_plus_fit(client, conn):
+    sid_a = q.insert_scenario(conn, "Remote ML", "")
+    sid_b = q.insert_scenario(conn, "Robotics", "")
+    root_id = client.post("/scenarios/reevaluate").json()["task_id"]
+
+    execute_task(conn, MagicMock(), "model", MagicMock(), q.get_task(conn, root_id))
+
+    kids = q.get_task_children(conn, root_id)
+    assert sorted(k["kind"] for k in kids) == [
+        "profile_reassess_fit", "scenario_reevaluate_one", "scenario_reevaluate_one",
+    ]
+    scenario_ids = {k["params"]["scenario_id"] for k in kids if k["kind"] == "scenario_reevaluate_one"}
+    assert scenario_ids == {sid_a, sid_b}
+    assert all(k["parent_task_id"] == root_id for k in kids)
+    assert q.get_task(conn, root_id)["status"] == "done"
+
+
+def test_reevaluate_all_children_rescore_every_scenario(conn):
     sid_a = q.insert_scenario(conn, "Remote ML", "")
     q.insert_criterion(conn, sid_a, "Must be remote", "must")
     sid_b = q.insert_scenario(conn, "Robotics", "")
-    q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
+    q.insert_criterion(conn, sid_b, "Must be embedded", "must")
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="seed summary")
 
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
+    q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    with patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
          patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+        _drain_all_tasks(conn)
 
-    fetched = q.get_task(conn, task["id"])
-    assert fetched["status"] == "done"
-    assert "Re-evaluating 2 scenario(s)" in fetched["log"]
-    assert "All scenarios re-evaluated: 2 job(s) updated across 2 scenario(s); fit recomputed for 1 job(s)" in fetched["log"]
-    assert q.get_job_score(conn, job_id, sid_a) is not None
-    assert q.get_job_score(conn, job_id, sid_b) is not None
+    assert q.get_job_score(conn, job_id, sid_a)["relevance_score"] == pytest.approx(0.75)
+    assert q.get_job_score(conn, job_id, sid_b)["relevance_score"] == pytest.approx(0.75)
+    assert q.get_job(conn, job_id)["interest_score"] == pytest.approx(0.5)
 
 
-def test_reevaluate_all_scenarios_counts_scenarios_and_jobs_independently(conn):
-    sid_a = q.insert_scenario(conn, "Remote ML", "")
-    q.insert_criterion(conn, sid_a, "Must be remote", "must")
-    sid_b = q.insert_scenario(conn, "Robotics", "")
-    q.insert_criterion(conn, sid_b, "Must involve embedded systems", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
-    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
-
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="ML Engineer - Remote @ Acme", headline="Great hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
-         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
-
-    # One job re-scored per scenario: the scenario counter climbs 1/2 -> 2/2,
-    # but the job counter resets per scenario rather than accumulating across
-    # scenarios (there is only ever 1 job to score in each one).
-    fetched = q.get_task(conn, task["id"])
-    assert "[Scenario 1/2: Remote ML] [1/1] Re-scored" in fetched["log"]
-    assert "[Scenario 2/2: Robotics] [1/1] Re-scored" in fetched["log"]
-
-
-def test_reevaluate_all_scenarios_recomputes_fit_for_accepted_and_gate_failed_jobs(conn):
-    sid = q.insert_scenario(conn, "Remote ML", "")
-    q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
-
-    accepted_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="A", company="C", raw_text="r")
-    q.update_job_pipeline(conn, accepted_id, simplified_content="clean", content_type="job_posting")
-    q.update_job_feedback(conn, accepted_id, "accepted", "")
-
-    gate_failed_id = q.insert_job(conn, source_id=source_id, url="http://job/2", title="B", company="C", raw_text="r")
-    q.update_job_pipeline(conn, gate_failed_id, simplified_content="clean", content_type="job_posting")
-
-    fit_result = {
-        "interest": 0.8, "interest_reasoning": "a",
-        "attainability": 0.6, "attainability_reasoning": "b",
-    }
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(title="Title", headline="Hook", summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.2, "weak")), \
-         patch("app.pipeline.assess_fit", return_value=fit_result):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
-
-    fetched = q.get_task(conn, task["id"])
-    assert fetched["status"] == "done"
-    assert "fit recomputed for 2 job(s)" in fetched["log"]
-    assert q.get_job(conn, accepted_id)["interest_score"] == pytest.approx(0.8)
-    assert q.get_job(conn, gate_failed_id)["interest_score"] == pytest.approx(0.8)
-
-
-def test_reevaluate_keeps_existing_title_when_ai_title_empty(conn):
-    sid = q.insert_scenario(conn, "Remote ML", "")
-    q.insert_criterion(conn, sid, "Must be remote", "must")
-    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
-    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
-    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting")
-
-    task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
-    with patch("app.pipeline.summarize", return_value=JobSummary(summary="Updated summary")), \
-         patch("app.pipeline.evaluate", return_value=(0.75, "Good match")), \
-         patch("app.pipeline.assess_fit", return_value={"interest": 0.5, "interest_reasoning": "x", "attainability": 0.5, "attainability_reasoning": "y"}):
-        execute_task(conn, MagicMock(), "model", MagicMock(), task)
-
-    job = q.get_job(conn, job_id)
-    assert job["title"] == "ML Eng"
-    assert job["summary"] == "Updated summary"
+def test_reevaluate_all_with_no_scenarios_still_queues_fit(conn):
+    q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    task = q.claim_next_task(conn)
+    execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    kids = q.get_task_children(conn, task["id"])
+    assert [k["kind"] for k in kids] == ["profile_reassess_fit"]
 
 
 def test_refine_proposals_sorted_must_prefer_avoid(conn):
@@ -858,3 +822,73 @@ def test_delete_scenario_route(client, conn):
 
 def test_delete_missing_scenario_404(client):
     assert client.delete("/scenarios/99999").status_code == 404
+
+
+def test_scenario_reevaluate_one_scopes_to_that_scenario(conn):
+    sid_a = q.insert_scenario(conn, "Remote ML", "")
+    q.insert_criterion(conn, sid_a, "Must be remote", "must")
+    sid_b = q.insert_scenario(conn, "Robotics", "")
+    q.insert_criterion(conn, sid_b, "Must be embedded", "must")
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    job_id = q.insert_job(conn, source_id=source_id, url="http://job/1", title="ML Eng", company="C", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="clean", content_type="job_posting", summary="seed summary")
+
+    task = q.enqueue_task(conn, kind="scenario_reevaluate_one", params={"scenario_id": sid_a})
+    with patch("app.pipeline.evaluate", return_value=(0.75, "Good match")):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+
+    assert q.get_task(conn, task["id"])["status"] == "done"
+    assert q.get_job_score(conn, job_id, sid_a)["relevance_score"] == pytest.approx(0.75)
+    assert q.get_job_score(conn, job_id, sid_b) is None
+
+
+def test_scenario_reevaluate_one_noop_when_scenario_deleted(conn):
+    task = q.enqueue_task(conn, kind="scenario_reevaluate_one", params={"scenario_id": 999})
+    execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "done"
+    assert "no longer exists" in fetched["log"]
+
+
+def test_post_scenario_reevaluate_enqueues_scoped_task(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    resp = client.post(f"/scenarios/{sid}/reevaluate")
+    assert resp.status_code == 200
+    data = resp.json()
+    task = q.get_task(conn, data["task_id"])
+    assert task["kind"] == "scenario_reevaluate_one"
+    assert task["params"] == {"scenario_id": sid}
+    assert data["already_active"] is False
+
+
+def test_post_scenario_reevaluate_dedupes_while_queued(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    first = client.post(f"/scenarios/{sid}/reevaluate").json()
+    second = client.post(f"/scenarios/{sid}/reevaluate").json()
+    assert first["task_id"] == second["task_id"]
+    assert second["already_active"] is True
+
+
+def test_post_scenario_reevaluate_404_for_missing_scenario(client, conn):
+    resp = client.post("/scenarios/999/reevaluate")
+    assert resp.status_code == 404
+
+
+def test_scenario_edits_do_not_enqueue_reevaluation(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "old")
+    client.post(f"/scenarios/{sid}", data={"name": "Remote ML", "description": "new", "gate_threshold": "0.8"})
+    cid = q.insert_criterion(conn, sid, "Must be remote", "must")
+    resp = client.post(f"/scenarios/{sid}/criteria", data={"text": "Prefer Python", "weight": "prefer"})
+    assert resp.status_code == 200
+    client.post(f"/criteria/{cid}", data={"text": "Must be fully remote", "weight": "must"})
+    client.delete(f"/criteria/{cid}")
+
+    assert q.find_active_task(conn, "scenario_reevaluate_one", {"scenario_id": sid}) is None
+    assert q.get_active_tasks(conn) == []
+
+
+def test_scenarios_page_has_per_scenario_reevaluate_button(client, conn):
+    sid = q.insert_scenario(conn, "Remote ML", "")
+    resp = client.get("/scenarios")
+    assert f'data-progress-url="/scenarios/{sid}/reevaluate"' in resp.text
+    assert "Re-evaluate this scenario" in resp.text

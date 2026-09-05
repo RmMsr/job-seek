@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.ai.refine import propose_criteria, match_removal_target
-from app.pipeline import run_reevaluate, run_reassess_fit
+from app.pipeline import run_reevaluate
 from app.task_engine import register_task_kind
 from app.template_env import templates
 
@@ -83,31 +83,22 @@ def create_scenario(
 
 @register_task_kind("scenarios_reevaluate_all")
 def _task_scenarios_reevaluate_all(conn, client, model, config, params):
+    """Root task: fan out one scenario_reevaluate_one child per scenario, plus
+    one profile_reassess_fit child. Completes immediately — displayed state is
+    derived from the children (like fetch_all)."""
     scenarios = q.get_scenarios(conn)
-    yield f"Re-evaluating {len(scenarios)} scenario(s)"
-    total_updated = 0
-    for idx, scenario in enumerate(scenarios, start=1):
-        label = f"[Scenario {idx}/{len(scenarios)}: {scenario['name']}] "
-        gen = run_reevaluate(conn, client, model, scenario, scenario_label=label)
-        try:
-            while True:
-                yield next(gen)
-        except StopIteration as stop:
-            total_updated += stop.value
-
-    fit_gen = run_reassess_fit(conn, client, model)
-    fit_updated = 0
-    try:
-        while True:
-            yield next(fit_gen)
-    except StopIteration as stop:
-        fit_updated = stop.value
-
-    yield (
-        f"All scenarios re-evaluated: {total_updated} job(s) updated across "
-        f"{len(scenarios)} scenario(s); fit recomputed for {fit_updated} job(s)"
+    for scenario in scenarios:
+        q.enqueue_task(
+            conn, kind="scenario_reevaluate_one",
+            params={"scenario_id": scenario["id"]},
+            parent_task_id=params["_task_id"],
+        )
+    q.enqueue_task(
+        conn, kind="profile_reassess_fit", params={},
+        parent_task_id=params["_task_id"],
     )
-    return {"notices": [], "html_chunks": []}
+    yield f"Queued re-evaluation of {len(scenarios)} scenario(s) + profile fit"
+    return {}
 
 
 @register_task_kind("scenarios_refine_all")
@@ -159,9 +150,26 @@ def _task_scenario_refine_one(conn, client, model, config, params):
     return {"notices": [], "html_chunks": [html]}
 
 
+@register_task_kind("scenario_reevaluate_one")
+def _task_scenario_reevaluate_one(conn, client, model, config, params):
+    scenario = q.get_scenario(conn, params["scenario_id"])
+    if scenario is None:
+        yield "Scenario no longer exists — nothing to re-evaluate"
+        return {}
+    yield from run_reevaluate(conn, client, model, scenario)
+    return {}
+
+
 @router.post("/scenarios/reevaluate")
 def reevaluate_all_scenarios(conn: sqlite3.Connection = Depends(get_db)):
     task = q.enqueue_task(conn, kind="scenarios_reevaluate_all", params={})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
+
+
+@router.post("/scenarios/{scenario_id}/reevaluate")
+def reevaluate_one_scenario(scenario_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    _get_scenario_or_404(conn, scenario_id)
+    task = q.enqueue_task(conn, kind="scenario_reevaluate_one", params={"scenario_id": scenario_id})
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 

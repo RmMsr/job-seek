@@ -5,6 +5,8 @@ from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
 from app.ai.refine_profile import propose_profile_changes
+from app.pipeline import run_reassess_fit
+from app.scenario_version import compute_profile_hash
 from app.profile_apply import resolve_proposals, apply_profile_proposals, group_proposals_by_section
 from app.task_engine import register_task_kind
 from app.template_env import templates
@@ -30,7 +32,11 @@ def profile_save(
     content: str = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
 ):
+    content = content.replace("\r\n", "\n")
+    changed = content != q.get_profile(conn)
     q.upsert_profile(conn, content)
+    if changed:
+        q.enqueue_task(conn, kind="profile_reassess_fit", params={})
     ctx = _profile_context(conn)
     ctx["saved"] = True
     return templates.TemplateResponse(request, "profile/index.html", ctx)
@@ -48,6 +54,22 @@ def _task_profile_refine(conn, client, model, config, params):
         request=None, grouped=group_proposals_by_section(resolved), job_ids=[n["id"] for n in notes],
     )
     return {"notices": [], "html_chunks": [html]}
+
+
+@register_task_kind("profile_reassess_fit")
+def _task_profile_reassess_fit(conn, client, model, config, params):
+    hash_before = compute_profile_hash(q.get_profile(conn))
+    yield from run_reassess_fit(conn, client, model)
+    if compute_profile_hash(q.get_profile(conn)) != hash_before:
+        # A profile save landed mid-run and deduped against *this* still-running
+        # task, so its edits were never scored. Queue a fresh pass — excluding
+        # our own task id so the dedup doesn't just hand us back to ourselves.
+        q.enqueue_task(
+            conn, kind="profile_reassess_fit", params={},
+            exclude_task_id=params.get("_task_id"),
+        )
+        yield "Profile changed during recompute — queued another fit pass"
+    return {}
 
 
 @router.post("/profile/refine")
@@ -83,6 +105,8 @@ async def accept_profile_proposals(
     profile_text = q.get_profile(conn)
     new_text = apply_profile_proposals(profile_text, resolved)
     q.upsert_profile(conn, new_text)
+    if new_text != profile_text:
+        q.enqueue_task(conn, kind="profile_reassess_fit", params={})
     job_ids = [int(v) for v in form.getlist("job_ids")]
     q.mark_profile_feedback_handled(conn, job_ids)
     ctx = _profile_context(conn)

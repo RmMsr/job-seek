@@ -39,6 +39,12 @@
     {% include "scenarios/_criteria.html" %}
     {% endwith %}
 
+    <button class="btn" style="margin-top:0.5rem;"
+      data-progress-url="/scenarios/{{ scenario.id }}/reevaluate"
+      title="Re-score every new/accepted job against this scenario's current criteria (only jobs whose score is out of date).">
+      Re-evaluate this scenario
+    </button>
+
     <div class="scenario-feedback-block">
       <h4 style="margin:0 0 0.5rem;">Feedback &amp; Refinement</h4>
       {% set fc = feedback_counts_by_scenario[scenario.id] %}
