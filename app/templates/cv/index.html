@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}CV — Job Seek{% endblock %}
+{% block content %}
+<div id="cv-page">
+<h1>CV</h1>
+<p style="color:var(--text-muted);">Your base CV — what every tailored, per-job version starts from.</p>
+
+{% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
+
+<form method="post" action="/cv"
+      hx-post="/cv" hx-target="#cv-page" hx-select="#cv-page" hx-swap="outerHTML">
+  <label>Base CV (markdown)<br>
+    <textarea name="base_cv" style="width:100%;min-height:420px;font-family:monospace;box-sizing:border-box;">{{ settings.base_cv }}</textarea>
+  </label>
+  <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;">
+    <button type="submit" class="btn btn-primary">Save &amp; preview</button>
+  </div>
+</form>
+
+<div id="cv-base-preview" style="margin-top:1rem;">
+  {% if saved %}{% include "cv/_preview_result.html" %}{% endif %}
+</div>
+
+<p style="margin-top:1.5rem;"><a href="/cv/advanced">Advanced / experimental CV settings &rarr;</a></p>
+</div>
+{% endblock %}

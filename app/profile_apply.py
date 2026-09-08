@@ -1,14 +1,6 @@
 from __future__ import annotations
 from app.ai.refine_profile import ProfileProposal
-
-
-def _find_bullet_line(lines: list[str], text: str) -> int | None:
-    needle = text.strip().casefold()
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("- ") and stripped[2:].strip().casefold() == needle:
-            return i
-    return None
+from app.bullet_edits import find_bullet, format_bullet, replace_bullet, remove_bullet
 
 
 def _find_section_bounds(lines: list[str], section: str) -> tuple[int, int] | None:
@@ -47,26 +39,17 @@ def resolve_proposals(proposals: list[ProfileProposal], profile_text: str) -> li
     resolved = []
     for p in proposals:
         if p.action == "add":
-            if _find_bullet_line(lines, p.text) is not None:
+            if find_bullet(lines, p.text) is not None:
                 continue
             row = {"action": "add", "section": p.section, "text": p.text, "target": None}
             if p.anchor:
                 row["anchor"] = p.anchor
             resolved.append(row)
         else:
-            if _find_bullet_line(lines, p.target) is None:
+            if find_bullet(lines, p.target) is None:
                 continue
             resolved.append({"action": p.action, "section": p.section, "text": p.text, "target": p.target})
     return resolved
-
-
-def _format_bullet(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("- "):
-        stripped = stripped[2:].strip()
-    elif stripped.startswith("-"):
-        stripped = stripped[1:].strip()
-    return f"- {stripped}"
 
 
 def group_proposals_by_section(resolved: list[dict]) -> list[dict]:
@@ -80,13 +63,9 @@ def apply_profile_proposals(profile_text: str, resolved: list[dict]) -> str:
     lines = profile_text.splitlines()
     for r in resolved:
         if r["action"] == "remove":
-            idx = _find_bullet_line(lines, r["target"])
-            if idx is not None:
-                del lines[idx]
+            remove_bullet(lines, r["target"])
         elif r["action"] == "replace":
-            idx = _find_bullet_line(lines, r["target"])
-            if idx is not None:
-                lines[idx] = _format_bullet(r["text"])
+            replace_bullet(lines, r["target"], r["text"])
         elif r["action"] == "add":
             bounds = _find_section_bounds(lines, r["section"])
             if bounds is not None:
@@ -106,7 +85,7 @@ def apply_profile_proposals(profile_text: str, resolved: list[dict]) -> str:
                     # heading and the new bullet instead of gluing them.
                     lines.insert(insert_at, "")
                     insert_at += 1
-                lines.insert(insert_at, _format_bullet(r["text"]))
+                lines.insert(insert_at, format_bullet(r["text"]))
                 # Never leave the new bullet glued to the next section's heading.
                 if insert_at + 1 < len(lines) and lines[insert_at + 1].startswith("#"):
                     lines.insert(insert_at + 1, "")
@@ -115,7 +94,7 @@ def apply_profile_proposals(profile_text: str, resolved: list[dict]) -> str:
                     lines.append("")
                 lines.append(f"## {r['section']}")
                 lines.append("")
-                lines.append(_format_bullet(r["text"]))
+                lines.append(format_bullet(r["text"]))
     result = "\n".join(lines)
     if profile_text.endswith("\n"):
         result += "\n"

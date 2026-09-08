@@ -1349,6 +1349,25 @@ def test_get_active_tasks_excludes_done_and_failed(conn):
     assert [t["id"] for t in active] == [b["id"]]
 
 
+def test_cv_generate_task_id_matches_only_generate_tasks(conn):
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s','http://s','manual')")
+    j7 = conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://s/7','A')").lastrowid
+    j8 = conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://s/8','B')").lastrowid
+    conn.commit()
+    assert q.cv_generate_task_id(conn, j7) is None
+    # a plan task never counts — it produces no draft
+    plan = q.enqueue_task(conn, kind="cv_tailor",
+                          params={"job_id": j7, "mode": "plan", "render": "plan_pane"})
+    assert q.cv_generate_task_id(conn, j7) is None
+    q.complete_task(conn, plan["id"], {})
+    gen = q.enqueue_task(conn, kind="cv_tailor",
+                         params={"job_id": j7, "mode": "generate", "render": "preview_pane"})
+    assert q.cv_generate_task_id(conn, j7) == gen["id"]
+    assert q.cv_generate_task_id(conn, j8) is None  # other job
+    q.complete_task(conn, gen["id"], {})
+    assert q.cv_generate_task_id(conn, j7) is None  # finished
+
+
 def test_inbox_item_lifecycle(conn):
     item_id = q.create_inbox_item(conn, kind="browser_missing", message="hi", link="/x")
     assert q.count_unresolved_inbox_items(conn) == 1
@@ -2027,3 +2046,86 @@ def test_update_job_fit_logs_meaningful_move(conn):
     q.update_job_fit(conn, jid, 0.8, "i", 0.8, "a", "p")   # fit_score = 0.80
     msgs = [e["message"] for e in q.get_job_events(conn, jid)]
     assert msgs == ["Fit re-assessed 0.60 → 0.80"]
+
+
+# --- CV ---
+
+def test_get_cv_settings_autocreates_and_defaults(conn):
+    from app.cv.instruction import DEFAULT_BASE_CV
+
+    s = q.get_cv_settings(conn)
+    assert s["base_cv"] == DEFAULT_BASE_CV
+    assert s["default_scope"] == ["select", "reorder"]
+    # idempotent
+    assert q.get_cv_settings(conn)["base_cv"] == DEFAULT_BASE_CV
+
+
+def test_save_and_reload_cv_settings(conn):
+    q.save_cv_settings(
+        conn, base_cv="# Me", base_instruction="British English",
+        base_guardrails="No invented dates", css="p{color:red}",
+        default_scope=["select", "reorder", "rephrase"],
+    )
+    s = q.get_cv_settings(conn)
+    assert s["base_cv"] == "# Me"
+    assert s["default_scope"] == ["select", "reorder", "rephrase"]
+    assert s["css"] == "p{color:red}"
+
+
+def test_save_cv_settings_round_trips_directives_template(conn):
+    q.save_cv_settings(conn, base_cv="", base_instruction="", base_guardrails="",
+                       css="", default_scope=[1], directives_template="## Foo\n## Bar")
+    assert q.get_cv_settings(conn)["directives_template"] == "## Foo\n## Bar"
+
+
+def _seed_job_for_cv(conn):
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s','http://x','manual')")
+    conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://x/1','Role')")
+    conn.commit()
+    return 1
+
+
+def test_job_cv_upsert_roundtrip_json(conn):
+    jid = _seed_job_for_cv(conn)
+    assert q.get_job_cv(conn, jid) is None
+    q.upsert_job_cv(conn, jid, scope=["select"], plan=[{"category": "trim", "line": "x", "rationale": "y"}],
+                    tailored_cv="# Draft", base_hash="abc")
+    row = q.get_job_cv(conn, jid)
+    assert row["scope"] == ["select"]
+    assert row["plan"][0]["line"] == "x"
+    assert row["tailored_cv"] == "# Draft"
+    assert row["base_hash"] == "abc"
+
+
+def test_set_directives_stamps_edited_at(conn):
+    jid = _seed_job_for_cv(conn)
+    q.upsert_job_cv(conn, jid, scope=["select"])
+    q.set_job_cv_directives(conn, jid, "- foreground X, keep Y")
+    row = q.get_job_cv(conn, jid)
+    assert row["tuning_directives"] == "- foreground X, keep Y"
+    assert row["directives_edited_at"] is not None
+
+
+def test_finalize_and_unfinalize(conn):
+    jid = _seed_job_for_cv(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="x")
+    q.finalize_job_cv(conn, jid)
+    assert q.get_job_cv(conn, jid)["finalized_at"] is not None
+    q.unfinalize_job_cv(conn, jid)
+    assert q.get_job_cv(conn, jid)["finalized_at"] is None
+
+
+def test_set_job_cv_scope_persists_and_stamps(conn):
+    jid = _seed_job_for_cv(conn)
+    q.set_job_cv_scope(conn, jid, [2, 3])
+    row = q.get_job_cv(conn, jid)
+    assert row["scope"] == [2, 3]
+    assert row["scope_edited_at"] is not None
+
+
+def test_cv_plan_task_id_only_matches_plan_mode(conn):
+    jid = _seed_job_for_cv(conn)
+    q.enqueue_task(conn, kind="cv_tailor", params={"job_id": jid, "mode": "generate"})
+    assert q.cv_plan_task_id(conn, jid) is None
+    t = q.enqueue_task(conn, kind="cv_tailor", params={"job_id": jid, "mode": "plan"})
+    assert q.cv_plan_task_id(conn, jid) == t["id"]

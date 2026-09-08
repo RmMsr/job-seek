@@ -1,0 +1,19 @@
+{# Change digest + newly-generated-content list, shown in the preview pane
+   between the Update button and the tab bar so it's visible on any tab.
+   `cv_diff_view` comes from _workbench_ctx (None when there's no draft or no
+   base snapshot to diff against). #}
+{% if cv_diff_view %}
+<div class="cv-diff-summary">
+  <p class="cv-diff-summary-line">{{ cv_diff_view.summary_line }}</p>
+  {% if cv_diff_view.added_items %}
+  <div class="cv-diff-added">
+    <strong>New — not from your base CV, review these</strong>
+    <ul>
+      {% for sec, text in cv_diff_view.added_items %}
+      <li>{% if sec %}<span class="muted">[{{ sec }}]</span> {% endif %}{{ text }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

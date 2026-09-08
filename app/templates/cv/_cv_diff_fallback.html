@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         margin: 2rem; color: #222; }
+  del { color: #b3261e; }
+  ins { color: #0a7d33; text-decoration: none; background: #e9f6ec; }
+  del.cvd-block, ins.cvd-block { display: block; padding: 0.1em 0.4em;
+         border-left: 3px solid currentColor; margin: 0.15em 0; }
+  .cvd-added { background: #fff3d6; }
+  .cvd-move, .cvd-new { font-size: 0.78em; font-weight: 700; cursor: help;
+         background: #ececec; border: 1px solid #ccc; border-radius: 0.4em;
+         padding: 0 0.4em; margin-left: 0.35em; white-space: nowrap; }
+  .cvd-move.cvd-up { background: #e1ecfb; border-color: #9fbde6; }
+  .cvd-move.cvd-down { background: #f0e4d4; border-color: #cbab82; }
+  .cvd-new { background: #ffe9a8; border-color: #e0c366; }
+  .cvd-hnote { display: inline-block; font-size: 0.72em; font-weight: 700; cursor: help;
+         margin: -0.2em 0 0.6em; padding: 0.05em 0.55em; border-radius: 0.5em;
+         background: #ececec; border: 1px solid #ccc; }
+  .cvd-hnote.cvd-up { background: #e1ecfb; border-color: #9fbde6; }
+  .cvd-hnote.cvd-down { background: #f0e4d4; border-color: #cbab82; }
+  .cvd-hnote-edit { font-size: 0.82em; font-weight: 400; margin-left: 0.3em; }
+  .cvd-gone { margin: 0.6em 0 1em; }
+  .cvd-gone-h { color: #b3261e; font-weight: 700; }
+  .cvd-gone-h2 { font-size: 1.4em; } .cvd-gone-h3 { font-size: 1.15em; }
+  .cvd-gone-d { font-size: 0.9em; margin-left: 0.4em; }
+  .cvd-gone-d > summary { cursor: pointer; color: #b3261e; }
+  .cvd-gone-line del { color: #8a6d6d; }
+  article > :not(.sidebar), body > :not(.sidebar) { padding-right: 1.2em; }
+  .sidebar :is(li,p,h1,h2,h3,h4,h5,h6) { padding-left: 0.8em; }
+  :is(li,p):has(.cvd-del,.cvd-ins,.cvd-move,.cvd-new),
+  :is(h1,h2,h3,h4,h5,h6):has(.cvd-hnote-edit),
+  :is(h1,h2,h3,h4,h5,h6):has(+ .cvd-hnote), del.cvd-block, ins.cvd-block, .cvd-added, .cvd-gone {
+    box-shadow: inset -3px 0 0 #7c3aed;
+    background-image: linear-gradient(to left, rgba(124,58,237,0.20), transparent 50%); }
+  .sidebar :is(li,p):has(.cvd-del,.cvd-ins,.cvd-move,.cvd-new),
+  .sidebar del.cvd-block, .sidebar ins.cvd-block, .sidebar .cvd-added {
+    box-shadow: inset 3px 0 0 #7c3aed;
+    background-image: linear-gradient(to right, rgba(124,58,237,0.20), transparent 50%); }
+  :is(li,p) > .cvd-block { box-shadow: none; background-image: none; }
+  .muted { color: #666; }
+</style></head><body>
+{% if predates %}
+  <p class="muted">This draft predates change tracking &mdash; regenerate to see the differences.</p>
+{% else %}
+  {{ body_html | safe }}
+{% endif %}
+</body></html>

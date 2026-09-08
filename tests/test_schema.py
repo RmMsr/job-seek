@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
-        "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -28,7 +28,7 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)
     init_db(conn)  # should not raise
     assert _tables(conn) == {
-        "profile", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -1241,3 +1241,287 @@ def test_status_changed_at_column_present_and_idempotent():
     cols = {r[1] for r in c.execute("PRAGMA table_info(jobs)")}
     assert "status_changed_at" in cols
     c.close()
+
+
+def test_cv_settings_table_is_singleton():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    assert cols == {
+        "id", "base_cv", "base_instruction", "base_guardrails",
+        "css", "default_scope", "directives_template", "updated_at",
+    }
+    conn.execute("INSERT INTO cv_settings (id) VALUES (1)")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO cv_settings (id) VALUES (2)")
+
+
+def test_job_cv_table_columns_and_cascade():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert cols == {
+        "job_id", "scope", "tuning_directives", "plan", "handled_suggestions", "tailored_cv",
+        "guardrail_findings", "change_report", "base_hash", "base_cv_snapshot",
+        "plan_generated_at", "directives_edited_at", "generated_at",
+        "scope_edited_at", "plan_context_hash",
+        "finalized_at", "updated_at",
+    }
+    conn.execute(
+        "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'manual')"
+    )
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://x/1')")
+    conn.execute("INSERT INTO job_cv (job_id) VALUES (1)")
+    conn.execute("DELETE FROM jobs WHERE id = 1")
+    assert conn.execute("SELECT COUNT(*) FROM job_cv").fetchone()[0] == 0
+
+
+def test_init_db_drops_job_cv_preview_pages(conn):
+    conn.executescript(
+        """
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT '[]',
+            tuning_directives TEXT NOT NULL DEFAULT '',
+            plan TEXT NOT NULL DEFAULT '[]',
+            tailored_cv TEXT NOT NULL DEFAULT '',
+            guardrail_findings TEXT NOT NULL DEFAULT '[]',
+            change_report TEXT NOT NULL DEFAULT '{}',
+            base_hash TEXT NOT NULL DEFAULT '',
+            preview_pages TEXT NOT NULL DEFAULT '[]',
+            plan_generated_at TEXT, directives_edited_at TEXT, generated_at TEXT, finalized_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO job_cv (job_id, preview_pages) VALUES (1, '[\"/x/p1.png\"]')")
+    conn.commit()
+
+    init_db(conn)
+
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert "preview_pages" not in cols
+
+
+def test_init_db_drops_cv_scope_options_is_baseline(conn):
+    conn.executescript(
+        """
+        CREATE TABLE cv_scope_options (
+            id INTEGER PRIMARY KEY,
+            description TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            default_enabled INTEGER NOT NULL DEFAULT 0,
+            is_baseline INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO cv_scope_options (description, name, default_enabled, is_baseline, sort_order) "
+        "VALUES ('keep me', 'correct', 1, 1, 0)"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_scope_options)")}
+    assert "is_baseline" not in cols
+    # the pre-existing row survives
+    assert conn.execute("SELECT description FROM cv_scope_options WHERE name='correct'").fetchone()[0] == "keep me"
+
+
+def test_init_db_adds_job_cv_handled_suggestions_defaulting_empty(conn):
+    conn.executescript(
+        """
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT '[]',
+            plan TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO job_cv (job_id) VALUES (1)")
+    conn.commit()
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert "handled_suggestions" in cols
+    assert conn.execute("SELECT handled_suggestions FROM job_cv WHERE job_id = 1").fetchone()[0] == "[]"
+    assert conn.execute("SELECT COUNT(*) FROM job_cv").fetchone()[0] == 1  # row preserved
+
+    init_db(conn)  # idempotent
+    assert "preview_pages" not in {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+
+
+def test_init_db_adds_job_cv_base_cv_snapshot_defaulting_empty(conn):
+    conn.executescript(
+        """
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT '[]',
+            plan TEXT NOT NULL DEFAULT '[]',
+            handled_suggestions TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO job_cv (job_id) VALUES (1)")
+    conn.commit()
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert "base_cv_snapshot" in cols
+    assert conn.execute("SELECT base_cv_snapshot FROM job_cv WHERE job_id = 1").fetchone()[0] == ""
+    assert conn.execute("SELECT COUNT(*) FROM job_cv").fetchone()[0] == 1  # row preserved
+
+    init_db(conn)  # idempotent
+    assert "base_cv_snapshot" in {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+
+
+def test_init_db_migrates_cv_settings_merges_floor_into_guardrails(conn):
+    conn.executescript(
+        """
+        CREATE TABLE cv_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            base_cv TEXT NOT NULL DEFAULT '',
+            base_instruction TEXT NOT NULL DEFAULT '',
+            base_guardrails TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO cv_settings (id, base_guardrails) VALUES (1, 'Keep it to two pages.')")
+    conn.commit()
+
+    init_db(conn)
+
+    from app.cv.instruction import DEFAULT_GUARDRAILS_RULES
+    merged = conn.execute("SELECT base_guardrails FROM cv_settings WHERE id = 1").fetchone()[0]
+    assert DEFAULT_GUARDRAILS_RULES[0] in merged
+    assert "Keep it to two pages." in merged
+    assert merged.index(DEFAULT_GUARDRAILS_RULES[0]) < merged.index("Keep it to two pages.")
+
+    # Idempotent: running again doesn't duplicate the floor text.
+    init_db(conn)
+    merged2 = conn.execute("SELECT base_guardrails FROM cv_settings WHERE id = 1").fetchone()[0]
+    assert merged2.count(DEFAULT_GUARDRAILS_RULES[0]) == 1
+
+
+def test_init_db_seeds_cv_scope_options_once(conn):
+    init_db(conn)
+    from app.db import queries as q
+    opts = q.get_scope_options(conn)
+    assert len(opts) == 6
+    # Idempotent: running again doesn't duplicate the seed.
+    init_db(conn)
+    assert len(q.get_scope_options(conn)) == 6
+
+
+def test_cv_settings_has_directives_template_column(conn):
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    assert "directives_template" in cols
+
+
+def test_init_db_seeds_directives_template_default(conn):
+    init_db(conn)
+    from app.cv.instruction import DEFAULT_DIRECTIVES_TEMPLATE
+    from app.db import queries as q
+    q.get_cv_settings(conn)  # ensure singleton row
+    row = conn.execute("SELECT directives_template FROM cv_settings WHERE id = 1").fetchone()
+    assert row[0] == DEFAULT_DIRECTIVES_TEMPLATE
+
+
+def test_cv_scope_options_has_name_column(conn):
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_scope_options)")}
+    assert "name" in cols
+
+
+def test_migrate_adds_name_and_reseeds_pristine_scope_options(conn):
+    init_db(conn)
+    from app.db import queries as q
+    opts = q.get_scope_options(conn)
+    assert [o["name"] for o in opts] == ["correct", "choose", "organize", "rephrase", "introduce", "wildcard"]
+
+
+def test_init_db_remaps_string_keyed_scope_to_ids(conn):
+    # Deliberately doesn't create sources/jobs tables (job_cv.job_id carries
+    # no FK in this minimal schema, so they aren't needed to exercise the
+    # scope remap) -- creating a minimal `jobs` table here would otherwise
+    # spuriously trip the unrelated, pre-existing
+    # _migrate_jobs_status_invalid_to_trash migration (it only skips when the
+    # `jobs` table is entirely absent), which expects the full jobs column
+    # set that isn't relevant to this test.
+    conn.executescript(
+        """
+        CREATE TABLE cv_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            base_cv TEXT NOT NULL DEFAULT '',
+            base_instruction TEXT NOT NULL DEFAULT '',
+            base_guardrails TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT '[]',
+            tuning_directives TEXT NOT NULL DEFAULT '',
+            plan TEXT NOT NULL DEFAULT '[]',
+            tailored_cv TEXT NOT NULL DEFAULT '',
+            guardrail_findings TEXT NOT NULL DEFAULT '[]',
+            change_report TEXT NOT NULL DEFAULT '{}',
+            base_hash TEXT NOT NULL DEFAULT '',
+            preview_pages TEXT NOT NULL DEFAULT '[]',
+            plan_generated_at TEXT, directives_edited_at TEXT, generated_at TEXT, finalized_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO cv_settings (id) VALUES (1)")
+    conn.execute(
+        "INSERT INTO job_cv (job_id, scope) VALUES (1, '[\"select\",\"rephrase\"]')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    from app.db import queries as q
+    import json
+    settings = conn.execute("SELECT default_scope FROM cv_settings WHERE id = 1").fetchone()[0]
+    assert json.loads(settings) == [1, 2]  # select=1, reorder=2 (seed order)
+    job_scope = conn.execute("SELECT scope FROM job_cv WHERE job_id = 1").fetchone()[0]
+    assert json.loads(job_scope) == [1, 3]  # select=1, rephrase=3
+
+    # Idempotent: running again doesn't re-map already-integer scope arrays.
+    init_db(conn)
+    job_scope2 = conn.execute("SELECT scope FROM job_cv WHERE job_id = 1").fetchone()[0]
+    assert json.loads(job_scope2) == [1, 3]
+
+
+def test_job_cv_has_scope_edited_at_and_plan_context_hash(conn):
+    init_db(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)").fetchall()}
+    assert {"scope_edited_at", "plan_context_hash"} <= cols
+
+
+def test_job_cv_new_columns_migration_is_idempotent(conn):
+    # Simulate a pre-existing DB without the columns, then migrate twice.
+    conn.executescript(
+        "CREATE TABLE job_cv (job_id INTEGER PRIMARY KEY, scope TEXT NOT NULL DEFAULT '[]');"
+    )
+    from app.db.schema import (
+        _migrate_job_cv_add_scope_edited_at, _migrate_job_cv_add_plan_context_hash,
+    )
+    _migrate_job_cv_add_scope_edited_at(conn)
+    _migrate_job_cv_add_scope_edited_at(conn)
+    _migrate_job_cv_add_plan_context_hash(conn)
+    _migrate_job_cv_add_plan_context_hash(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)").fetchall()}
+    assert {"scope_edited_at", "plan_context_hash"} <= cols

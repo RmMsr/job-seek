@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from app.cv.instruction import DEFAULT_BASE_CV, DEFAULT_GUARDRAILS, DEFAULT_DIRECTIVES_TEMPLATE
 from app.url_canon import canonicalize_url
 
 # Letters + digits, no underscore — keeps Unicode words (Norwegian "ø/æ/å",
@@ -30,6 +31,229 @@ def upsert_profile(conn: sqlite3.Connection, content: str) -> None:
         "INSERT INTO profile (id, content) VALUES (1, ?) "
         "ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')",
         (content,),
+    )
+    conn.commit()
+
+
+# --- CV ---
+
+_JOB_CV_JSON_COLS = ("scope", "plan", "handled_suggestions", "guardrail_findings", "change_report")
+
+
+def get_cv_settings(conn: sqlite3.Connection) -> dict:
+    row = conn.execute("SELECT * FROM cv_settings WHERE id = 1").fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO cv_settings (id, base_cv, base_guardrails, directives_template) "
+            "VALUES (1, ?, ?, ?)",
+            (DEFAULT_BASE_CV, DEFAULT_GUARDRAILS, DEFAULT_DIRECTIVES_TEMPLATE),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM cv_settings WHERE id = 1").fetchone()
+    d = dict(row)
+    d["default_scope"] = json.loads(d["default_scope"])
+    return d
+
+
+def save_cv_settings(
+    conn: sqlite3.Connection, *, base_cv: str, base_instruction: str,
+    base_guardrails: str, css: str, default_scope: list[str],
+    directives_template: str = "",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO cv_settings
+            (id, base_cv, base_instruction, base_guardrails, css, default_scope, directives_template)
+        VALUES (1, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            base_cv = excluded.base_cv,
+            base_instruction = excluded.base_instruction,
+            base_guardrails = excluded.base_guardrails,
+            css = excluded.css,
+            default_scope = excluded.default_scope,
+            directives_template = excluded.directives_template,
+            updated_at = datetime('now')
+        """,
+        (base_cv, base_instruction, base_guardrails, css, json.dumps(default_scope),
+         directives_template),
+    )
+    conn.commit()
+
+
+def _seed_default_scope_options(conn: sqlite3.Connection) -> None:
+    from app.cv.instruction import DEFAULT_SCOPE_OPTIONS
+    for i, opt in enumerate(DEFAULT_SCOPE_OPTIONS):
+        conn.execute(
+            "INSERT INTO cv_scope_options (name, description, default_enabled, sort_order) "
+            "VALUES (?, ?, ?, ?)",
+            (opt.get("name", ""), opt["description"], int(opt["default_enabled"]), i),
+        )
+    conn.commit()
+
+
+def get_scope_options(conn: sqlite3.Connection) -> list[dict]:
+    return _rows_to_dicts(
+        conn.execute("SELECT * FROM cv_scope_options ORDER BY sort_order, id").fetchall()
+    )
+
+
+def insert_scope_option(
+    conn: sqlite3.Connection, description: str, name: str = "", default_enabled: bool = False
+) -> int:
+    next_sort = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM cv_scope_options").fetchone()[0]
+    cur = conn.execute(
+        "INSERT INTO cv_scope_options (name, description, default_enabled, sort_order) VALUES (?, ?, ?, ?)",
+        (name, description, int(default_enabled), next_sort),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_scope_option(conn: sqlite3.Connection, scope_option_id: int) -> dict | None:
+    return _row_to_dict(
+        conn.execute("SELECT * FROM cv_scope_options WHERE id = ?", (scope_option_id,)).fetchone()
+    )
+
+
+def update_scope_option(
+    conn: sqlite3.Connection, scope_option_id: int, description: str,
+    default_enabled: bool, name: str = "",
+) -> None:
+    conn.execute(
+        "UPDATE cv_scope_options SET name = ?, description = ?, default_enabled = ? WHERE id = ?",
+        (name, description, int(default_enabled), scope_option_id),
+    )
+    conn.commit()
+
+
+def delete_scope_option(conn: sqlite3.Connection, scope_option_id: int) -> None:
+    conn.execute("DELETE FROM cv_scope_options WHERE id = ?", (scope_option_id,))
+    conn.commit()
+
+
+def reset_scope_options(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM cv_scope_options")
+    _seed_default_scope_options(conn)
+
+
+def get_job_cv(conn: sqlite3.Connection, job_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM job_cv WHERE job_id = ?", (job_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    for col in _JOB_CV_JSON_COLS:
+        d[col] = json.loads(d[col])
+    return d
+
+
+def upsert_job_cv(conn: sqlite3.Connection, job_id: int, **fields) -> None:
+    encoded = {}
+    for k, v in fields.items():
+        if k in _JOB_CV_JSON_COLS and not isinstance(v, str):
+            encoded[k] = json.dumps(v)
+        else:
+            encoded[k] = v
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    if encoded:
+        sets = ", ".join(f"{k} = ?" for k in encoded)
+        conn.execute(
+            f"UPDATE job_cv SET {sets}, updated_at = datetime('now') WHERE job_id = ?",
+            (*encoded.values(), job_id),
+        )
+    else:
+        conn.execute("UPDATE job_cv SET updated_at = datetime('now') WHERE job_id = ?", (job_id,))
+    conn.commit()
+
+
+def set_job_cv_directives(conn: sqlite3.Connection, job_id: int, text: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    conn.execute(
+        "UPDATE job_cv SET tuning_directives = ?, directives_edited_at = datetime('now'), "
+        "updated_at = datetime('now') WHERE job_id = ?",
+        (text, job_id),
+    )
+    conn.commit()
+
+
+def set_job_cv_scope(conn: sqlite3.Connection, job_id: int, scope: list[int]) -> None:
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    conn.execute(
+        "UPDATE job_cv SET scope = ?, scope_edited_at = datetime('now'), "
+        "updated_at = datetime('now') WHERE job_id = ?",
+        (json.dumps(scope), job_id),
+    )
+    conn.commit()
+
+
+def _handled_key(d: dict) -> tuple:
+    return (d.get("action", "add"),
+            (d.get("line") or "").strip().casefold(),
+            (d.get("target") or "").strip().casefold())
+
+
+def add_handled_suggestions(conn: sqlite3.Connection, job_id: int, items: list[dict]) -> None:
+    """Record proposals the candidate reviewed and chose not to apply — a
+    judgement call about data the CV doesn't carry, not a rejection — so
+    plan_tailoring stops re-proposing them. De-duped by (action, line, target)."""
+    if not items:
+        return
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    row = conn.execute(
+        "SELECT handled_suggestions FROM job_cv WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    current = json.loads(row["handled_suggestions"] if row else "[]")
+    seen = {_handled_key(d) for d in current}
+    for it in items:
+        rec = {"action": it.get("action", "add"), "section": it.get("section", ""),
+               "rationale": it.get("rationale", ""),
+               "line": it.get("line") or None, "target": it.get("target") or None}
+        k = _handled_key(rec)
+        if k not in seen:
+            seen.add(k)
+            current.append(rec)
+    conn.execute(
+        "UPDATE job_cv SET handled_suggestions = ?, updated_at = datetime('now') WHERE job_id = ?",
+        (json.dumps(current), job_id),
+    )
+    conn.commit()
+
+
+def remove_handled_suggestion(conn: sqlite3.Connection, job_id: int, index: int) -> None:
+    row = conn.execute(
+        "SELECT handled_suggestions FROM job_cv WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    if row is None:
+        return
+    current = json.loads(row["handled_suggestions"])
+    if 0 <= index < len(current):
+        current.pop(index)
+        conn.execute(
+            "UPDATE job_cv SET handled_suggestions = ?, updated_at = datetime('now') WHERE job_id = ?",
+            (json.dumps(current), job_id),
+        )
+        conn.commit()
+
+
+def clear_handled_suggestions(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute(
+        "UPDATE job_cv SET handled_suggestions = '[]', updated_at = datetime('now') WHERE job_id = ?",
+        (job_id,),
+    )
+    conn.commit()
+
+
+def finalize_job_cv(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute(
+        "UPDATE job_cv SET finalized_at = datetime('now'), updated_at = datetime('now') WHERE job_id = ?",
+        (job_id,),
+    )
+    conn.commit()
+
+
+def unfinalize_job_cv(conn: sqlite3.Connection, job_id: int) -> None:
+    conn.execute(
+        "UPDATE job_cv SET finalized_at = NULL, updated_at = datetime('now') WHERE job_id = ?",
+        (job_id,),
     )
     conn.commit()
 
@@ -1164,6 +1388,34 @@ def get_active_tasks(conn: sqlite3.Connection) -> list[dict]:
         "SELECT * FROM tasks WHERE status IN ('queued', 'running') ORDER BY created_at ASC"
     ).fetchall()
     return [_decode_task(d) for d in _rows_to_dicts(rows)]
+
+
+def cv_generate_task_id(conn: sqlite3.Connection, job_id: int) -> int | None:
+    """The id of a queued/running cv_tailor 'generate' task for this job. Lets the
+    workbench show the "update in progress" note across a reload and reattach so
+    the preview pane still refreshes when the task finishes. Returns None otherwise
+    — a 'plan' task produces no draft and doesn't count."""
+    for t in conn.execute(
+        "SELECT id, params FROM tasks WHERE kind = 'cv_tailor' AND status IN ('queued', 'running') "
+        "ORDER BY created_at DESC"
+    ).fetchall():
+        p = json.loads(t["params"] or "{}")
+        if p.get("job_id") == job_id and p.get("mode") == "generate":
+            return t["id"]
+    return None
+
+
+def cv_plan_task_id(conn: sqlite3.Connection, job_id: int) -> int | None:
+    """The id of a queued/running cv_tailor 'plan' task for this job — lets the
+    workbench show the plan stage as 'working' across a reload."""
+    for t in conn.execute(
+        "SELECT id, params FROM tasks WHERE kind = 'cv_tailor' AND status IN ('queued', 'running') "
+        "ORDER BY created_at DESC"
+    ).fetchall():
+        p = json.loads(t["params"] or "{}")
+        if p.get("job_id") == job_id and p.get("mode") == "plan":
+            return t["id"]
+    return None
 
 
 def claim_next_task(conn: sqlite3.Connection) -> dict | None:

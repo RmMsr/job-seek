@@ -33,6 +33,16 @@ COPY --from=builder /app/.venv /app/.venv
 # found regardless of runtime uid.
 RUN playwright install --with-deps chromium
 
+# doc-write (AGPL, invoked only as a subprocess) for per-job CV rendering, plus
+# the system libraries WeasyPrint needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 \
+        libjpeg62-turbo libgdk-pixbuf-2.0-0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --python /app/.venv/bin/python \
+        "doc-write @ git+https://gitlab.com/RmMsr/doc-write-mcp.git"
+
 COPY app ./app
 
 # data/ is the mount point for all per-instance state; a bind mount would

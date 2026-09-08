@@ -93,11 +93,10 @@ def _title(conn: sqlite3.Connection, task: dict) -> str:
         n = len(params.get("job_ids") or [])
         verb = "Reset" if kind == "jobs_bulk_reset" else "Re-evaluate"
         return f"{verb} {n} job{'s' if n != 1 else ''}"
-    if kind == "scenario_reevaluate_one":
-        scenario = q.get_scenario(conn, params.get("scenario_id"))
-        return f"Re-evaluate: {scenario['name']}" if scenario else "Re-evaluate scenario"
-    if kind == "profile_reassess_fit":
-        return "Recompute profile fit"
+    if kind == "cv_tailor":
+        verb = "Evaluate CV directives" if params.get("mode") == "plan" else "Update CV"
+        title = _job_title(conn, params.get("job_id"))
+        return f"{verb}: {title}" if title else verb
     return kind.replace("_", " ")
 
 
@@ -116,10 +115,8 @@ def _goal(conn: sqlite3.Connection, task: dict) -> str:
     if kind == "job_add_by_url":
         url = params.get("url", "")
         return f"Add the job at {url[:60]}{'…' if len(url) > 60 else ''}"
-    if kind in ("job_reevaluate", "jobs_bulk_reevaluate", "scenarios_reevaluate_all", "scenario_reevaluate_one"):
+    if kind in ("job_reevaluate", "jobs_bulk_reevaluate", "scenarios_reevaluate_all"):
         return "Re-score against your scenarios and profile"
-    if kind == "profile_reassess_fit":
-        return "Recompute how well your profile fits each job"
     if kind in ("job_reset", "jobs_bulk_reset"):
         return "Re-run the full pipeline for the selected job(s)"
     if kind == "job_pass_as_new":
@@ -128,6 +125,10 @@ def _goal(conn: sqlite3.Connection, task: dict) -> str:
         return "Generate improvement suggestions from your feedback"
     if kind in ("source_detect", "source_confirm", "job_add_listing_source"):
         return f"Add {params.get('name') or params.get('url', 'a source')} as a source"
+    if kind == "cv_tailor":
+        if params.get("mode") == "plan":
+            return "Check your tuning directives against this job and suggest changes"
+        return "Regenerate the tailored CV from your current directives"
     return ""
 
 
@@ -195,6 +196,10 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
     elif (rjid := _single_revisit_job_id(task)) is not None:
         title = _job_title(conn, rjid)
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{rjid}"})
+    elif kind == "cv_tailor" and params.get("job_id"):
+        title = _job_title(conn, params["job_id"])
+        out.append({"label": f"Open the CV for {title}" if title else "Open the CV workbench",
+                    "href": f"/jobs/{params['job_id']}/cv"})
     elif kind in ("jobs_bulk_reset", "jobs_bulk_reevaluate"):
         out.append({"label": "Back to jobs", "href": "/jobs"})
     elif kind in ("source_confirm", "job_add_listing_source", "source_detect") and r.get("source_id"):

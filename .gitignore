@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 job-seek.db*
 config.toml
+cv-previews/
 browser-profile/
 job-seek/
 /data/

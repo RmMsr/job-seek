@@ -1,9 +1,50 @@
+import json
 import sqlite3
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS profile (
     id INTEGER PRIMARY KEY,
     content TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cv_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    base_cv TEXT NOT NULL DEFAULT '',
+    base_instruction TEXT NOT NULL DEFAULT '',
+    base_guardrails TEXT NOT NULL DEFAULT '',
+    css TEXT NOT NULL DEFAULT '',
+    default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+    directives_template TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cv_scope_options (
+    id INTEGER PRIMARY KEY,
+    description TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    default_enabled INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS job_cv (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL DEFAULT '[]',
+    tuning_directives TEXT NOT NULL DEFAULT '',
+    plan TEXT NOT NULL DEFAULT '[]',
+    handled_suggestions TEXT NOT NULL DEFAULT '[]',
+    tailored_cv TEXT NOT NULL DEFAULT '',
+    guardrail_findings TEXT NOT NULL DEFAULT '[]',
+    change_report TEXT NOT NULL DEFAULT '{}',
+    base_hash TEXT NOT NULL DEFAULT '',
+    base_cv_snapshot TEXT NOT NULL DEFAULT '',
+    plan_generated_at TEXT,
+    directives_edited_at TEXT,
+    generated_at TEXT,
+    scope_edited_at TEXT,
+    plan_context_hash TEXT,
+    finalized_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -384,6 +425,18 @@ def _migrate_jobs_drop_feedback_scenario_id(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("ALTER TABLE jobs DROP COLUMN feedback_scenario_id")
+    conn.commit()
+
+
+def _migrate_job_cv_drop_preview_pages(conn: sqlite3.Connection) -> None:
+    # Previews are rendered on demand as HTML now (doc-write-cli --html) — the
+    # task no longer stores PNG page paths. Direct DROP COLUMN.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='job_cv'"
+    ).fetchone()
+    if row is None or "preview_pages" not in row[0]:
+        return
+    conn.execute("ALTER TABLE job_cv DROP COLUMN preview_pages")
     conn.commit()
 
 
@@ -808,6 +861,149 @@ def _migrate_add_jobs_fts(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_cv_settings_merge_floor_guardrails(conn: sqlite3.Connection) -> None:
+    """FLOOR_RULES used to be a hardcoded, always-on guardrail block; now the
+    whole guardrails field is user-editable. Fold the floor text into
+    base_guardrails once, ahead of any existing custom text, so nothing the
+    user already wrote is lost. Guarded by checking for a stable floor rule
+    so re-running init_db is a no-op."""
+    from app.cv.instruction import DEFAULT_GUARDRAILS
+    # A rule that has been in the default set since the floor merge; used only
+    # as a "have we already merged?" sentinel, so keep it a literal even if
+    # DEFAULT_GUARDRAILS_RULES is later reordered or reworded.
+    sentinel = "Do not add a degree, certification, school, or field of study that is not in the base CV."
+    row = conn.execute("SELECT base_guardrails FROM cv_settings WHERE id = 1").fetchone()
+    if row is None:
+        return  # no settings row saved yet -- get_cv_settings() seeds new rows itself
+    current = row[0] or ""
+    if sentinel in current:
+        return  # already migrated
+    merged = DEFAULT_GUARDRAILS if not current.strip() else f"{DEFAULT_GUARDRAILS}\n{current}"
+    conn.execute("UPDATE cv_settings SET base_guardrails = ? WHERE id = 1", (merged,))
+    conn.commit()
+
+
+def _migrate_cv_settings_add_directives_template(conn: sqlite3.Connection) -> None:
+    from app.cv.instruction import DEFAULT_DIRECTIVES_TEMPLATE
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    if "directives_template" not in cols:
+        conn.execute("ALTER TABLE cv_settings ADD COLUMN directives_template TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        "UPDATE cv_settings SET directives_template = ? WHERE id = 1 AND directives_template = ''",
+        (DEFAULT_DIRECTIVES_TEMPLATE,),
+    )
+    conn.commit()
+
+
+def _migrate_seed_and_remap_cv_scope_options(conn: sqlite3.Connection) -> None:
+    """cv_scope_options is created by _DDL, so a fresh DB already has the
+    (empty) table. Seed it with the four defaults if empty, then remap any
+    still-string-keyed job_cv.scope / cv_settings.default_scope arrays (from
+    before scopes became a user-editable table) to the seeded ids. Guarded
+    by row count / content shape, so re-running is a no-op."""
+    if conn.execute("SELECT COUNT(*) FROM cv_scope_options").fetchone()[0] == 0:
+        from app.db.queries import _seed_default_scope_options
+        _seed_default_scope_options(conn)
+    key_to_id = {"select": 1, "reorder": 2, "rephrase": 3, "summary": 4}
+    row = conn.execute("SELECT default_scope FROM cv_settings WHERE id = 1").fetchone()
+    if row is not None:
+        old = json.loads(row[0] or "[]")
+        if old and isinstance(old[0], str):
+            new = [key_to_id[k] for k in old if k in key_to_id]
+            conn.execute("UPDATE cv_settings SET default_scope = ? WHERE id = 1", (json.dumps(new),))
+    for jc_row in conn.execute("SELECT job_id, scope FROM job_cv").fetchall():
+        old = json.loads(jc_row["scope"] or "[]")
+        if old and isinstance(old[0], str):
+            new = [key_to_id[k] for k in old if k in key_to_id]
+            conn.execute("UPDATE job_cv SET scope = ? WHERE job_id = ?", (json.dumps(new), jc_row["job_id"]))
+    conn.commit()
+
+
+def _migrate_cv_scope_options_add_name(conn: sqlite3.Connection) -> None:
+    """Add the `name` short-identifier column. If the scope-options table is
+    still exactly the old 4-default set (untouched), replace it with the new
+    5-set that carries names and remap the integer ids everywhere they're
+    referenced. If the user customised it, only add the empty column — they
+    run 'Reset to defaults' in the UI to adopt the new set."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cv_scope_options)")}
+    if "name" not in cols:
+        conn.execute("ALTER TABLE cv_scope_options ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+
+    old_defaults = [
+        "Include or omit existing bullets and whole sections by relevance to this job.",
+        "Reorder bullets and sections, and choose what leads each section, to foreground "
+        "the experience this job values most.",
+        "Reword existing bullets toward the job's terminology, without introducing a claim "
+        "the base CV does not already support or upgrading the scope or seniority of one.",
+        "Write a job-specific professional summary synthesised only from facts already "
+        "stated in the base CV.",
+    ]
+    rows = conn.execute(
+        "SELECT id, description FROM cv_scope_options ORDER BY sort_order, id"
+    ).fetchall()
+    if [r[1] for r in rows] != old_defaults:
+        conn.commit()
+        return  # customised or already migrated — leave it
+
+    # old id order [1,2,3,4] == [select, reorder, rephrase, summary]
+    # new id order [1..5]    == [correct, choose, organize, rephrase, introduce]
+    remap = {rows[0][0]: 2, rows[1][0]: 3, rows[2][0]: 4, rows[3][0]: 5}
+    conn.execute("DELETE FROM cv_scope_options")
+    from app.db.queries import _seed_default_scope_options
+    _seed_default_scope_options(conn)
+
+    srow = conn.execute("SELECT default_scope FROM cv_settings WHERE id = 1").fetchone()
+    if srow is not None:
+        old = json.loads(srow[0] or "[]")
+        new = [remap[i] for i in old if i in remap]
+        conn.execute("UPDATE cv_settings SET default_scope = ? WHERE id = 1", (json.dumps(new),))
+    for jc in conn.execute("SELECT job_id, scope FROM job_cv").fetchall():
+        old = json.loads(jc[1] or "[]")
+        new = [remap[i] for i in old if i in remap]
+        conn.execute("UPDATE job_cv SET scope = ? WHERE job_id = ?", (json.dumps(new), jc[0]))
+    conn.commit()
+
+
+def _migrate_job_cv_add_handled_suggestions(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "handled_suggestions" not in cols:
+        conn.execute(
+            "ALTER TABLE job_cv ADD COLUMN handled_suggestions TEXT NOT NULL DEFAULT '[]'"
+        )
+        conn.commit()
+
+
+def _migrate_job_cv_add_base_cv_snapshot(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "base_cv_snapshot" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN base_cv_snapshot TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+
+def _migrate_job_cv_add_scope_edited_at(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "scope_edited_at" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN scope_edited_at TEXT")
+        conn.commit()
+
+
+def _migrate_job_cv_add_plan_context_hash(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "plan_context_hash" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN plan_context_hash TEXT")
+        conn.commit()
+
+
+def _migrate_cv_scope_options_drop_is_baseline(conn: sqlite3.Connection) -> None:
+    # The auto baseline draft is gone — the first manual Update uses the default
+    # scope, so is_baseline has no reader. Direct DROP COLUMN.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cv_scope_options)")}
+    if "is_baseline" not in cols:
+        return
+    conn.execute("ALTER TABLE cv_scope_options DROP COLUMN is_baseline")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -838,3 +1034,13 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_tasks_group_to_parent(conn)
     _migrate_tasks_add_cancelled(conn)
     _migrate_add_jobs_fts(conn)
+    _migrate_cv_settings_merge_floor_guardrails(conn)
+    _migrate_cv_settings_add_directives_template(conn)
+    _migrate_seed_and_remap_cv_scope_options(conn)
+    _migrate_cv_scope_options_add_name(conn)
+    _migrate_job_cv_drop_preview_pages(conn)
+    _migrate_job_cv_add_handled_suggestions(conn)
+    _migrate_job_cv_add_base_cv_snapshot(conn)
+    _migrate_job_cv_add_scope_edited_at(conn)
+    _migrate_job_cv_add_plan_context_hash(conn)
+    _migrate_cv_scope_options_drop_is_baseline(conn)

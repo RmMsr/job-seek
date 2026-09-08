@@ -1,0 +1,64 @@
+{% set has_draft = job_cv and job_cv.tailored_cv %}
+
+<h2>Preview
+  <span class="cv-stage-status" data-state="{{ draft_status }}">{{ {
+    "none": "No draft yet", "fresh": "Up to date",
+    "stale": "Outdated", "running": "Working…",
+  }.get(draft_status, "") }}</span>
+</h2>
+
+<form id="cv-latitude-form" class="cv-latitude" method="post"
+      action="/jobs/{{ job.id }}/cv/save-scope">
+  <span class="cv-scope-label">Edit latitude</span>
+  <span class="muted" style="font-size:.85em;"> — how far the rewrite may go.
+    The levels are configurable in <a href="/cv/advanced#cv-scope-options">edit scope</a>.</span>
+  <div class="cv-scope-row" role="group" aria-label="Edit latitude">
+    {% for opt in scope_options %}
+    <label class="cv-scope-chip">
+      <input type="checkbox" name="scope" value="{{ opt.id }}"{% if job_cv %}{% if opt.id in job_cv.scope %} checked{% endif %}{% elif opt.default_enabled %} checked{% endif %}>
+      {{ opt.name or opt.description }}
+    </label>
+    {% endfor %}
+  </div>
+  <details class="cv-scope-help">
+    <summary>Descriptions</summary>
+    <dl>
+      {% for opt in scope_options %}
+      <dt>{{ opt.name or "—" }}</dt><dd>{{ opt.description }}</dd>
+      {% endfor %}
+    </dl>
+  </details>
+</form>
+
+<div class="cv-preview-actions">
+  <button type="button" class="btn btn-primary" data-progress-url="/jobs/{{ job.id }}/cv/generate"
+          data-progress-label="Updating the tailored CV" data-progress-oob>Update</button>
+  <span class="cv-preview-progress" aria-live="polite"{% if not updating_task_id %} hidden{% endif %}>&#9203; A tailored update is in progress&hellip;</span>
+  {% if not has_doc_write %}<span class="muted">(doc-write-cli not installed)</span>{% endif %}
+</div>
+
+{% if not has_draft %}
+<p class="cv-preview-empty muted">No tailored CV yet — review the plan above, then hit
+  <strong>Update</strong>. Your base CV is shown below for reference.</p>
+{% endif %}
+
+{% include "cv/_cv_diff_summary.html" %}
+
+{% if has_doc_write %}
+  {% with mid_label = 'Tailored', title_prefix = '', active = '' %}
+    {% include "cv/_preview_tabs.html" %}
+  {% endwith %}
+{% else %}
+  <p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
+  <div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ (job_cv.tailored_cv if has_draft else settings.base_cv) | markdown }}</div>
+{% endif %}
+
+{% if has_draft %}
+  <div class="cv-preview-decision">
+    <form method="post" action="/jobs/{{ job.id }}/cv/accept" style="display:inline;">
+      <button type="submit" class="btn btn-accept">Accept this CV</button>
+    </form>
+    {% include "cv/_cv_export.html" %}
+  </div>
+{% endif %}
+<div id="cv-findings">{% include "cv/_findings.html" %}</div>

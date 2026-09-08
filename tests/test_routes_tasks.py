@@ -37,6 +37,35 @@ def test_presentation_source_detect_title_names_host(conn):
     assert task_presentation(conn, t)["title"] == "Add source: careers.acme.io"
 
 
+def test_presentation_cv_tailor_generate_names_job_and_links_to_workbench(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="ML Engineer @ Acme",
+                       company="", raw_text="")
+    t = q.enqueue_task(conn, kind="cv_tailor",
+                       params={"job_id": jid, "mode": "generate", "render": "preview_pane"})
+    q.complete_task(conn, t["id"], {"job_id": jid})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["title"] == "Update CV: ML Engineer @ Acme"
+    assert "tailored cv" in p["goal"].lower()
+    assert {"label": "Open the CV for ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
+
+
+def test_presentation_cv_tailor_plan_is_directive_eval(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="ML Engineer @ Acme",
+                       company="", raw_text="")
+    t = q.enqueue_task(conn, kind="cv_tailor",
+                       params={"job_id": jid, "mode": "plan", "render": "plan_pane"})
+    p = task_presentation(conn, t)
+    assert p["title"] == "Evaluate CV directives: ML Engineer @ Acme"
+    assert "directives" in p["goal"].lower()
+
+
+def test_presentation_cv_tailor_without_job_falls_back(conn):
+    t = q.enqueue_task(conn, kind="cv_tailor", params={"job_id": 999, "mode": "generate"})
+    assert task_presentation(conn, t)["title"] == "Update CV"
+
+
 def test_presentation_done_results_link_for_add_by_url(conn):
     sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")

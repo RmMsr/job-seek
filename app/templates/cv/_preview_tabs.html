@@ -1,0 +1,42 @@
+{# Shared preview tab bar + iframe stage for the CV workbench and the accepted
+   view. Params (via {% with %} or surrounding context):
+     job          - the job row (needs .id)
+     has_draft    - bool; when false the Tailored/Differences tabs are disabled
+     mid_label    - "Tailored" (workbench) or "Accepted" (accepted view)
+     title_prefix - iframe title prefix, e.g. "Accepted "
+     active       - "" | "base" | "tailored" | "diff"  #}
+{% set mid_label = mid_label or 'Tailored' %}
+{% set title_prefix = title_prefix or '' %}
+{% set active = active or ('tailored' if has_draft else 'base') %}
+<div class="cv-preview-bar">
+  <div class="cv-preview-tabs" role="tablist" aria-label="CV preview">
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="base"
+            aria-selected="{{ 'true' if active == 'base' else 'false' }}">Base</button>
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="tailored"
+            aria-selected="{{ 'true' if active == 'tailored' else 'false' }}"
+            {% if not has_draft %}disabled title="Update to see the tailored version"{% endif %}>{{ mid_label }}</button>
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="diff"
+            aria-selected="{{ 'true' if active == 'diff' else 'false' }}"
+            {% if not has_draft %}disabled title="Update to see the differences"{% endif %}>Differences</button>
+  </div>
+  <button type="button" class="btn btn-subtle cv-preview-fs">&#9974; Fullscreen</button>
+</div>
+<div class="cv-preview-stage">
+  <iframe class="cv-preview-doc{{ ' is-active' if active == 'base' }}" data-variant="base"
+          title="{{ title_prefix }}Base CV"
+          {{ 'src' if active == 'base' else 'data-src' }}="/jobs/{{ job.id }}/cv/preview.html?variant=base"
+          sandbox="allow-scripts allow-same-origin"></iframe>
+  {% if has_draft %}
+  <iframe class="cv-preview-doc{{ ' is-active' if active == 'tailored' }}" data-variant="tailored"
+          title="{{ title_prefix }}{{ mid_label }} CV"
+          {{ 'src' if active == 'tailored' else 'data-src' }}="/jobs/{{ job.id }}/cv/preview.html?variant=tailored"
+          sandbox="allow-scripts allow-same-origin"></iframe>
+  <iframe class="cv-preview-doc{{ ' is-active' if active == 'diff' }}" data-variant="diff"
+          title="{{ title_prefix }}Differences"
+          {{ 'src' if active == 'diff' else 'data-src' }}="/jobs/{{ job.id }}/cv/diff.html"
+          sandbox="allow-scripts allow-same-origin"></iframe>
+  {% endif %}
+  <div class="cv-preview-notice" aria-live="polite">
+    <p class="n-loading">&#8635; Loading preview&hellip;</p>
+  </div>
+</div>

@@ -17,6 +17,7 @@ from app.task_engine import register_task_kind
 from app.routes.tasks import resolve_origin_task_id
 from app.template_env import templates
 from app.version import get_app_version, get_build_date
+from app.config import cv_enabled
 
 router = APIRouter()
 
@@ -105,7 +106,12 @@ def _post_confirm_chunks(conn: sqlite3.Connection) -> list[str]:
 
 @router.get("/sources", response_class=HTMLResponse)
 def sources_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    context = {**_sources_context(conn), "app_version": get_app_version(), "build_date": get_build_date()}
+    context = {
+        **_sources_context(conn),
+        "app_version": get_app_version(),
+        "build_date": get_build_date(),
+        "cv_enabled": cv_enabled(),
+    }
     return templates.TemplateResponse(request, "sources/index.html", context)
 
 

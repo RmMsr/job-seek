@@ -1,0 +1,43 @@
+<div id="cv-scope-options-list">
+  <form id="cv-scope-save-all" hx-post="/cv/scope-options/save-all"
+        hx-target="#cv-scope-options-list" hx-swap="outerHTML">
+    <ul style="list-style:none; padding:0;">
+      {% for o in scope_options %}
+      <li style="display:flex; align-items:flex-start; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.3rem;">
+        <input type="checkbox" name="default_enabled" value="{{ o.id }}" title="On by default for new jobs"
+          style="margin-top:0.5em;" {% if o.default_enabled %}checked{% endif %}>
+        <input type="hidden" name="id" value="{{ o.id }}">
+        <input type="text" name="name" value="{{ o.name }}" placeholder="id"
+          style="width:6.5rem; box-sizing:border-box; font:inherit;">
+        <textarea name="description" required rows="1" class="autosize"
+          style="flex:1; min-width:200px; box-sizing:border-box; font:inherit; resize:vertical;">{{ o.description }}</textarea>
+        <button type="button" class="btn" style="padding:2px 8px; font-size:0.8em;"
+          hx-delete="/cv/scope-options/{{ o.id }}"
+          hx-target="closest li"
+          hx-swap="outerHTML swap:0s">&#x2715;</button>
+      </li>
+      {% else %}
+      <li class="muted">No scope types yet.</li>
+      {% endfor %}
+    </ul>
+  </form>
+
+  <form hx-post="/cv/scope-options" hx-target="#cv-scope-options-list" hx-swap="outerHTML"
+        style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem; align-items:flex-start;">
+    <input type="checkbox" name="default_enabled" title="On by default for new jobs" style="margin-top:0.5em;">
+    <input type="text" name="name" placeholder="id"
+           style="width:6.5rem; box-sizing:border-box; font:inherit;">
+    <textarea name="description" placeholder="Describe a new permitted edit…" required rows="1" class="autosize"
+           style="flex:1; min-width:240px; box-sizing:border-box; font:inherit; resize:vertical;"></textarea>
+    <button type="submit" class="btn">Add a scope type</button>
+  </form>
+
+  <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:0.75rem;">
+    {% if scope_options %}<button type="submit" form="cv-scope-save-all" class="btn btn-primary">Save</button>{% endif %}
+    <button type="button" class="btn btn-subtle"
+      hx-post="/cv/scope-options/reset"
+      hx-target="#cv-scope-options-list"
+      hx-swap="outerHTML">Reset to defaults</button>
+    {% if saved == "scope" %}<div class="save-confirmation" aria-live="polite" style="margin:0;">Saved.</div>{% endif %}
+  </div>
+</div>

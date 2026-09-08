@@ -193,6 +193,7 @@
     .job-row-stale:hover { opacity: 0.85; }
     .stale-note { margin: 0.35rem 0 0; font-size: 0.9em; color: var(--text-muted); }
     .stale-note a { color: inherit; }
+    .muted { color: var(--text-muted); font-size: 0.9em; }
 
     .job-row-score { flex: none; display: flex; min-width: 3.75rem; }
     .job-row-score .score-badge {
@@ -298,6 +299,53 @@
       0% { background: var(--warning-tint); }
       100% { background: transparent; }
     }
+    .cv-workbench { display: flex; flex-direction: column; gap: 1.5rem; }
+    .cv-workbench h2, #cv-findings h3 { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .cv-workbench-crumb { margin: 0 0 -0.5rem; font-size: 0.8rem; letter-spacing: 0.02em;
+      color: var(--text-muted); }
+    .cv-workbench-crumb span { opacity: 0.5; margin: 0 0.15rem; }
+    .cv-stage-status { font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.5rem;
+      border-radius: 999px; border: 1px solid var(--border); white-space: nowrap;
+      vertical-align: middle; color: var(--text-secondary); background: var(--surface); }
+    .cv-stage-status:empty { display: none; }
+    .cv-stage-status[data-state="fresh"] { color: var(--success-strong);
+      border-color: var(--success); }
+    .cv-stage-status[data-state="stale"] { color: var(--text-primary);
+      background: var(--warning-tint); border-color: var(--warning); }
+    .cv-stage-status[data-state="running"] { color: var(--text-primary);
+      background: var(--warning-tint); border-color: var(--warning); }
+    .cv-stage-status[data-state="none"] { opacity: 0.7; }
+    .guardrail-summary { margin-top: 1.5rem; }
+    .guardrail-summary summary { cursor: pointer; }
+    .guardrail-summary-line { display: inline-flex; align-items: center; gap: 0.5rem; }
+    .guardrail-bar { display: inline-flex; width: 80px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border); }
+    .guardrail-seg { display: block; height: 100%; }
+    .guardrail-seg-ok { background: var(--success); }
+    .guardrail-seg-fail { background: var(--alert); }
+    .guardrail-seg-unclear { background: var(--warning); }
+    .guardrail-fail { color: var(--alert); }
+    .guardrail-ok { color: var(--success-strong); }
+    .guardrail-list { font-size: .88em; list-style: none; padding: 0; margin-top: .5rem; }
+    .guardrail-list li { margin-bottom: .3rem; }
+    .cv-scope-row { display: flex; flex-wrap: wrap; align-items: center;
+      gap: 0.15rem 0.85rem; font-size: 0.85em; margin-bottom: 0.3rem; }
+    .cv-scope-chip { display: inline-flex; align-items: center; gap: 0.25rem;
+      white-space: nowrap; }
+    .cv-scope-help { font-size: 0.9em; margin-bottom: 0.25rem; }
+    .cv-scope-help summary { cursor: pointer; color: var(--text-muted); }
+    .cv-scope-help dl { margin: 0.4rem 0 0; display: grid;
+      grid-template-columns: max-content 1fr; gap: 0.2rem 0.6rem; }
+    .cv-scope-help dt { font-weight: 600; font-size: 0.85em; }
+    .cv-scope-help dd { margin: 0; font-size: 0.85em; color: var(--text-muted); }
+    .cv-scope-label { font-weight: 600; }
+    .cv-latitude { margin-bottom: 0.75rem; }
+    .cv-latitude .cv-scope-row { margin-top: 0.3rem; }
+    .cv-editor-wrap { position: relative; display: block; }
+    .cv-save-hint { position: absolute; right: 8px; bottom: 8px; font-size: 0.72rem;
+      color: var(--text-muted); background: var(--surface); padding: 0.05rem 0.4rem;
+      border-radius: 4px; pointer-events: none; transition: opacity 0.4s ease; }
+    .cv-save-hint[hidden] { display: none; }
+    .cv-save-hint.is-fading { opacity: 0; }
     .job-row-expanded.htmx-swapping {
       overflow: hidden;
       animation: job-fold 0.35s ease forwards;
@@ -326,7 +374,7 @@
       font: inherit; background: var(--surface); color: var(--text-primary);
     }
     .text-input { width: 100%; max-width: 480px; }
-    .btn { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+    .btn { cursor: pointer; transition: border-color 0.15s, background 0.15s; text-decoration: none; }
     .btn:hover { border-color: var(--accent); }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
     .btn-primary:hover { background: var(--accent-light); border-color: var(--accent-light); }
@@ -338,9 +386,15 @@
     .btn-delete:hover { filter: brightness(1.08); }
     .btn-subtle { background: none; border-color: transparent; color: var(--text-muted); }
     .btn-subtle:hover { color: var(--text-primary); border-color: var(--border); background: var(--ground); }
+    .btn-secondary { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+    .btn-secondary:hover { border-color: var(--accent); filter: brightness(0.97); }
     .job-advanced { display: inline-flex; align-items: center; gap: 0.5rem; }
     .feedback-form + .job-advanced { margin-top: 0.5rem; }
     .job-advanced summary { cursor: pointer; color: var(--text-muted); font-size: 0.85em; user-select: none; }
+    .job-action-group { margin-top: 0.75rem; }
+    .job-actions-group-label { display: block; margin-bottom: 0.3rem; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+    .job-action-group .cv-actions-group, .job-action-group .actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .btn-tailor-cv { display: inline-flex; align-items: center; gap: 0.35rem; }
     .job-history { margin-top: 0.5rem; }
     .job-history summary { cursor: pointer; color: var(--text-muted); font-size: 0.85em; user-select: none; }
     .job-history-list { list-style: none; padding: 0; margin: 0.4rem 0 0; font-size: 0.85em; color: var(--text-secondary); }
@@ -350,7 +404,6 @@
     .setup-form .form-row { margin-bottom: 1.1rem; }
     .setup-form .form-row label { display: block; margin-bottom: 0.35rem; font-weight: 500; }
     .feedback-form textarea { width: 100%; min-height: 60px; }
-    .feedback-form .actions { margin-top: 0.75rem; }
     textarea, input, select { font-family: inherit; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; }
     textarea { padding: 0.75rem; }
     textarea:focus, input:focus, select:focus { outline: none; border-color: var(--accent); }
@@ -561,6 +614,80 @@
     .scenario-tab-panel { display: none; }
     .scenario-tab-panel-active { display: block; }
 
+    .cv-preview-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .cv-preview-bar-end { justify-content: flex-end; }
+    .cv-preview-tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--border); }
+    .cv-preview-tab { background: none; border: none; cursor: pointer; padding: 0.4rem 0; margin-bottom: -1px;
+      color: var(--text-secondary); font-weight: 500; font-size: 0.9rem; border-bottom: 2px solid transparent; }
+    .cv-preview-tab:hover:not(:disabled) { color: var(--accent); }
+    .cv-preview-tab[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
+    .cv-preview-tab:disabled { cursor: default; opacity: 0.45; }
+    .cv-preview-fs { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
+    .cv-preview-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+      margin-bottom: 0.75rem; }
+    .cv-preview-decision { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
+    /* Full content width. Height in rem so page zoom scales the preview with
+       the rest of the page; clamped to the viewport so it never needs
+       scrolling to reach the toolbar, and floored so it stays usable. */
+    .cv-preview-stage { position: relative; width: 100%;
+      height: 58rem; min-height: 28rem; max-height: 90vh; margin-top: 0.5rem; }
+    /* Fullscreen targets the whole stage, so the active iframe AND any overlay
+       scale together — the fullscreen view is identical to the windowed one. */
+    .cv-preview-stage:fullscreen { width: 100vw; height: 100vh; min-width: 0;
+      aspect-ratio: auto; margin: 0; background: var(--surface); }
+    .cv-preview-stage:fullscreen .cv-preview-doc { border: none; }
+    .cv-preview-doc { position: absolute; inset: 0; width: 100%; height: 100%;
+      border: 1px solid var(--border); background: #fff; display: block;
+      opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
+    .cv-preview-doc.is-active { opacity: 1; pointer-events: auto; }
+    /* Small "loading" note pinned top-right while a not-yet-fetched tab's
+       iframe loads. pointer-events:none so the preview stays interactive. */
+    .cv-preview-notice { position: absolute; inset: 0; display: none;
+      justify-content: flex-end; align-items: flex-start; padding: 0.5rem;
+      pointer-events: none; }
+    .cv-preview-notice[data-state="loading"] { display: flex; }
+    .cv-preview-notice p { display: none; margin: 0; width: max-content; max-width: 70%;
+      background: var(--warning-tint); color: var(--text-primary);
+      border: 1px solid var(--warning); border-radius: 6px;
+      padding: 0.3rem 0.55rem; font-size: 0.8rem; line-height: 1.35; }
+    .cv-preview-notice[data-state="loading"] .n-loading { display: block; }
+    /* sits in .cv-preview-actions next to the Update button (flex row) — no
+       display rule here so [hidden] keeps working */
+    .cv-preview-progress { background: var(--warning-tint); color: var(--text-primary);
+      border: 1px solid var(--warning); border-radius: 6px;
+      padding: 0 0.6rem; font-size: 0.82rem; }
+    /* :not([hidden]) so the display rule doesn't fight the hidden attribute.
+       Match the sibling button's box height (.btn ≈ 6px pad + 1px border + text). */
+    .cv-preview-progress:not([hidden]) {
+      display: inline-flex; align-items: center; align-self: stretch; }
+    .cv-findings-stale { margin: 1.5rem 0 0; padding: 0.3rem 0.55rem; font-size: 0.82rem;
+      background: var(--warning-tint); color: var(--text-primary);
+      border: 1px solid var(--warning); border-radius: 6px; }
+    .cv-findings-stale:not([hidden]) ~ .guardrail-summary { opacity: 0.45; }
+
+    /* Change digest + newly-generated-content list, between the Update button
+       and the preview tabs (see cv/_cv_diff_summary.html). */
+    .cv-diff-summary { margin: 0 0 0.6rem; }
+    .cv-preview-empty { margin: 0 0 0.6rem; font-size: 0.9rem; }
+    .cv-diff-summary-line { margin: 0; font-size: 0.85rem; color: var(--text-secondary); }
+    .cv-diff-added { margin-top: 0.5rem; padding: 0.5rem 0.7rem; font-size: 0.85rem;
+      background: var(--alert-tint); border: 1px solid var(--alert); border-radius: 6px; }
+    .cv-diff-added ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+    .cv-diff-added li { margin: 0.15rem 0; }
+
+    /* Suggested-change diff: the "old" text and the editable "new" text must
+       share line-height, padding and border width so the two columns' lines
+       sit on the same baseline. */
+    .cv-suggest-diff { display: flex; gap: 0.5rem; align-items: flex-start; flex-basis: 100%; }
+    .cv-suggest-side { flex: 1 1 150px; min-width: 150px; box-sizing: border-box;
+      font: inherit; line-height: 1.5; padding: 0.35rem 0.5rem;
+      border: 1px solid transparent; border-radius: 4px; margin: 0; }
+    textarea.cv-suggest-side { border-color: var(--border); resize: vertical; }
+    .cv-suggest-side.is-old { text-decoration: line-through; color: var(--text-muted);
+      white-space: pre-wrap; }
+    .cv-suggest-full { flex-basis: 100%; width: 100%; }
+    .cv-suggest-arrow { align-self: center; color: var(--text-muted); }
+
     .scenario-feedback-block { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; }
     .scenario-feedback-block-target-highlight { animation: target-highlight 2.5s ease-out; }
 
@@ -677,6 +804,9 @@
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
+    {% if cv_feature_enabled() %}
+    <a href="/cv" {% if request.url.path.startswith("/cv") %}class="active"{% endif %}>CV</a>
+    {% endif %}
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
     <a href="/setup" {% if request.url.path in ("/setup", "/sources") %}class="active"{% endif %}>Setup</a>
   </nav>
@@ -782,6 +912,9 @@
         var w = watched[taskId];
         if (!w) return;
         delete watched[taskId];
+        // The CV "update in progress" note is normally cleared by the pane
+        // re-render; clear it here too so a failed regen doesn't leave it stuck.
+        if (window.__cvPreviewResync) window.__cvPreviewResync();
         if (task.status === "failed") {
           resetTrigger(w.el);
           showNotice("<p>" + escapeHtml(task.error || "Failed") + "</p>", "warning");
@@ -831,6 +964,7 @@
         }
         if (w.oobMode) {
           chunks.forEach(applyOob);
+          if (window.__cvPreviewResync) window.__cvPreviewResync();
           highlightAffectedScenarios(scenarioIdsFromNotices(result.notices));
         } else if (w.targetSelector && chunks.length) {
           var target = document.querySelector(landingSelector);
@@ -956,6 +1090,17 @@
       }
 
       document.body.addEventListener("click", onClick);
+
+      // Reattach to a CV regen that was already running when the page loaded, so
+      // its preview/plan panes still get swapped in when it finishes.
+      window.__cvWatchGenerate = function (taskId) {
+        if (!taskId || watched[taskId]) return;
+        watched[taskId] = {
+          el: document.querySelector('.cv-preview-actions [data-progress-url*="/cv/generate"]'),
+          targetSelector: null, actionTarget: null, oobMode: true, bodyFieldNames: [],
+        };
+        pollWatched(taskId);
+      };
 
       // A <form> wrapping one of these buttons (e.g. a text input + Add
       // button) has no native submit handler of its own — pressing Enter in
@@ -1233,6 +1378,147 @@ document.body.addEventListener('input', function (e) {
 });
   </script>
   <script>
+// CV preview stages. Only the active variant's iframe has a src on load; the
+// other carries data-src and is fetched the first time its tab is activated,
+// behind a "Loading…" note. Content stays cached after that. All delegated /
+// observer-driven so it survives htmx + task-poll pane swaps (their
+// innerHTML/outerHTML writes never execute embedded <script>).
+(function () {
+  function stageOf(el) {
+    var bar = el.closest('.cv-preview-bar');
+    return (bar && bar.parentNode.querySelector('.cv-preview-stage'))
+        || (el.closest('#cv-preview-pane') || document).querySelector('.cv-preview-stage');
+  }
+  function syncNotice(stage) {
+    if (!stage) return;
+    var note = stage.querySelector('.cv-preview-notice');
+    if (!note) return;
+    var f = stage.querySelector('.cv-preview-doc.is-active');
+    note.dataset.state = (f && f.dataset.loading) ? 'loading' : '';
+  }
+  function showPreviewProgress(on) {
+    var p = document.querySelector('.cv-preview-progress');
+    if (p) p.hidden = !on;
+    // the guardrail findings shown are from the previous draft while a regen runs
+    var g = document.querySelector('.cv-findings-stale');
+    if (g) g.hidden = !on;
+    document.querySelectorAll('#cv-preview-pane .cv-stage-status').forEach(function (el) {
+      if (on) {
+        el.dataset.prevState = el.dataset.state;
+        el.dataset.state = 'running';
+        el.textContent = 'Working…';
+      }
+    });
+  }
+  function activate(stage, variant) {
+    stage.querySelectorAll('.cv-preview-doc').forEach(function (f) {
+      var on = f.dataset.variant === variant;
+      f.classList.toggle('is-active', on);
+      if (on && !f.getAttribute('src') && f.dataset.src) {
+        f.dataset.loading = '1';
+        f.setAttribute('src', f.dataset.src);
+      }
+    });
+    syncNotice(stage);
+  }
+  function initStages() {
+    document.querySelectorAll('.cv-preview-stage:not([data-wired])').forEach(function (stage) {
+      stage.setAttribute('data-wired', '1');
+      stage.querySelectorAll('.cv-preview-doc').forEach(function (f) {
+        f.addEventListener('load', function () {
+          delete f.dataset.loading;
+          syncNotice(stage);
+        });
+      });
+      syncNotice(stage);
+    });
+  }
+
+  document.body.addEventListener('click', function (e) {
+    var fsBtn = e.target.closest('.cv-preview-fs');
+    if (fsBtn) {
+      var fsStage = stageOf(fsBtn);
+      if (fsStage && fsStage.requestFullscreen) fsStage.requestFullscreen();
+      return;
+    }
+    // Explicit "Update" — show the "update in progress" note straight away.
+    // (The first-visit autostart only runs the plan now; it produces no draft.)
+    var upd = e.target.closest('.cv-preview-actions [data-progress-url*="/cv/generate"]');
+    if (upd) { showPreviewProgress(true); return; }
+    var tab = e.target.closest('.cv-preview-tab');
+    if (!tab || tab.disabled) return;
+    var bar = tab.closest('.cv-preview-bar');
+    if (!bar) return;
+    bar.querySelectorAll('.cv-preview-tab').forEach(function (o) {
+      o.setAttribute('aria-selected', o === tab ? 'true' : 'false');
+    });
+    var stage = bar.parentNode.querySelector('.cv-preview-stage');
+    if (stage) activate(stage, tab.dataset.variant);
+  });
+
+  // Called by the task-poll code when a task finishes, so a failed regen that
+  // never re-renders the pane doesn't leave the "update in progress" note stuck.
+  window.__cvPreviewResync = function () {
+    showPreviewProgress(false);
+    document.querySelectorAll('#cv-preview-pane .cv-stage-status').forEach(function (el) {
+      if (el.dataset.state === 'running' && el.dataset.prevState) {
+        el.dataset.state = el.dataset.prevState;  // pane wasn't swapped (regen failed)
+      }
+    });
+    document.querySelectorAll('.cv-preview-stage').forEach(syncNotice);
+  };
+
+  var host = document.querySelector('.cv-workbench') || document.getElementById('cv-base-preview');
+  if (host) new MutationObserver(initStages).observe(host, { childList: true, subtree: true });
+  initStages();
+})();
+
+(function () {
+  // Edit-latitude chips: POST on change, swap the preview pane in place so its
+  // freshness indicator updates. Delegated so it survives pane re-renders.
+  document.body.addEventListener("change", function (e) {
+    var form = e.target.closest("#cv-latitude-form");
+    if (!form) return;
+    fetch(form.action, { method: "POST", body: new FormData(form) })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var pane = document.getElementById("cv-preview-pane");
+        if (pane) { pane.innerHTML = html; if (window.htmx) window.htmx.process(pane); }
+      })
+      .catch(function () {});
+  });
+
+  // Directives autosave (moved out of _plan_pane.html so it survives the OOB
+  // plan-pane swap), with a visible Saving/Saved hint.
+  var t = null;
+  function setHint(form, text, fading) {
+    var wrap = form.querySelector(".cv-editor-wrap");
+    var hint = wrap && wrap.querySelector(".cv-save-hint");
+    if (!hint) return;
+    hint.hidden = false;
+    hint.textContent = text;
+    hint.classList.toggle("is-fading", !!fading);
+  }
+  function scheduleSave(form) {
+    clearTimeout(t);
+    setHint(form, "Saving…", false);
+    t = setTimeout(function () {
+      fetch(form.action, { method: "POST", body: new FormData(form) })
+        .then(function (r) {
+          if (!r.ok) throw new Error();
+          setHint(form, "Saved", false);
+          setTimeout(function () { setHint(form, "Saved", true); }, 1500);
+        })
+        .catch(function () { setHint(form, "Not saved — retrying", false); scheduleSave(form); });
+    }, 600);
+  }
+  document.body.addEventListener("input", function (e) {
+    var form = e.target.closest("#cv-directives-form");
+    if (form) scheduleSave(form);
+  });
+})();
+  </script>
+  <script>
 document.body.addEventListener('change', function (e) {
   var input = e.target.closest('.scenario-tab-input');
   if (!input) return;
@@ -1371,6 +1657,40 @@ document.body.addEventListener('click', function (e) {
       // for those — hashchange is the only event that does.
       window.addEventListener("hashchange", highlightFromHash);
     })();
+  </script>
+  <script>
+    (function () {
+      function autosize(el){ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+      window.__autosize = autosize;
+      function all(root){ (root && root.querySelectorAll ? root.querySelectorAll('textarea.autosize') : []).forEach(autosize); }
+      document.addEventListener('DOMContentLoaded', function(){ all(document); });
+      document.body.addEventListener('input', function(e){
+        if (e.target.matches && e.target.matches('textarea.autosize')) autosize(e.target);
+      });
+      document.body.addEventListener('htmx:load', function(e){ all(e.target); });
+    })();
+  </script>
+  <script>
+    // "Copy markdown" — copy the raw tailored CV embedded next to the button.
+    document.body.addEventListener('click', function (e) {
+      var btn = e.target.closest('.cv-copy-md');
+      if (!btn) return;
+      var src = (btn.parentNode || document).querySelector('.cv-md-source')
+             || document.querySelector('.cv-md-source');
+      if (!src) return;
+      var done = function () {
+        var label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = label; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(src.value).then(done, function () {});
+      } else {
+        src.hidden = false; src.select();
+        try { document.execCommand('copy'); done(); } catch (err) {}
+        src.hidden = true;
+      }
+    });
   </script>
 </body>
 </html>

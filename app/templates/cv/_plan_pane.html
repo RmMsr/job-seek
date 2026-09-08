@@ -1,0 +1,97 @@
+<h2>Tailoring plan
+  <span class="cv-stage-status" data-state="{{ plan_status }}">{{ {
+    "none": "Not run yet", "fresh": "Up to date",
+    "stale": "Job posting changed — re-analyze", "running": "Working…",
+  }.get(plan_status, "") }}</span>
+</h2>
+
+<form id="cv-directives-form" method="post" action="/jobs/{{ job.id }}/cv/save-directives">
+  <p class="muted" style="font-size:.85em;margin:.2rem 0 .6rem;">
+    Suggestions below cover the full opportunity. You choose how much to apply with
+    <strong>Edit latitude</strong>, next to the preview.
+  </p>
+
+  <label style="display:block;margin-top:.75rem;">Tuning directives<br>
+    <span class="cv-editor-wrap">
+      <textarea name="tuning_directives" rows="10"
+        style="width:100%;font-family:monospace;box-sizing:border-box;">{{ job_cv.tuning_directives if job_cv else settings.directives_template }}</textarea>
+      <span class="cv-save-hint" aria-live="polite" hidden></span>
+    </span>
+  </label>
+  <p class="muted" style="font-size:.85em;">Keep the <code>## Heading</code> / <code>- bullet</code>
+    structure — the evaluation pass proposes directives under each heading. Saved automatically as you type.</p>
+
+  <div style="margin-top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap;">
+    <button type="button" class="btn btn-secondary" data-progress-url="/jobs/{{ job.id }}/cv/plan"
+            data-progress-label="Analyzing the job" data-progress-oob>Analyze and find improvements</button>
+    <button type="button" class="btn btn-subtle"
+            hx-post="/jobs/{{ job.id }}/cv/reset-directives"
+            hx-target="#cv-plan-pane" hx-swap="innerHTML"
+            hx-confirm="Replace the current tuning directives with your template? This discards edits here.">
+      Reset to template
+    </button>
+  </div>
+</form>
+
+{% if job_cv and job_cv.plan %}
+<div style="margin-top:1rem;">
+  <form hx-post="/jobs/{{ job.id }}/cv/plan/accept" hx-target="#cv-plan-pane" hx-swap="innerHTML">
+    <p><strong>Suggested directive changes ({{ job_cv.plan | length }}).</strong> Uncheck any you don't want, edit the text if needed, then apply.</p>
+    {% set ns = namespace(i=0) %}
+    {% for section, items in job_cv.plan | groupby("section") %}
+    <p class="muted" style="margin:.6rem 0 .3rem;"><strong>{{ section or "(no section)" }}</strong></p>
+    {% for d in items %}
+    <div style="display:flex; gap:0.5rem; align-items:flex-start; flex-wrap:wrap; margin-bottom:0.5rem; padding:0.4rem; background:var(--surface); border:1px solid var(--border); border-radius:4px;">
+      <input type="checkbox" name="apply_{{ ns.i }}" checked style="margin-top:0.5em;">
+      <input type="hidden" name="action_{{ ns.i }}" value="{{ d.action }}">
+      <input type="hidden" name="section_{{ ns.i }}" value="{{ d.section }}">
+      <input type="hidden" name="rationale_{{ ns.i }}" value="{{ d.rationale }}">
+      <strong style="margin-top:0.3em;">{{ {"add": "Add", "replace": "Replace", "remove": "Remove"}[d.action] }}</strong>
+      <span style="font-size:.85em;color:var(--text-muted); flex-basis:100%;">{{ d.rationale }}</span>
+      {% if d.action == "remove" %}
+      <input type="hidden" name="target_{{ ns.i }}" value="{{ d.target }}">
+      <div class="cv-suggest-diff">
+        <div class="cv-suggest-side is-old">{{ d.target }}</div>
+      </div>
+      {% elif d.action == "replace" %}
+      <input type="hidden" name="target_{{ ns.i }}" value="{{ d.target }}">
+      <div class="cv-suggest-diff">
+        <div class="cv-suggest-side is-old">{{ d.target }}</div>
+        <span class="cv-suggest-arrow">&rarr;</span>
+        <textarea class="cv-suggest-side autosize" name="line_{{ ns.i }}" rows="2">{{ d.line }}</textarea>
+      </div>
+      {% else %}
+      <textarea class="cv-suggest-side cv-suggest-full autosize" name="line_{{ ns.i }}" rows="2">{{ d.line }}</textarea>
+      {% endif %}
+    </div>
+    {% set ns.i = ns.i + 1 %}
+    {% endfor %}
+    {% endfor %}
+    <button type="submit" class="btn btn-primary">Apply</button>
+  </form>
+</div>
+{% endif %}
+
+{% if job_cv and job_cv.handled_suggestions %}
+<details style="margin-top:1rem;">
+  <summary class="muted" style="font-size:.85em; cursor:pointer;">Handled suggestions ({{ job_cv.handled_suggestions | length }}) — a judgement call was made; not proposed again</summary>
+  <ul style="list-style:none; margin:.4rem 0 0; padding:0; font-size:.85em;">
+    {% for h in job_cv.handled_suggestions %}
+    <li style="display:flex; gap:.4rem; align-items:flex-start; margin-bottom:.3rem;">
+      <button type="button" class="btn" style="padding:0 6px; font-size:.8em;"
+              hx-post="/jobs/{{ job.id }}/cv/handled/{{ loop.index0 }}/delete"
+              hx-target="#cv-plan-pane" hx-swap="innerHTML"
+              title="Let this be proposed again">&#x2715;</button>
+      <span>
+        {% if h.section %}<span class="tag">{{ h.section }}</span> {% endif %}
+        <strong>{{ {"add": "Add", "replace": "Replace", "remove": "Remove"}[h.action] }}</strong>
+        {% if h.action == "remove" %}{{ h.target }}
+        {% elif h.action == "replace" %}{{ h.target }} &rarr; {{ h.line }}
+        {% else %}{{ h.line }}{% endif %}
+        {% if h.rationale %}<span class="muted" style="display:block;">{{ h.rationale }}</span>{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}

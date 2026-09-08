@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Advanced CV settings — Job Seek{% endblock %}
+{% block content %}
+{% include "setup/_subnav.html" %}
+<h1>Advanced CV settings <span class="tag">experimental</span></h1>
+<p style="color:var(--text-muted);">Rules the tailoring pipeline uses when adapting your base
+CV to a job. All fields are yours to maintain; the system never edits them.</p>
+
+<form id="cv-reset-guardrails-form" method="post" action="/cv/reset-guardrails"></form>
+<form id="cv-reset-style-form" method="post" action="/cv/reset-style"></form>
+<form id="cv-reset-css-form" method="post" action="/cv/reset-css"></form>
+<form id="cv-reset-directives-template-form" method="post" action="/cv/reset-directives-template"></form>
+
+<h2>Writing style</h2>
+<form method="post" action="/cv/save-style">
+  <label>Instruction (optional)<br>
+    <textarea name="base_instruction" style="width:100%;min-height:60px;font-family:monospace;box-sizing:border-box;">{{ settings.base_instruction }}</textarea>
+  </label>
+  <p style="color:var(--text-muted);font-size:.85em;">
+    Global steering, not the tailoring mandate — e.g. "British English, active voice."
+    <button type="submit" form="cv-reset-style-form" class="btn btn-subtle" style="margin-left:.5rem;">Reset to defaults</button>
+  </p>
+  <button type="submit" class="btn btn-primary">Save</button>
+  {% if saved == "style" %}<div class="save-confirmation" aria-live="polite" style="margin-top:.5rem;">Saved.</div>{% endif %}
+</form>
+
+<h2 style="margin-top:1.5rem;">Tuning directives template</h2>
+<form method="post" action="/cv/save-directives-template">
+  <label>Headings a new job's tuning-directives outline starts from (one <code>## Heading</code> per line)<br>
+    <textarea name="directives_template" rows="10"
+      style="width:100%;font-family:monospace;box-sizing:border-box;">{{ settings.directives_template }}</textarea>
+  </label>
+  <p style="color:var(--text-muted);font-size:.85em;">
+    The evaluation pass walks these headings and proposes directives under each.
+    <button type="submit" form="cv-reset-directives-template-form" class="btn btn-subtle" style="margin-left:.5rem;">Reset to defaults</button>
+  </p>
+  <button type="submit" class="btn btn-primary">Save</button>
+  {% if saved == "directives_template" %}<div class="save-confirmation" aria-live="polite" style="margin-top:.5rem;">Saved.</div>{% endif %}
+</form>
+
+<h2 style="margin-top:1.5rem;">Editing scopes</h2>
+<div id="cv-scope-options">{% include "cv/_scope_options.html" %}</div>
+
+<h2 style="margin-top:1.5rem;">Guardrails</h2>
+<form method="post" action="/cv/save-guardrails">
+  <label>Guardrails (one per line)<br>
+    <textarea name="base_guardrails" style="width:100%;min-height:140px;font-family:monospace;box-sizing:border-box;">{{ settings.base_guardrails }}</textarea>
+  </label>
+  <p style="color:var(--text-muted);font-size:.85em;">
+    Hard limits the tailored CV must never break — fully yours to edit.
+    <button type="submit" form="cv-reset-guardrails-form" class="btn btn-subtle" style="margin-left:.5rem;">Reset to defaults</button>
+  </p>
+  <button type="submit" class="btn btn-primary">Save</button>
+  {% if saved == "guardrails" %}<div class="save-confirmation" aria-live="polite" style="margin-top:.5rem;">Saved.</div>{% endif %}
+</form>
+
+<h2 style="margin-top:1.5rem;">Appearance (CSS)</h2>
+<form method="post" action="/cv/save-css">
+  <label>Custom CSS (optional; appended after doc-write defaults)<br>
+    <textarea name="css" style="width:100%;min-height:100px;font-family:monospace;box-sizing:border-box;">{{ settings.css }}</textarea>
+  </label>
+  <p style="color:var(--text-muted);font-size:.85em;">
+    No <code>@import</code>; <code>url()</code> only with <code>data:</code> URIs.
+    <button type="submit" form="cv-reset-css-form" class="btn btn-subtle" style="margin-left:.5rem;">Reset to defaults</button>
+  </p>
+  <button type="submit" class="btn btn-primary">Save</button>
+  {% if saved == "css" %}<div class="save-confirmation" aria-live="polite" style="margin-top:.5rem;">Saved.</div>{% endif %}
+  {% if error %}<div class="save-confirmation" style="margin-top:.5rem;background:var(--alert-tint);color:var(--alert);animation:none;">{{ error }}</div>{% endif %}
+</form>
+{% endblock %}

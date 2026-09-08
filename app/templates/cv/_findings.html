@@ -1,0 +1,62 @@
+{% set findings = job_cv.guardrail_findings if job_cv else [] %}
+<p class="cv-findings-stale" aria-live="polite"{% if not updating_task_id %} hidden{% endif %}>&#9203; Re-checking
+  against your guardrails — results will update when the new draft is ready.</p>
+{% set failed = findings | selectattr("verdict", "equalto", "violated") | list %}
+{% set unclear = findings | selectattr("verdict", "equalto", "unclear") | list %}
+{% set ok = findings | selectattr("verdict", "equalto", "ok") | list %}
+<section class="guardrail-summary" aria-label="Guardrail check">
+  <h3 style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">Guardrails
+    <span class="cv-stage-status" data-state="{{ guardrail_status }}">{{ {
+      "none": "Not checked yet", "fresh": "Checked", "stale": "Re-check with Update",
+      "running": "Re-checking…",
+    }.get(guardrail_status, "") }}</span>
+    {% if findings %}
+    <span class="guardrail-bar" role="img"
+          aria-label="{{ ok|length }} ok, {{ failed|length }} failed, {{ unclear|length }} unclear">
+      {% if failed %}<span class="guardrail-seg guardrail-seg-fail" style="flex:{{ failed|length }}"></span>{% endif %}
+      {% if unclear %}<span class="guardrail-seg guardrail-seg-unclear" style="flex:{{ unclear|length }}"></span>{% endif %}
+      {% if ok %}<span class="guardrail-seg guardrail-seg-ok" style="flex:{{ ok|length }}"></span>{% endif %}
+    </span>
+    {% endif %}
+  </h3>
+
+  {% if not findings and not updating_task_id %}
+  <p class="muted" style="font-size:.85em;margin:0;">
+    {% if job_cv and job_cv.tailored_cv %}No guardrail findings recorded — run Update to re-check.
+    {% else %}Checked against your guardrails after you generate a draft.{% endif %}
+  </p>
+  {% endif %}
+
+  {% if failed %}
+  <details open>
+    <summary><strong class="guardrail-fail">Failed</strong> ({{ failed|length }})</summary>
+    <ul class="guardrail-list">
+      {% for f in failed %}
+      <li><strong class="guardrail-fail">FAIL</strong> {{ f.rule }}<br><span class="muted">{{ f.explanation }}</span></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if unclear %}
+  <details open>
+    <summary><span class="muted">Unclear</span> ({{ unclear|length }})</summary>
+    <ul class="guardrail-list">
+      {% for f in unclear %}
+      <li><span class="muted">??</span> {{ f.rule }}<br><span class="muted">{{ f.explanation }}</span></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if ok %}
+  <details>
+    <summary><span class="guardrail-ok">OK</span> ({{ ok|length }})</summary>
+    <ul class="guardrail-list">
+      {% for f in ok %}
+      <li><span class="guardrail-ok">ok</span> {{ f.rule }}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</section>

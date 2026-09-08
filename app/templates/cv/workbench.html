@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Tailor CV — {{ job.title or "Job" }}{% endblock %}
+{% block content %}
+<p><a href="/jobs/{{ job.id }}">&larr; Back to job</a> &nbsp;·&nbsp; <a href="/cv">CV settings</a></p>
+<h1>Tailor CV <span class="tag">experimental</span></h1>
+<p class="muted">{{ job.title }}{% if job.company %} — {{ job.company }}{% endif %}</p>
+
+{% if job_cv and job_cv.finalized_at %}
+{% include "cv/_accepted.html" %}
+{% else %}
+<div class="cv-workbench">
+  <p class="cv-workbench-crumb" aria-hidden="true">
+    Directives <span>&rarr;</span> Plan <span>&rarr;</span> Draft <span>&rarr;</span> Guardrails
+  </p>
+  <div id="cv-plan-pane">{% include "cv/_plan_pane.html" %}</div>
+  <div id="cv-preview-pane">{% include "cv/_preview_pane.html" %}</div>
+</div>
+
+{% if job_cv is none %}
+<button type="button" id="cv-autostart" hidden
+        data-progress-url="/jobs/{{ job.id }}/cv/plan" data-progress-oob
+        data-progress-label="Analysing the job"></button>
+<script>
+  // The base.html body click-listener is registered after this content block is
+  // parsed, so defer the synthetic click until the DOM is ready.
+  document.addEventListener("DOMContentLoaded", function () {
+    var b = document.getElementById("cv-autostart");
+    if (b) b.click();
+  });
+</script>
+{% elif updating_task_id %}
+<script>
+  // A regen was already running when this page loaded (e.g. a mid-update
+  // reload). Reattach so the preview pane still refreshes when it finishes.
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.__cvWatchGenerate) window.__cvWatchGenerate({{ updating_task_id }});
+  });
+</script>
+{% endif %}
+{% endif %}
+{% endblock %}

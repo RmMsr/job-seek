@@ -1,0 +1,11 @@
+{% if has_doc_write %}
+<div class="cv-preview-bar cv-preview-bar-end">
+  <button type="button" class="btn btn-subtle cv-preview-fs">&#9974; Fullscreen</button>
+</div>
+<div class="cv-preview-stage">
+  <iframe class="cv-preview-doc is-active" data-variant="base" title="Base CV preview"
+          src="/cv/preview.html" sandbox="allow-scripts allow-same-origin"></iframe>
+</div>
+{% else %}
+<p class="muted">Preview unavailable: doc-write-cli is not installed.</p>
+{% endif %}
