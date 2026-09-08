@@ -93,6 +93,11 @@ def _title(conn: sqlite3.Connection, task: dict) -> str:
         n = len(params.get("job_ids") or [])
         verb = "Reset" if kind == "jobs_bulk_reset" else "Re-evaluate"
         return f"{verb} {n} job{'s' if n != 1 else ''}"
+    if kind == "scenario_reevaluate_one":
+        scenario = q.get_scenario(conn, params.get("scenario_id"))
+        return f"Re-evaluate: {scenario['name']}" if scenario else "Re-evaluate scenario"
+    if kind == "profile_reassess_fit":
+        return "Recompute profile fit"
     if kind == "cv_tailor":
         verb = "Evaluate CV directives" if params.get("mode") == "plan" else "Update CV"
         title = _job_title(conn, params.get("job_id"))
@@ -115,8 +120,10 @@ def _goal(conn: sqlite3.Connection, task: dict) -> str:
     if kind == "job_add_by_url":
         url = params.get("url", "")
         return f"Add the job at {url[:60]}{'…' if len(url) > 60 else ''}"
-    if kind in ("job_reevaluate", "jobs_bulk_reevaluate", "scenarios_reevaluate_all"):
+    if kind in ("job_reevaluate", "jobs_bulk_reevaluate", "scenarios_reevaluate_all", "scenario_reevaluate_one"):
         return "Re-score against your scenarios and profile"
+    if kind == "profile_reassess_fit":
+        return "Recompute how well your profile fits each job"
     if kind in ("job_reset", "jobs_bulk_reset"):
         return "Re-run the full pipeline for the selected job(s)"
     if kind == "job_pass_as_new":
