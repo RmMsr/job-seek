@@ -38,8 +38,14 @@ RUN playwright install --with-deps chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 \
-        libjpeg62-turbo libgdk-pixbuf-2.0-0 fonts-dejavu-core \
+        libjpeg62-turbo libgdk-pixbuf-2.0-0 \
+        fonts-dejavu-core \
+        fonts-noto-core fonts-noto-extra \
+        fonts-roboto fonts-roboto-slab \
+        fonts-open-sans fonts-source-sans-3 \
+        fonts-ibm-plex \
     && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv \
     && uv pip install --python /app/.venv/bin/python \
         "doc-write @ git+https://gitlab.com/RmMsr/doc-write-mcp.git"
 
