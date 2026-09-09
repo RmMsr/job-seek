@@ -37,6 +37,7 @@ RUN playwright install chromium
 # the system libraries WeasyPrint needs, plus Chromium deps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
+        wget \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 \
         libjpeg62-turbo libgdk-pixbuf-2.0-0 \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
@@ -44,10 +45,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrandr2 libgbm1 libasound2t64 libatspi2.0-0 \
         libwayland-client0 libwayland-server0 libxshmfence1 \
         fonts-dejavu-core \
-        fonts-noto-core \
-        fonts-roboto fonts-roboto-slab \
-        fonts-open-sans \
     && rm -rf /var/lib/apt/lists/* \
+    # Install modern variable fonts (all weights 100–900, single file each)
+    && mkdir -p /usr/share/fonts/truetype/noto /usr/share/fonts/truetype/inter \
+       /usr/share/fonts/truetype/jetbrains-mono \
+    && wget -q https://raw.githubusercontent.com/notofonts/noto-fonts/main/unhinted/variable-ttf/NotoSans-VF.ttf \
+         -O /usr/share/fonts/truetype/noto/NotoSans-VF.ttf \
+    && wget -q https://raw.githubusercontent.com/notofonts/noto-fonts/main/unhinted/variable-ttf/NotoSerif-VF.ttf \
+         -O /usr/share/fonts/truetype/noto/NotoSerif-VF.ttf \
+    && wget -q https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf \
+         -O /usr/share/fonts/truetype/inter/Inter-VF.ttf \
+    && wget -q https://github.com/JetBrains/JetBrainsMono/raw/master/fonts/variable/JetBrainsMono%5Bwght%5D.ttf \
+         -O /usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-VF.ttf \
     && fc-cache -fv \
     && uv pip install --python /app/.venv/bin/python \
         "doc-write @ git+https://gitlab.com/RmMsr/doc-write-mcp.git"

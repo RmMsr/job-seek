@@ -118,3 +118,18 @@ Then open any job and use **Tailor CV**. Fill in your base CV and rules at **/cv
 ## License
 
 [BSD 2-Clause](LICENSE)
+
+## Fonts included (container)
+
+The container bundles modern variable fonts for high-quality PDF rendering via WeasyPrint:
+
+| Font Family | Type | Weights | Use Case |
+|-------------|------|---------|----------|
+| **Noto Sans VF** | Variable | 100–900 | Primary sans-serif, full Unicode, true Black (900) |
+| **Noto Serif VF** | Variable | 100–900 | Primary serif, full Unicode |
+| **Inter VF** | Variable | 100–900 | UI, headings, excellent screen/print balance |
+| **JetBrains Mono VF** | Variable | 100–800 | Code blocks, monospace |
+| **DejaVu Sans/Serif/Mono** | Static | 400, 700 | Fallback (system package `fonts-dejavu-core`) |
+
+All variable fonts are single-file downloads from upstream GitHub releases (OFL-licensed).
+Fontconfig cache is built at image build time (`fc-cache -fv`).
