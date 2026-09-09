@@ -48,7 +48,8 @@ def test_cv_preview_html_renders_base_cv(client, conn):
     from unittest.mock import patch
     q.save_cv_settings(conn, base_cv="# Marker CV\n", base_instruction="", base_guardrails="",
                        css="", default_scope=[1])
-    with patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: f"<!DOCTYPE html>\n{md}"):
+    with patch("app.routes.cv.doc_write_available", return_value=True), \
+         patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: f"<!DOCTYPE html>\n{md}"):
         r = client.get("/cv/preview.html")
     assert r.status_code == 200
     assert "Marker CV" in r.text

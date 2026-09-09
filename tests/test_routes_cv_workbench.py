@@ -26,7 +26,8 @@ def test_preview_html_renders_base_and_tailored(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Tailored marker\n")
-    with patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: f"<!DOCTYPE html>\n{md}"):
+    with patch("app.routes.cv.doc_write_available", return_value=True), \
+         patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: f"<!DOCTYPE html>\n{md}"):
         rb = client.get(f"/jobs/{jid}/cv/preview.html?variant=base")
         rt = client.get(f"/jobs/{jid}/cv/preview.html?variant=tailored")
     assert rb.status_code == 200 and "# Me" in rb.text          # base CV from _job()
@@ -37,7 +38,8 @@ def test_preview_html_defaults_to_tailored(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# The draft\n")
-    with patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: md):
+    with patch("app.routes.cv.doc_write_available", return_value=True), \
+         patch("app.routes.cv.render_preview_html", side_effect=lambda md, css: md):
         r = client.get(f"/jobs/{jid}/cv/preview.html")
     assert "The draft" in r.text
 
@@ -233,10 +235,12 @@ def test_workbench_has_no_workflow_instructions_line(client, conn):
 
 
 def test_preview_pane_layout_guardrails_under_preview_controls_below_iframe(client, conn):
+    from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n\n- x\n", scope=[1],
                     guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
-    text = client.get(f"/jobs/{jid}/cv").text
+    with patch("app.routes.cv.doc_write_available", return_value=True):
+        text = client.get(f"/jobs/{jid}/cv").text
     actions = text[text.index('class="cv-preview-actions"'):text.index('class="cv-preview-bar"')]
     assert ">Update</button>" in actions
     assert "Accept this CV" not in actions and "Download PDF" not in actions
