@@ -29,18 +29,22 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 COPY --from=builder /app/.venv /app/.venv
 
-# PLAYWRIGHT_BROWSERS_PATH=0 installs into the venv, not ~/.cache, so it's
-# found regardless of runtime uid.
-RUN playwright install --with-deps chromium
+# Install only Chromium (no deps - we installed them below). PLAYWRIGHT_BROWSERS_PATH=0
+# puts it in the venv so it's found regardless of runtime uid.
+RUN playwright install chromium
 
 # doc-write (AGPL, invoked only as a subprocess) for per-job CV rendering, plus
-# the system libraries WeasyPrint needs.
+# the system libraries WeasyPrint needs, plus Chromium deps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 \
         libjpeg62-turbo libgdk-pixbuf-2.0-0 \
+        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+        libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+        libxrandr2 libgbm1 libasound2t64 libatspi2.0-0 \
+        libwayland-client0 libwayland-server0 libxshmfence1 \
         fonts-dejavu-core \
-        fonts-noto-core fonts-noto-extra \
+        fonts-noto-core \
         fonts-roboto fonts-roboto-slab \
         fonts-open-sans \
     && rm -rf /var/lib/apt/lists/* \
