@@ -42,8 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
         fonts-noto-core fonts-noto-extra \
         fonts-roboto fonts-roboto-slab \
-        fonts-open-sans fonts-source-sans-3 \
-        fonts-ibm-plex \
+        fonts-open-sans \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -fv \
     && uv pip install --python /app/.venv/bin/python \
