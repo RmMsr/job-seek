@@ -7,8 +7,3 @@ path = "data/job-seek.db"
 
 [browser]
 profile_dir = "data/browser-profile"
-
-# Experimental per-job CV generation. Off unless explicitly enabled.
-# Requires `doc-write-cli` on PATH (see README).
-# [cv]
-# enabled = true

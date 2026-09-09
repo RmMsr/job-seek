@@ -197,22 +197,3 @@ def test_write_config_recovers_from_corrupt_existing_file(tmp_path):
     assert 'provider = "custom"' in content
     assert 'path = "job-seek.db"' in content
     assert 'profile_dir = "job-seek"' in content
-
-
-def test_cv_enabled_true(tmp_path):
-    p = tmp_path / "c.toml"
-    p.write_text('[llm]\nprovider = "custom"\nendpoint = "http://x/v1"\n\n[cv]\nenabled = true\n')
-    from app.config import cv_enabled
-    assert cv_enabled(str(p)) is True
-
-
-def test_cv_enabled_defaults_false(tmp_path):
-    p = tmp_path / "c.toml"
-    p.write_text('[llm]\nprovider = "custom"\nendpoint = "http://x/v1"\n')
-    from app.config import cv_enabled
-    assert cv_enabled(str(p)) is False
-
-
-def test_cv_enabled_missing_file_false(tmp_path):
-    from app.config import cv_enabled
-    assert cv_enabled(str(tmp_path / "nope.toml")) is False

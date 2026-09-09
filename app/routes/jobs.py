@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
-from app.config import cv_enabled
 from app.job_filter import JobFilter, VALID_TABS
 from app.pipeline import (
     run_reprocess_job, run_pass_as_new, run_reevaluate_job, run_add_job, run_fetch,
@@ -182,7 +181,7 @@ def _render_updated_job_html(
     return templates.get_template("jobs/_feedback.html").render(
         request=request, job=job, scenarios=scenarios, job_scores=job_scores,
         job_events=job_events, filter=f, is_detail_page=detail,
-        cv_enabled=cv_enabled(), job_cv=q.get_job_cv(conn, job_id),
+        job_cv=q.get_job_cv(conn, job_id),
     )
 
 
@@ -241,7 +240,7 @@ def job_detail(job_id: int, request: Request, conn: sqlite3.Connection = Depends
         request, "jobs/detail.html",
         {"job": job, "scenarios": scenarios, "job_scores": job_scores,
          "job_events": job_events, "is_detail_page": True, "filter": None,
-         "cv_enabled": cv_enabled(), "job_cv": q.get_job_cv(conn, job_id)},
+         "job_cv": q.get_job_cv(conn, job_id)},
     )
 
 
@@ -262,7 +261,7 @@ def job_expand(job_id: int, request: Request, conn: sqlite3.Connection = Depends
     context = {
         "job": job, "scenarios": scenarios, "job_scores": job_scores,
         "job_events": job_events, "filter": f, "is_detail_page": detail,
-        "cv_enabled": cv_enabled(), "job_cv": q.get_job_cv(conn, job_id),
+        "job_cv": q.get_job_cv(conn, job_id),
     }
     return templates.TemplateResponse(request, "jobs/_feedback.html", context)
 

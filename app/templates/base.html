@@ -804,9 +804,7 @@
     <a href="/jobs" {% if request.url.path == "/jobs" %}class="active"{% endif %}>Jobs</a>
     <a href="/fetch" {% if request.url.path == "/fetch" %}class="active"{% endif %}>Fetch</a>
     <a href="/profile" {% if request.url.path == "/profile" %}class="active"{% endif %}>Profile</a>
-    {% if cv_feature_enabled() %}
     <a href="/cv" {% if request.url.path.startswith("/cv") %}class="active"{% endif %}>CV</a>
-    {% endif %}
     <a href="/scenarios" {% if request.url.path == "/scenarios" %}class="active"{% endif %}>Scenarios</a>
     <a href="/setup" {% if request.url.path in ("/setup", "/sources") %}class="active"{% endif %}>Setup</a>
   </nav>

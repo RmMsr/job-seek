@@ -85,18 +85,16 @@
       </ul>
     </details>
     {% endif %}
-    {% if cv_enabled|default(false) %}
     <div class="job-action-group">
       <span class="job-actions-group-label">Actions</span>
       <div class="cv-actions-group" role="group" aria-label="Actions">
         <a class="btn btn-primary btn-tailor-cv" href="/jobs/{{ job.id }}/cv"
-           title="Generate a CV tailored to this job (experimental).">
+           title="Generate a CV tailored to this job.">
           <span aria-hidden="true">&#128196;</span>
           {% if job_cv and job_cv.finalized_at %}Tailored CV &#10003;{% elif job_cv and job_cv.tailored_cv %}Continue tailoring CV{% else %}Tailor CV{% endif %}
         </a>
       </div>
     </div>
-    {% endif %}
     <div class="job-action-group">
       <span class="job-actions-group-label">Organize</span>
       <div class="actions" role="group" aria-label="Organize">

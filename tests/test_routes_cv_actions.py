@@ -1,12 +1,5 @@
-import pytest
 from unittest.mock import patch
 from app.db import queries as q
-import app.deps as deps
-
-
-@pytest.fixture
-def cv_on(monkeypatch):
-    monkeypatch.setattr(deps, "cv_enabled", lambda *_a, **_k: True)
 
 
 def _job(conn):
@@ -18,7 +11,7 @@ def _job(conn):
     return 1
 
 
-def test_plan_endpoint_enqueues_task(client, cv_on, conn):
+def test_plan_endpoint_enqueues_task(client, conn):
     jid = _job(conn)
     r = client.post(f"/jobs/{jid}/cv/plan")
     assert r.status_code == 200
@@ -26,7 +19,7 @@ def test_plan_endpoint_enqueues_task(client, cv_on, conn):
     assert q.get_task(conn, r.json()["task_id"])["kind"] == "cv_tailor"
 
 
-def test_generate_endpoint_enqueues_task(client, cv_on, conn):
+def test_generate_endpoint_enqueues_task(client, conn):
     jid = _job(conn)
     r = client.post(f"/jobs/{jid}/cv/generate")
     assert r.status_code == 200
@@ -35,17 +28,11 @@ def test_generate_endpoint_enqueues_task(client, cv_on, conn):
     assert task["params"]["render"] == "preview_pane"
 
 
-def test_plan_endpoint_404_for_missing_job(client, cv_on, conn):
+def test_plan_endpoint_404_for_missing_job(client, conn):
     assert client.post("/jobs/999/cv/plan").status_code == 404
 
 
-def test_actions_404_when_disabled(client, monkeypatch, conn):
-    monkeypatch.setattr(deps, "cv_enabled", lambda *_a, **_k: False)
-    assert client.post("/jobs/1/cv/plan").status_code == 404
-    assert client.get("/jobs/1/cv.pdf").status_code == 404
-
-
-def test_save_directives_persists_and_returns_pane(client, cv_on, conn):
+def test_save_directives_persists_and_returns_pane(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, scope=[1, 2])  # pre-set; must survive a directives save
     r = client.post(f"/jobs/{jid}/cv/save-directives",
@@ -58,7 +45,7 @@ def test_save_directives_persists_and_returns_pane(client, cv_on, conn):
     assert row["directives_edited_at"] is not None
 
 
-def test_save_scope_persists_and_marks_draft_stale(client, cv_on, conn):
+def test_save_scope_persists_and_marks_draft_stale(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", scope=[1])
     conn.execute("UPDATE job_cv SET generated_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
@@ -70,14 +57,14 @@ def test_save_scope_persists_and_marks_draft_stale(client, cv_on, conn):
     assert 'data-state="stale"' in r.text  # preview pane reports the draft as stale
 
 
-def test_save_scope_is_read_only_for_finalized_cv(client, cv_on, conn):
+def test_save_scope_is_read_only_for_finalized_cv(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     q.finalize_job_cv(conn, jid)
     assert client.post(f"/jobs/{jid}/cv/save-scope", data={"scope": ["1"]}).status_code == 409
 
 
-def test_accept_finalizes_and_shows_read_only_view(client, cv_on, conn):
+def test_accept_finalizes_and_shows_read_only_view(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     r = client.post(f"/jobs/{jid}/cv/accept", follow_redirects=False)
@@ -94,7 +81,7 @@ def test_accept_finalizes_and_shows_read_only_view(client, cv_on, conn):
     assert ">Update</button>" not in page
 
 
-def test_copy_markdown_available_in_both_states(client, cv_on, conn):
+def test_copy_markdown_available_in_both_states(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Tailored\n\n- a bullet with <special> & chars\n")
     # draft state
@@ -107,7 +94,7 @@ def test_copy_markdown_available_in_both_states(client, cv_on, conn):
     assert "Copy markdown" in page and "a bullet with" in page
 
 
-def test_reopen_clears_finalized_and_restores_workbench(client, cv_on, conn):
+def test_reopen_clears_finalized_and_restores_workbench(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     q.finalize_job_cv(conn, jid)
@@ -118,7 +105,7 @@ def test_reopen_clears_finalized_and_restores_workbench(client, cv_on, conn):
     assert 'id="cv-plan-pane"' in page and 'id="cv-preview-pane"' in page
 
 
-def test_editing_routes_are_read_only_for_a_finalized_cv(client, cv_on, conn):
+def test_editing_routes_are_read_only_for_a_finalized_cv(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     q.finalize_job_cv(conn, jid)
@@ -134,17 +121,17 @@ def test_editing_routes_are_read_only_for_a_finalized_cv(client, cv_on, conn):
     assert q.get_job_cv(conn, jid)["tuning_directives"] == ""
 
 
-def test_accept_400_without_draft(client, cv_on, conn):
+def test_accept_400_without_draft(client, conn):
     jid = _job(conn)
     assert client.post(f"/jobs/{jid}/cv/accept").status_code == 400
 
 
-def test_pdf_404_without_draft(client, cv_on, conn):
+def test_pdf_404_without_draft(client, conn):
     jid = _job(conn)
     assert client.get(f"/jobs/{jid}/cv.pdf").status_code == 404
 
 
-def test_pdf_renders_when_draft_present(client, cv_on, conn):
+def test_pdf_renders_when_draft_present(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n\n- x\n")
     with patch("app.routes.cv.render_pdf", return_value=b"%PDF-1.7 fake") as rp:
@@ -155,7 +142,7 @@ def test_pdf_renders_when_draft_present(client, cv_on, conn):
     rp.assert_called_once()
 
 
-def test_pdf_render_error_returns_503(client, cv_on, conn):
+def test_pdf_render_error_returns_503(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     from app.cv.render import CvRenderError
@@ -164,20 +151,20 @@ def test_pdf_render_error_returns_503(client, cv_on, conn):
     assert r.status_code == 503
 
 
-def test_plan_pane_has_no_save_directives_submit_button(client, cv_on, conn):
+def test_plan_pane_has_no_save_directives_submit_button(client, conn):
     jid = _job(conn)
     r = client.get(f"/jobs/{jid}/cv")
     assert "Save directives" not in r.text
 
 
-def test_directives_autosave_handler_is_in_base(client, cv_on, conn):
+def test_directives_autosave_handler_is_in_base(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     assert "cv-directives-form" in page and "save-directives" in page
     assert 'action="/jobs/{}/cv/save-directives"'.format(jid) in page
 
 
-def test_scope_control_lives_in_the_preview_pane_not_the_plan_pane(client, cv_on, conn):
+def test_scope_control_lives_in_the_preview_pane_not_the_plan_pane(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     plan_pane = page[page.index('id="cv-plan-pane"'):page.index('id="cv-preview-pane"')]
@@ -189,14 +176,14 @@ def test_scope_control_lives_in_the_preview_pane_not_the_plan_pane(client, cv_on
     assert "Edit latitude" in preview_pane
 
 
-def test_plan_pane_points_at_edit_latitude(client, cv_on, conn):
+def test_plan_pane_points_at_edit_latitude(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     plan_pane = page[page.index('id="cv-plan-pane"'):page.index('id="cv-preview-pane"')]
     assert "Edit latitude" in plan_pane  # the pointer line lives in the plan pane
 
 
-def test_directives_still_autosave_without_inline_script(client, cv_on, conn):
+def test_directives_still_autosave_without_inline_script(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     assert 'id="cv-directives-form"' in page
@@ -204,14 +191,14 @@ def test_directives_still_autosave_without_inline_script(client, cv_on, conn):
     assert "<script" not in plan_pane
 
 
-def test_directives_editor_has_a_saved_hint(client, cv_on, conn):
+def test_directives_editor_has_a_saved_hint(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     assert 'class="cv-save-hint"' in page
     assert 'class="cv-editor-wrap"' in page
 
 
-def test_accept_button_is_a_plain_post(client, cv_on, conn):
+def test_accept_button_is_a_plain_post(client, conn):
     # accept changes the whole page (workbench -> read-only view), so it's a
     # normal form POST + redirect, not an htmx pane swap
     jid = _job(conn)
@@ -223,7 +210,7 @@ def test_accept_button_is_a_plain_post(client, cv_on, conn):
     assert "hx-post" not in accept_form
 
 
-def test_accept_plan_proposals_applies_checked_add(client, cv_on, conn):
+def test_accept_plan_proposals_applies_checked_add(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, plan=[
         {"action": "add", "section": "Skills match", "rationale": "r", "line": "foreground Kafka", "target": None},
@@ -239,7 +226,7 @@ def test_accept_plan_proposals_applies_checked_add(client, cv_on, conn):
     assert row["plan"] == []
 
 
-def test_accept_plan_proposals_applies_replace_against_existing_directive(client, cv_on, conn):
+def test_accept_plan_proposals_applies_replace_against_existing_directive(client, conn):
     jid = _job(conn)
     q.set_job_cv_directives(conn, jid, "- mention platform work")
     q.upsert_job_cv(conn, jid, plan=[
@@ -255,7 +242,7 @@ def test_accept_plan_proposals_applies_replace_against_existing_directive(client
     assert q.get_job_cv(conn, jid)["tuning_directives"] == "- tighten the wording"
 
 
-def test_accept_plan_proposals_unchecked_row_is_recorded_as_handled(client, cv_on, conn):
+def test_accept_plan_proposals_unchecked_row_is_recorded_as_handled(client, conn):
     jid = _job(conn)
     q.set_job_cv_directives(conn, jid, "- keep this")
     q.upsert_job_cv(conn, jid, plan=[
@@ -273,7 +260,7 @@ def test_accept_plan_proposals_unchecked_row_is_recorded_as_handled(client, cv_o
     assert "new suggestion" in r.text
 
 
-def test_accept_plan_proposals_stale_target_is_safely_skipped(client, cv_on, conn):
+def test_accept_plan_proposals_stale_target_is_safely_skipped(client, conn):
     jid = _job(conn)
     q.set_job_cv_directives(conn, jid, "- something else entirely")
     r = client.post(
@@ -285,7 +272,7 @@ def test_accept_plan_proposals_stale_target_is_safely_skipped(client, cv_on, con
     assert q.get_job_cv(conn, jid)["tuning_directives"] == "- something else entirely"
 
 
-def test_accept_plan_proposals_blank_line_on_checked_add_is_not_applied(client, cv_on, conn):
+def test_accept_plan_proposals_blank_line_on_checked_add_is_not_applied(client, conn):
     jid = _job(conn)
     q.set_job_cv_directives(conn, jid, "- keep this")
     before = q.get_job_cv(conn, jid)["tuning_directives"]
@@ -301,11 +288,11 @@ def test_accept_plan_proposals_blank_line_on_checked_add_is_not_applied(client, 
     assert row["handled_suggestions"] == []     # checked-but-blank isn't "handled", just dropped
 
 
-def test_accept_plan_proposals_404_for_missing_job(client, cv_on, conn):
+def test_accept_plan_proposals_404_for_missing_job(client, conn):
     assert client.post("/jobs/999/cv/plan/accept").status_code == 404
 
 
-def test_unhandle_suggestion_puts_it_back_in_play(client, cv_on, conn):
+def test_unhandle_suggestion_puts_it_back_in_play(client, conn):
     jid = _job(conn)
     q.add_handled_suggestions(conn, jid, [
         {"action": "add", "section": "Skills match", "line": "name C++ prominently", "rationale": "r"},
@@ -317,21 +304,21 @@ def test_unhandle_suggestion_puts_it_back_in_play(client, cv_on, conn):
     assert [h["line"] for h in left] == ["pivot the narrative"]
 
 
-def test_reset_directives_also_clears_handled(client, cv_on, conn):
+def test_reset_directives_also_clears_handled(client, conn):
     jid = _job(conn)
     q.add_handled_suggestions(conn, jid, [{"action": "add", "line": "x", "rationale": "r"}])
     client.post(f"/jobs/{jid}/cv/reset-directives")
     assert q.get_job_cv(conn, jid)["handled_suggestions"] == []
 
 
-def test_plan_pane_button_says_analyze_and_find_improvements(client, cv_on, conn):
+def test_plan_pane_button_says_analyze_and_find_improvements(client, conn):
     jid = _job(conn)
     r = client.get(f"/jobs/{jid}/cv")
     assert "Analyze and find improvements" in r.text
     assert "Re-plan" not in r.text
 
 
-def test_plan_pane_shows_suggestion_form_when_plan_pending(client, cv_on, conn):
+def test_plan_pane_shows_suggestion_form_when_plan_pending(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, plan=[
         {"action": "add", "section": "Skills match", "rationale": "r", "line": "foreground Kafka", "target": None},
@@ -342,7 +329,7 @@ def test_plan_pane_shows_suggestion_form_when_plan_pending(client, cv_on, conn):
     assert "Reset editor to proposed plan" not in r.text
 
 
-def test_accept_plan_proposal_inserts_under_its_section(client, cv_on, conn):
+def test_accept_plan_proposal_inserts_under_its_section(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, scope=[1])
     q.set_job_cv_directives(conn, jid, "## Skills match\n## Wording and typography")
@@ -354,7 +341,7 @@ def test_accept_plan_proposal_inserts_under_its_section(client, cv_on, conn):
     assert td.splitlines() == ["## Skills match", "", "- name Kubernetes", "## Wording and typography"]
 
 
-def test_reset_directives_replaces_with_configured_template(client, cv_on, conn):
+def test_reset_directives_replaces_with_configured_template(client, conn):
     jid = _job(conn)
     q.save_cv_settings(conn, base_cv="", base_instruction="", base_guardrails="",
                        css="", default_scope=[1], directives_template="## A\n## B")

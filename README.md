@@ -106,9 +106,9 @@ uv run python -m app.cli.slack_login
 
 Or follow the instructions in the webapp to get the cookie by hand.
 
-## Per-Job CV generation (experimental)
+## Per-Job CV generation
 
-Set `[cv].enabled = true` in `config.toml` and install the renderer:
+Install the renderer:
 
     pipx install "git+https://gitlab.com/RmMsr/doc-write-mcp.git"   # provides doc-write-cli
 

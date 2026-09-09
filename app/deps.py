@@ -2,18 +2,12 @@ from __future__ import annotations
 import sqlite3
 from typing import Generator
 import openai
-from fastapi import HTTPException
-from app.config import load_config, check_config_status, Config, cv_enabled
+from app.config import load_config, check_config_status, Config
 from app.db.schema import init_db
 
 
 def get_config() -> Config:
     return load_config()
-
-
-def require_cv_enabled() -> None:
-    if not cv_enabled():
-        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _open_db(config: Config) -> sqlite3.Connection:

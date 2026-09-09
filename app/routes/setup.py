@@ -2,7 +2,7 @@ from __future__ import annotations
 import openai
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from app.config import load_config, load_raw_llm, validate_llm, validate_llm_for_save, write_config, cv_enabled
+from app.config import load_config, load_raw_llm, validate_llm, validate_llm_for_save, write_config
 from app.providers import LLM_PROVIDERS, provider_groups
 from app.template_env import templates
 from app.version import get_app_version, get_build_date
@@ -70,7 +70,6 @@ def setup_form(request: Request):
             "saved": request.query_params.get("saved") == "1",
             "app_version": get_app_version(),
             "build_date": get_build_date(),
-            "cv_enabled": cv_enabled(),
         },
     )
 
@@ -173,8 +172,7 @@ def setup_save(
                 "error": err,
                 "app_version": get_app_version(),
                 "build_date": get_build_date(),
-                "cv_enabled": cv_enabled(),
-            },
+                },
             status_code=400,
         )
 

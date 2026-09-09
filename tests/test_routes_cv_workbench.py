@@ -1,12 +1,5 @@
 import re
-import pytest
 from app.db import queries as q
-import app.deps as deps
-
-
-@pytest.fixture
-def cv_on(monkeypatch):
-    monkeypatch.setattr(deps, "cv_enabled", lambda *_a, **_k: True)
 
 
 def _job(conn):
@@ -18,23 +11,18 @@ def _job(conn):
     return 1
 
 
-def test_workbench_404_when_disabled(client, monkeypatch):
-    monkeypatch.setattr(deps, "cv_enabled", lambda *_a, **_k: False)
-    assert client.get("/jobs/1/cv").status_code == 404
-
-
-def test_workbench_404_for_missing_job(client, cv_on):
+def test_workbench_404_for_missing_job(client):
     assert client.get("/jobs/999/cv").status_code == 404
 
 
-def test_workbench_renders_first_visit(client, cv_on, conn):
+def test_workbench_renders_first_visit(client, conn):
     jid = _job(conn)
     r = client.get(f"/jobs/{jid}/cv")
     assert r.status_code == 200
     assert "Tailoring plan" in r.text or "plan" in r.text.lower()
 
 
-def test_preview_html_renders_base_and_tailored(client, cv_on, conn):
+def test_preview_html_renders_base_and_tailored(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Tailored marker\n")
@@ -45,7 +33,7 @@ def test_preview_html_renders_base_and_tailored(client, cv_on, conn):
     assert rt.status_code == 200 and "Tailored marker" in rt.text
 
 
-def test_preview_html_defaults_to_tailored(client, cv_on, conn):
+def test_preview_html_defaults_to_tailored(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# The draft\n")
@@ -54,19 +42,19 @@ def test_preview_html_defaults_to_tailored(client, cv_on, conn):
     assert "The draft" in r.text
 
 
-def test_preview_html_tailored_404_without_draft(client, cv_on, conn):
+def test_preview_html_tailored_404_without_draft(client, conn):
     jid = _job(conn)
     assert client.get(f"/jobs/{jid}/cv/preview.html?variant=tailored").status_code == 404
 
 
-def test_preview_html_503_without_doc_write(client, cv_on, conn):
+def test_preview_html_503_without_doc_write(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     with patch("app.routes.cv.doc_write_available", return_value=False):
         assert client.get(f"/jobs/{jid}/cv/preview.html?variant=base").status_code == 503
 
 
-def test_stage_headers_show_status_indicators(client, cv_on, conn):
+def test_stage_headers_show_status_indicators(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     # three stage-status elements, all "none" on a blank workbench
@@ -74,7 +62,7 @@ def test_stage_headers_show_status_indicators(client, cv_on, conn):
     assert 'data-state="none"' in page
 
 
-def test_draft_status_is_stale_after_scope_change(client, cv_on, conn):
+def test_draft_status_is_stale_after_scope_change(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
     conn.execute("UPDATE job_cv SET generated_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
@@ -85,7 +73,7 @@ def test_draft_status_is_stale_after_scope_change(client, cv_on, conn):
     assert page.count('data-state="stale"') >= 2
 
 
-def test_workbench_has_no_waiting_on_you_nags(client, cv_on, conn):
+def test_workbench_has_no_waiting_on_you_nags(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     conn.execute("UPDATE job_cv SET generated_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
@@ -95,7 +83,7 @@ def test_workbench_has_no_waiting_on_you_nags(client, cv_on, conn):
         assert gone not in text
 
 
-def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, cv_on, conn):
+def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, conn):
     from app.routes.cv import _base_hash
     jid = _job(conn)
     settings = q.get_cv_settings(conn)
@@ -113,7 +101,7 @@ def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, cv_on, con
     assert '<span class="cv-stage-status" data-state="stale">Outdated</span>' in r.text
 
 
-def test_preview_badge_shows_running_while_an_update_runs(client, cv_on, conn):
+def test_preview_badge_shows_running_while_an_update_runs(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", base_hash="stale")
     conn.execute("UPDATE job_cv SET generated_at = datetime('now') WHERE job_id = ?", (jid,))
@@ -124,7 +112,7 @@ def test_preview_badge_shows_running_while_an_update_runs(client, cv_on, conn):
     assert 'class="cv-preview-progress" aria-live="polite">' in r.text
 
 
-def test_preview_progress_note_hidden_when_no_update_running(client, cv_on, conn):
+def test_preview_progress_note_hidden_when_no_update_running(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     text = client.get(f"/jobs/{jid}/cv").text
@@ -132,7 +120,7 @@ def test_preview_progress_note_hidden_when_no_update_running(client, cv_on, conn
     assert 'class="cv-preview-progress" aria-live="polite" hidden' in text
 
 
-def test_guardrail_findings_grouped_by_status_with_counts(client, cv_on, conn):
+def test_guardrail_findings_grouped_by_status_with_counts(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", guardrail_findings=[
         {"rule": "no invented dates", "verdict": "ok", "explanation": ""},
@@ -163,7 +151,7 @@ def test_guardrail_findings_grouped_by_status_with_counts(client, cv_on, conn):
     assert unclear_details.startswith("<details open>")
 
 
-def test_guardrails_heading_shows_without_a_draft(client, cv_on, conn):
+def test_guardrails_heading_shows_without_a_draft(client, conn):
     jid = _job(conn)
     text = client.get(f"/jobs/{jid}/cv").text
     assert 'class="guardrail-summary"' in text
@@ -171,7 +159,7 @@ def test_guardrails_heading_shows_without_a_draft(client, cv_on, conn):
     assert "after you generate a draft" in text
 
 
-def test_guardrails_heading_and_bar_show_with_findings(client, cv_on, conn):
+def test_guardrails_heading_and_bar_show_with_findings(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft",
                     guardrail_findings=[{"rule": "No lies", "verdict": "ok", "explanation": ""}])
@@ -182,7 +170,7 @@ def test_guardrails_heading_and_bar_show_with_findings(client, cv_on, conn):
     assert "after you generate a draft" not in text
 
 
-def test_guardrails_placeholder_when_draft_has_no_findings(client, cv_on, conn):
+def test_guardrails_placeholder_when_draft_has_no_findings(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", guardrail_findings=[])
     text = client.get(f"/jobs/{jid}/cv").text
@@ -190,7 +178,7 @@ def test_guardrails_placeholder_when_draft_has_no_findings(client, cv_on, conn):
     assert 'class="guardrail-bar"' not in text
 
 
-def test_guardrails_placeholder_hidden_while_recheck_runs(client, cv_on, conn):
+def test_guardrails_placeholder_hidden_while_recheck_runs(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", guardrail_findings=[])
     q.enqueue_task(conn, kind="cv_tailor",
@@ -201,7 +189,7 @@ def test_guardrails_placeholder_hidden_while_recheck_runs(client, cv_on, conn):
     assert 'class="cv-findings-stale" aria-live="polite">' in text   # stale line shows, un-hidden
 
 
-def test_scope_selector_is_an_edit_latitude_row_with_descriptions_foldout(client, cv_on, conn):
+def test_scope_selector_is_an_edit_latitude_row_with_descriptions_foldout(client, conn):
     jid = _job(conn)
     text = client.get(f"/jobs/{jid}/cv").text
     assert "<legend>Edit scope</legend>" not in text        # no full fieldset
@@ -213,7 +201,7 @@ def test_scope_selector_is_an_edit_latitude_row_with_descriptions_foldout(client
     assert "<details class=\"cv-scope-help\">" in text and "<details class=\"cv-scope-help\" open>" not in text
 
 
-def test_scope_selector_checkbox_state_reflects_job_cv_scope(client, cv_on, conn):
+def test_scope_selector_checkbox_state_reflects_job_cv_scope(client, conn):
     jid = _job(conn)
     opts = q.get_scope_options(conn)
     chosen, other = opts[0]["id"], opts[1]["id"]
@@ -229,7 +217,7 @@ def test_scope_selector_checkbox_state_reflects_job_cv_scope(client, cv_on, conn
     assert f'value="{other}" checked>' not in text
 
 
-def test_workbench_has_a_stage_breadcrumb(client, cv_on, conn):
+def test_workbench_has_a_stage_breadcrumb(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
     assert 'class="cv-workbench-crumb"' in page
@@ -237,14 +225,14 @@ def test_workbench_has_a_stage_breadcrumb(client, cv_on, conn):
         assert label in page
 
 
-def test_workbench_has_no_workflow_instructions_line(client, cv_on, conn):
+def test_workbench_has_no_workflow_instructions_line(client, conn):
     jid = _job(conn)
     r = client.get(f"/jobs/{jid}/cv")
     assert "cv-workflow-note" not in r.text
     assert "How this works" not in r.text
 
 
-def test_preview_pane_layout_guardrails_under_preview_controls_below_iframe(client, cv_on, conn):
+def test_preview_pane_layout_guardrails_under_preview_controls_below_iframe(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n\n- x\n", scope=[1],
                     guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
@@ -256,7 +244,7 @@ def test_preview_pane_layout_guardrails_under_preview_controls_below_iframe(clie
     assert stage < text.index("Accept this CV") < text.index('id="cv-findings"')
 
 
-def test_preview_pane_has_base_tailored_tabs(client, cv_on, conn):
+def test_preview_pane_has_base_tailored_tabs(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n")
@@ -275,7 +263,7 @@ def test_preview_pane_has_base_tailored_tabs(client, cv_on, conn):
     assert 'class="btn btn-subtle cv-preview-fs"' in r.text
 
 
-def test_preview_pane_tailored_tab_disabled_without_draft(client, cv_on, conn):
+def test_preview_pane_tailored_tab_disabled_without_draft(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     with patch("app.routes.cv.doc_write_available", return_value=True):
@@ -288,7 +276,7 @@ def test_preview_pane_tailored_tab_disabled_without_draft(client, cv_on, conn):
     assert 'src="/jobs/%d/cv/preview.html?variant=base"' % jid in r.text
 
 
-def test_preview_pane_shows_progress_note_while_a_generate_task_runs(client, cv_on, conn):
+def test_preview_pane_shows_progress_note_while_a_generate_task_runs(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n")
@@ -304,7 +292,7 @@ def test_preview_pane_shows_progress_note_while_a_generate_task_runs(client, cv_
     assert f"__cvWatchGenerate({tid})" in r.text
 
 
-def test_first_pass_plan_task_does_not_show_preview_progress_note(client, cv_on, conn):
+def test_first_pass_plan_task_does_not_show_preview_progress_note(client, conn):
     # a plan run produces no draft and doesn't touch guardrails
     jid = _job(conn)
     q.enqueue_task(conn, kind="cv_tailor",
@@ -315,7 +303,7 @@ def test_first_pass_plan_task_does_not_show_preview_progress_note(client, cv_on,
     assert 'class="cv-findings-stale" aria-live="polite" hidden' in r.text
 
 
-def test_preview_pane_markdown_fallback_without_doc_write(client, cv_on, conn):
+def test_preview_pane_markdown_fallback_without_doc_write(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft body\n")
@@ -325,7 +313,7 @@ def test_preview_pane_markdown_fallback_without_doc_write(client, cv_on, conn):
     assert "Draft body" in r.text  # rendered markdown
 
 
-def test_plan_pane_scope_checkboxes_use_live_descriptions(client, cv_on, conn):
+def test_plan_pane_scope_checkboxes_use_live_descriptions(client, conn):
     import html
     jid = _job(conn)
     opts = q.get_scope_options(conn)
@@ -340,13 +328,13 @@ def test_plan_pane_scope_checkboxes_use_live_descriptions(client, cv_on, conn):
         assert f'#{opts[0]["id"]} {opts[0]["name"]}' not in text  # no "#1 correct" style
 
 
-def test_directives_note_mentions_heading_and_bullet_structure(client, cv_on, conn):
+def test_directives_note_mentions_heading_and_bullet_structure(client, conn):
     jid = _job(conn)
     r = client.get(f"/jobs/{jid}/cv")
     assert "## Heading" in r.text and "- bullet" in r.text
 
 
-def test_first_visit_directives_textarea_prefilled_with_template(client, cv_on, conn):
+def test_first_visit_directives_textarea_prefilled_with_template(client, conn):
     jid = _job(conn)
     q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
                        css="", default_scope=[1], directives_template="## Role relevance\n## Skills match")
@@ -356,7 +344,7 @@ def test_first_visit_directives_textarea_prefilled_with_template(client, cv_on, 
     assert "## Role relevance" in body and "## Skills match" in body
 
 
-def test_diff_html_renders_with_a_draft(client, cv_on, conn):
+def test_diff_html_renders_with_a_draft(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# CV\n\n- kept\n",
@@ -368,12 +356,12 @@ def test_diff_html_renders_with_a_draft(client, cv_on, conn):
     assert "cvd-del" in r.text and "dropped" in r.text
 
 
-def test_diff_html_404_without_draft(client, cv_on, conn):
+def test_diff_html_404_without_draft(client, conn):
     jid = _job(conn)
     assert client.get(f"/jobs/{jid}/cv/diff.html").status_code == 404
 
 
-def test_diff_html_predates_tracking_when_snapshot_empty(client, cv_on, conn):
+def test_diff_html_predates_tracking_when_snapshot_empty(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# CV\n", base_cv_snapshot="")
     r = client.get(f"/jobs/{jid}/cv/diff.html")
@@ -381,7 +369,7 @@ def test_diff_html_predates_tracking_when_snapshot_empty(client, cv_on, conn):
     assert "predates change tracking" in r.text
 
 
-def test_diff_html_fallback_without_doc_write(client, cv_on, conn):
+def test_diff_html_fallback_without_doc_write(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# CV\n\n- a\n", base_cv_snapshot="# CV\n\n- a\n- b\n")
@@ -391,7 +379,7 @@ def test_diff_html_fallback_without_doc_write(client, cv_on, conn):
     assert "<del" in r.text  # markdown filter rendered the annotated md
 
 
-def test_diff_html_falls_back_to_plain_doc_when_the_diff_builder_raises(client, cv_on, conn):
+def test_diff_html_falls_back_to_plain_doc_when_the_diff_builder_raises(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# CV marker\n", base_cv_snapshot="# Base\n")
@@ -403,7 +391,7 @@ def test_diff_html_falls_back_to_plain_doc_when_the_diff_builder_raises(client, 
     assert "CV marker" in r.text  # the plain tailored doc, not a 500
 
 
-def test_preview_pane_has_differences_tab(client, cv_on, conn):
+def test_preview_pane_has_differences_tab(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n", base_cv_snapshot="# Base\n")
@@ -415,7 +403,7 @@ def test_preview_pane_has_differences_tab(client, cv_on, conn):
     assert 'id="cv-change-report"' not in r.text
 
 
-def test_preview_pane_shows_change_digest_above_the_tabs(client, cv_on, conn):
+def test_preview_pane_shows_change_digest_above_the_tabs(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(
@@ -432,7 +420,7 @@ def test_preview_pane_shows_change_digest_above_the_tabs(client, cv_on, conn):
     assert r.text.index('<div class="cv-diff-summary">') < r.text.index('data-variant="diff"')
 
 
-def test_preview_pane_no_digest_before_first_draft(client, cv_on, conn):
+def test_preview_pane_no_digest_before_first_draft(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     with patch("app.routes.cv.doc_write_available", return_value=True):
@@ -440,7 +428,7 @@ def test_preview_pane_no_digest_before_first_draft(client, cv_on, conn):
     assert '<div class="cv-diff-summary">' not in r.text
 
 
-def test_differences_tab_disabled_without_draft(client, cv_on, conn):
+def test_differences_tab_disabled_without_draft(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     with patch("app.routes.cv.doc_write_available", return_value=True):
@@ -449,7 +437,7 @@ def test_differences_tab_disabled_without_draft(client, cv_on, conn):
     assert f'/jobs/{jid}/cv/diff.html' not in r.text
 
 
-def test_accepted_view_has_three_tabs(client, cv_on, conn):
+def test_accepted_view_has_three_tabs(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Final\n", base_cv_snapshot="# Base\n")
@@ -460,21 +448,21 @@ def test_accepted_view_has_three_tabs(client, cv_on, conn):
     assert 'data-variant="diff"' in r.text
 
 
-def test_workbench_first_visit_shows_empty_preview_state(client, cv_on, conn):
+def test_workbench_first_visit_shows_empty_preview_state(client, conn):
     jid = _job(conn)
     text = client.get(f"/jobs/{jid}/cv").text
     assert "No tailored CV yet" in text
     assert "Accept this CV" not in text           # gated on has_draft
 
 
-def test_findings_stale_note_hidden_when_no_generate_running(client, cv_on, conn):
+def test_findings_stale_note_hidden_when_no_generate_running(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     text = client.get(f"/jobs/{jid}/cv").text
     assert 'class="cv-findings-stale" aria-live="polite" hidden' in text
 
 
-def test_findings_stale_note_visible_while_generate_runs(client, cv_on, conn):
+def test_findings_stale_note_visible_while_generate_runs(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     q.enqueue_task(conn, kind="cv_tailor",
@@ -483,7 +471,7 @@ def test_findings_stale_note_visible_while_generate_runs(client, cv_on, conn):
     assert 'class="cv-findings-stale" aria-live="polite">' in text          # present, no hidden attr
 
 
-def test_findings_container_present_on_first_generate_without_draft(client, cv_on, conn):
+def test_findings_container_present_on_first_generate_without_draft(client, conn):
     jid = _job(conn)
     q.enqueue_task(conn, kind="cv_tailor",
                    params={"job_id": jid, "mode": "generate", "render": "preview_pane"})

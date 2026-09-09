@@ -205,9 +205,7 @@ def test_job_expand_has_full_meta_parity_with_card(client, conn):
     assert '<h2 class="job-detail-title">ML Eng</h2>' in resp.text
 
 
-def test_job_expand_keeps_tailor_cv_link_on_detail(client, conn, monkeypatch):
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: True)
+def test_job_expand_keeps_tailor_cv_link_on_detail(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand?detail=1")
     assert resp.status_code == 200
@@ -2753,9 +2751,7 @@ def test_job_expand_shows_data_age(client, conn):
     assert "job-data-age" in resp.text
 
 
-def test_job_detail_shows_tailor_cv_link_when_enabled(client, conn, monkeypatch):
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: True)
+def test_job_detail_shows_tailor_cv_link(client, conn):
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
@@ -2764,19 +2760,7 @@ def test_job_detail_shows_tailor_cv_link_when_enabled(client, conn, monkeypatch)
     assert "/jobs/1/cv" in r.text
 
 
-def test_job_detail_hides_tailor_cv_link_when_disabled(client, conn, monkeypatch):
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: False)
-    conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
-    conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
-    conn.commit()
-    r = client.get("/jobs/1")
-    assert "/jobs/1/cv" not in r.text
-
-
-def test_job_detail_tailor_cv_sits_in_actions_group_before_organize(client, conn, monkeypatch):
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: True)
+def test_job_detail_tailor_cv_sits_in_actions_group_before_organize(client, conn):
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
@@ -2792,12 +2776,10 @@ def test_job_detail_tailor_cv_sits_in_actions_group_before_organize(client, conn
     assert text.index('btn-tailor-cv') < advanced_start
 
 
-def test_job_list_row_expand_shows_actions_and_organize(client, conn, monkeypatch):
+def test_job_list_row_expand_shows_actions_and_organize(client, conn):
     """Regression: /jobs/{id}/expand (list-view row expansion) used to only
-    attach cv_enabled/job_cv when the request came from the detail page,
+    attach job_cv when the request came from the detail page,
     so the Actions group silently never appeared on the jobs list."""
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: True)
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
@@ -2809,13 +2791,11 @@ def test_job_list_row_expand_shows_actions_and_organize(client, conn, monkeypatc
     assert text.index('aria-label="Actions"') < text.index('aria-label="Organize"')
 
 
-def test_job_feedback_response_keeps_actions_group(client, conn, monkeypatch):
+def test_job_feedback_response_keeps_actions_group(client, conn):
     """Regression: _render_updated_job_html (the row re-render used after
     feedback/reset/pass-as-new/reevaluate/revisit) built jobs/_feedback.html
-    without cv_enabled/job_cv at all, so the Actions group vanished from a
+    without job_cv at all, so the Actions group vanished from a
     row the instant you accepted/rejected/trashed it."""
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: True)
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type,status) VALUES (1,'http://x/1','Role','job_posting','new')")
     conn.commit()
@@ -2824,19 +2804,7 @@ def test_job_feedback_response_keeps_actions_group(client, conn, monkeypatch):
     assert 'btn-tailor-cv' in r.text
 
 
-def test_job_detail_no_actions_group_when_cv_disabled(client, conn, monkeypatch):
-    import app.routes.jobs as jr
-    monkeypatch.setattr(jr, "cv_enabled", lambda *_a, **_k: False)
-    conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
-    conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
-    conn.commit()
-    r = client.get("/jobs/1")
-    assert 'aria-label="Actions"' not in r.text
-
-
-def test_main_nav_shows_cv_link_after_profile_when_enabled(client, monkeypatch):
-    import app.config as cfg
-    monkeypatch.setattr(cfg, "cv_enabled", lambda *_a, **_k: True)
+def test_main_nav_shows_cv_link_after_profile(client):
     r = client.get("/jobs")
     text = r.text
     assert '<a href="/cv"' in text
@@ -2844,8 +2812,3 @@ def test_main_nav_shows_cv_link_after_profile_when_enabled(client, monkeypatch):
     assert text.index('href="/cv"') < text.index('href="/scenarios"')
 
 
-def test_main_nav_hides_cv_link_when_disabled(client, monkeypatch):
-    import app.config as cfg
-    monkeypatch.setattr(cfg, "cv_enabled", lambda *_a, **_k: False)
-    r = client.get("/jobs")
-    assert '<a href="/cv"' not in r.text

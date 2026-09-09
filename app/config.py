@@ -138,14 +138,3 @@ def write_config(
 
     # Write directly (follow symlink if present) — do not rename-replace
     p.write_text("\n".join(lines))
-
-
-def cv_enabled(path: str = "config.toml") -> bool:
-    """True only when [cv].enabled is explicitly true in config.toml.
-    The per-job CV generator is experimental and off by default."""
-    try:
-        with open(path, "rb") as f:
-            raw = tomllib.load(f)
-    except (FileNotFoundError, tomllib.TOMLDecodeError):
-        return False
-    return bool(raw.get("cv", {}).get("enabled", False))

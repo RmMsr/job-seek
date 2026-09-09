@@ -2,7 +2,7 @@
 {% block title %}Tailor CV — {{ job.title or "Job" }}{% endblock %}
 {% block content %}
 <p><a href="/jobs/{{ job.id }}">&larr; Back to job</a> &nbsp;·&nbsp; <a href="/cv">CV settings</a></p>
-<h1>Tailor CV <span class="tag">experimental</span></h1>
+<h1>Tailor CV</h1>
 <p class="muted">{{ job.title }}{% if job.company %} — {{ job.company }}{% endif %}</p>
 
 {% if job_cv and job_cv.finalized_at %}

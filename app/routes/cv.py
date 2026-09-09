@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.db import queries as q
-from app.deps import get_db, require_cv_enabled
+from app.deps import get_db
 from app.markdown_render import markdown_to_text
 from app.task_engine import register_task_kind
 from app.ai.tailor_cv import plan_tailoring, tailor_cv, check_guardrails
@@ -136,7 +136,6 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
 def _cv_page_ctx(conn: sqlite3.Connection) -> dict:
     return {
         "settings": q.get_cv_settings(conn),
-        "cv_enabled": True,
         "app_version": get_app_version(),
         "build_date": get_build_date(),
     }
@@ -146,7 +145,6 @@ def _advanced_ctx(conn: sqlite3.Connection) -> dict:
     return {
         "settings": q.get_cv_settings(conn),
         "scope_options": q.get_scope_options(conn),
-        "cv_enabled": True,
         "app_version": get_app_version(),
         "build_date": get_build_date(),
     }
@@ -227,9 +225,7 @@ def _workbench_ctx(conn: sqlite3.Connection, job_id: int) -> dict:
 
 
 @router.get(
-    "/jobs/{job_id}/cv", response_class=HTMLResponse,
-    dependencies=[Depends(require_cv_enabled)],
-)
+    "/jobs/{job_id}/cv", response_class=HTMLResponse)
 def cv_workbench(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     if q.get_job(conn, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -237,9 +233,7 @@ def cv_workbench(job_id: int, request: Request, conn: sqlite3.Connection = Depen
 
 
 @router.get(
-    "/jobs/{job_id}/cv/preview.html", response_class=HTMLResponse,
-    dependencies=[Depends(require_cv_enabled)],
-)
+    "/jobs/{job_id}/cv/preview.html", response_class=HTMLResponse)
 def cv_preview_html(job_id: int, variant: str = "tailored",
                     conn: sqlite3.Connection = Depends(get_db)):
     job = q.get_job(conn, job_id)
@@ -262,9 +256,7 @@ def cv_preview_html(job_id: int, variant: str = "tailored",
 
 
 @router.get(
-    "/jobs/{job_id}/cv/diff.html", response_class=HTMLResponse,
-    dependencies=[Depends(require_cv_enabled)],
-)
+    "/jobs/{job_id}/cv/diff.html", response_class=HTMLResponse)
 def cv_diff_html(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     job = q.get_job(conn, job_id)
     if job is None:
@@ -293,12 +285,12 @@ def cv_diff_html(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     )
 
 
-@router.get("/cv", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.get("/cv", response_class=HTMLResponse)
 def cv_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "cv/index.html", _cv_page_ctx(conn))
 
 
-@router.post("/cv", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv", response_class=HTMLResponse)
 async def cv_save(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     current = q.get_cv_settings(conn)
@@ -314,8 +306,7 @@ async def cv_save(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     return templates.TemplateResponse(request, "cv/index.html", ctx)
 
 
-@router.get("/cv/preview.html", response_class=HTMLResponse,
-            dependencies=[Depends(require_cv_enabled)])
+@router.get("/cv/preview.html", response_class=HTMLResponse)
 def cv_preview_base_html(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     if not doc_write_available():
@@ -326,7 +317,7 @@ def cv_preview_base_html(conn: sqlite3.Connection = Depends(get_db)):
         raise HTTPException(status_code=503, detail=str(exc))
 
 
-@router.get("/cv/advanced", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.get("/cv/advanced", response_class=HTMLResponse)
 def cv_advanced_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     ctx = _advanced_ctx(conn)
     ctx["saved"] = request.query_params.get("saved")
@@ -337,7 +328,7 @@ def cv_advanced_page(request: Request, conn: sqlite3.Connection = Depends(get_db
 # (see routes/setup.py): persist, then 303 to the GET with ?saved=<section> so
 # the URL stays on /cv/advanced and a reload can't re-submit.
 
-@router.post("/cv/save-style", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/save-style")
 async def cv_save_style(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     current = q.get_cv_settings(conn)
@@ -350,7 +341,7 @@ async def cv_save_style(request: Request, conn: sqlite3.Connection = Depends(get
     return RedirectResponse("/cv/advanced?saved=style", status_code=303)
 
 
-@router.post("/cv/save-guardrails", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/save-guardrails")
 async def cv_save_guardrails(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     current = q.get_cv_settings(conn)
@@ -363,7 +354,7 @@ async def cv_save_guardrails(request: Request, conn: sqlite3.Connection = Depend
     return RedirectResponse("/cv/advanced?saved=guardrails", status_code=303)
 
 
-@router.post("/cv/save-css", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/save-css", response_class=HTMLResponse)
 async def cv_save_css(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     css = form.get("css", "")
@@ -384,7 +375,7 @@ async def cv_save_css(request: Request, conn: sqlite3.Connection = Depends(get_d
     return RedirectResponse("/cv/advanced?saved=css", status_code=303)
 
 
-@router.post("/cv/reset-guardrails", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/reset-guardrails")
 def cv_reset_guardrails(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
@@ -395,7 +386,7 @@ def cv_reset_guardrails(conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse("/cv/advanced?saved=guardrails", status_code=303)
 
 
-@router.post("/cv/reset-style", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/reset-style")
 def cv_reset_style(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
@@ -407,7 +398,7 @@ def cv_reset_style(conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse("/cv/advanced?saved=style", status_code=303)
 
 
-@router.post("/cv/reset-css", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/reset-css")
 def cv_reset_css(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
@@ -419,7 +410,7 @@ def cv_reset_css(conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse("/cv/advanced?saved=css", status_code=303)
 
 
-@router.post("/cv/save-directives-template", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/save-directives-template")
 async def cv_save_directives_template(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     c = q.get_cv_settings(conn)
@@ -430,7 +421,7 @@ async def cv_save_directives_template(request: Request, conn: sqlite3.Connection
     return RedirectResponse("/cv/advanced?saved=directives_template", status_code=303)
 
 
-@router.post("/cv/reset-directives-template", dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/reset-directives-template")
 def cv_reset_directives_template(conn: sqlite3.Connection = Depends(get_db)):
     from app.cv.instruction import DEFAULT_DIRECTIVES_TEMPLATE
     c = q.get_cv_settings(conn)
@@ -441,7 +432,7 @@ def cv_reset_directives_template(conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse("/cv/advanced?saved=directives_template", status_code=303)
 
 
-@router.post("/cv/scope-options", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/scope-options", response_class=HTMLResponse)
 async def add_scope_option(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     description = form.get("description", "").strip()
@@ -453,7 +444,7 @@ async def add_scope_option(request: Request, conn: sqlite3.Connection = Depends(
     )
 
 
-@router.post("/cv/scope-options/reset", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/scope-options/reset", response_class=HTMLResponse)
 def reset_scope_options_route(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     # Registered before the dynamic /cv/scope-options/{scope_option_id} DELETE
     # route below — FastAPI matches path routes in registration order, and a
@@ -465,7 +456,7 @@ def reset_scope_options_route(request: Request, conn: sqlite3.Connection = Depen
     )
 
 
-@router.post("/cv/scope-options/save-all", response_class=HTMLResponse, dependencies=[Depends(require_cv_enabled)])
+@router.post("/cv/scope-options/save-all", response_class=HTMLResponse)
 async def save_all_scope_options_route(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     # Registered before the dynamic /cv/scope-options/{scope_option_id} DELETE
     # route below, same reasoning as reset above.
@@ -485,8 +476,7 @@ async def save_all_scope_options_route(request: Request, conn: sqlite3.Connectio
     )
 
 
-@router.delete("/cv/scope-options/{scope_option_id}", response_class=HTMLResponse,
-               dependencies=[Depends(require_cv_enabled)])
+@router.delete("/cv/scope-options/{scope_option_id}", response_class=HTMLResponse)
 def delete_scope_option_route(scope_option_id: int, conn: sqlite3.Connection = Depends(get_db)):
     q.delete_scope_option(conn, scope_option_id)
     return HTMLResponse(content="")
@@ -587,7 +577,7 @@ def _require_editable(conn: sqlite3.Connection, job_id: int) -> None:
                             detail="This CV is accepted and read-only. Use “Start over” to edit it.")
 
 
-@router.post("/jobs/{job_id}/cv/plan", dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/plan")
 def cv_plan(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
     task = q.enqueue_task(conn, kind="cv_tailor",
@@ -595,7 +585,7 @@ def cv_plan(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
-@router.post("/jobs/{job_id}/cv/generate", dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/generate")
 def cv_generate(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
     task = q.enqueue_task(conn, kind="cv_tailor",
@@ -603,8 +593,7 @@ def cv_generate(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
-@router.post("/jobs/{job_id}/cv/save-directives", response_class=HTMLResponse,
-             dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/save-directives", response_class=HTMLResponse)
 async def cv_save_directives(job_id: int, request: Request,
                              conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
@@ -613,8 +602,7 @@ async def cv_save_directives(job_id: int, request: Request,
     return _plan_pane(request, conn, job_id)
 
 
-@router.post("/jobs/{job_id}/cv/save-scope", response_class=HTMLResponse,
-             dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/save-scope", response_class=HTMLResponse)
 async def cv_save_scope(job_id: int, request: Request,
                         conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
@@ -626,8 +614,7 @@ async def cv_save_scope(job_id: int, request: Request,
                                       _workbench_ctx(conn, job_id))
 
 
-@router.post("/jobs/{job_id}/cv/reset-directives", response_class=HTMLResponse,
-             dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/reset-directives", response_class=HTMLResponse)
 def cv_reset_directives(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
     q.set_job_cv_directives(conn, job_id, q.get_cv_settings(conn)["directives_template"])
@@ -635,8 +622,7 @@ def cv_reset_directives(job_id: int, request: Request, conn: sqlite3.Connection 
     return _plan_pane(request, conn, job_id)
 
 
-@router.post("/jobs/{job_id}/cv/handled/{index}/delete", response_class=HTMLResponse,
-             dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/handled/{index}/delete", response_class=HTMLResponse)
 def cv_unhandle_suggestion(job_id: int, index: int, request: Request,
                            conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
@@ -644,8 +630,7 @@ def cv_unhandle_suggestion(job_id: int, index: int, request: Request,
     return _plan_pane(request, conn, job_id)
 
 
-@router.post("/jobs/{job_id}/cv/plan/accept", response_class=HTMLResponse,
-             dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/plan/accept", response_class=HTMLResponse)
 async def cv_accept_plan_proposals(job_id: int, request: Request,
                                    conn: sqlite3.Connection = Depends(get_db)):
     _require_editable(conn, job_id)
@@ -677,7 +662,7 @@ async def cv_accept_plan_proposals(job_id: int, request: Request,
     return _plan_pane(request, conn, job_id)
 
 
-@router.post("/jobs/{job_id}/cv/accept", dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/accept")
 def cv_accept(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     row = q.get_job_cv(conn, job_id)
     if row is None or not row["tailored_cv"]:
@@ -688,7 +673,7 @@ def cv_accept(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse(f"/jobs/{job_id}/cv", status_code=303)
 
 
-@router.post("/jobs/{job_id}/cv/reopen", dependencies=[Depends(require_cv_enabled)])
+@router.post("/jobs/{job_id}/cv/reopen")
 def cv_reopen(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     if q.get_job(conn, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -699,7 +684,7 @@ def cv_reopen(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return RedirectResponse(f"/jobs/{job_id}/cv", status_code=303)
 
 
-@router.get("/jobs/{job_id}/cv.pdf", dependencies=[Depends(require_cv_enabled)])
+@router.get("/jobs/{job_id}/cv.pdf")
 def cv_pdf(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     row = q.get_job_cv(conn, job_id)
     if row is None or not row["tailored_cv"]:

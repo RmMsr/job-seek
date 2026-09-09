@@ -3,7 +3,6 @@ from pathlib import Path
 from fastapi.templating import Jinja2Templates
 from app.markdown_render import render_markdown, render_markdown_inline, markdown_to_text
 from app.dates import time_ago, age
-import app.config as _config
 
 _SCORE_STOPS = [(0.0, "low"), (0.40, "mid"), (0.80, "high"), (1.0, "top")]
 
@@ -62,22 +61,3 @@ def short_url(url: str, limit: int = 50) -> str:
 
 
 templates.env.filters["short_url"] = short_url
-
-
-def _cv_feature_enabled() -> bool:
-    # Looked up via the module object (not `from app.config import cv_enabled`)
-    # so a test's `monkeypatch.setattr(app.config, "cv_enabled", ...)` is
-    # honored at call time instead of being bound to the original function
-    # object once at import time.
-    #
-    # Registered under a name distinct from the existing per-route
-    # `context["cv_enabled"]` (a plain bool many routes already pass, e.g.
-    # for a job's Actions-group gating) -- Jinja lets a context variable
-    # shadow a global of the same name, so reusing "cv_enabled" here would
-    # make base.html's `{% if cv_enabled() %}` call a bool on any page whose
-    # route-supplied context already has a `cv_enabled` key, raising
-    # "'bool' object is not callable".
-    return _config.cv_enabled()
-
-
-templates.env.globals["cv_feature_enabled"] = _cv_feature_enabled
