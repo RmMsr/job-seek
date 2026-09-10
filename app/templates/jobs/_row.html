@@ -6,7 +6,7 @@
   hx-trigger="click, keyup[key=='Enter']">
   <div class="job-row-score">{% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}</div>
   <div class="job-row-content">
-    {% if not is_detail_page and not (filter and filter.searching) %}
+    {% if not is_detail_page %}
     <label class="job-select-wrap">
       <input type="checkbox" class="job-select" name="job_ids" value="{{ job.id }}" form="bulk-form"
         id="job-select-{{ job.id }}" hx-preserve="true"

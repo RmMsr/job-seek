@@ -72,9 +72,15 @@
     hx-target="#job-{{ job.id }}"
     hx-swap="outerHTML">
     {% if is_detail_page %}<input type="hidden" name="redirect" value="/jobs">{% endif %}
-    <label><strong>Job note</strong> (optional, will also feed back into adjusting your profile):
-      <textarea name="note" placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
+    <label style="display:block;"><strong>Job note</strong> (optional, will also feed back into adjusting your profile):
+      <span class="cv-editor-wrap">
+        <textarea name="note" id="job-note-{{ job.id }}"
+          data-autosave-url="/jobs/{{ job.id }}/note"
+          placeholder="Why accepting/rejecting? What should change?">{{ job.feedback_note or '' }}</textarea>
+        <span class="cv-save-hint" aria-live="polite" hidden></span>
+      </span>
     </label>
+    <p class="muted" style="font-size:.85em;margin:.15rem 0 0;">Saved automatically as you type.</p>
     {% if job_events %}
     <details class="job-history">
       <summary>History ({{ job_events | length }})</summary>

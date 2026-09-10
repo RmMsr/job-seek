@@ -22,6 +22,12 @@ logging.getLogger("uvicorn.access").addFilter(_ExcludeTasksActiveFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        from app.config import load_config
+        from app.tracing import init_tracing
+        init_tracing(load_config())
+    except Exception:
+        logging.getLogger("job_seek").warning("tracing init skipped", exc_info=True)
     stop_event = threading.Event()
     worker_thread = threading.Thread(target=run_worker_forever, args=(stop_event,), daemon=True)
     worker_thread.start()

@@ -14,6 +14,7 @@
   </label>
   <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;">
     <button type="submit" class="btn btn-primary">Save &amp; preview</button>
+    {% if has_doc_write %}<a class="btn" href="/cv.pdf">Download PDF</a>{% endif %}
   </div>
 </form>
 

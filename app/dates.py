@@ -17,6 +17,29 @@ def time_ago(published_at: str | None) -> str:
     return f"{days} days ago"
 
 
+def duration(start: str | None, end: str | None) -> str:
+    """Compact elapsed span between two ISO-8601 timestamps: '8s', '2m 30s',
+    '1h 4m'. Empty string if either side is missing or end precedes start."""
+    if not start or not end:
+        return ""
+    a = datetime.fromisoformat(start)
+    b = datetime.fromisoformat(end)
+    if a.tzinfo is None:
+        a = a.replace(tzinfo=timezone.utc)
+    if b.tzinfo is None:
+        b = b.replace(tzinfo=timezone.utc)
+    total = int((b - a).total_seconds())
+    if total < 0:
+        return ""
+    if total < 60:
+        return f"{total}s"
+    minutes, seconds = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
 def age(ts: str | None) -> str:
     """Render an ISO-8601 timestamp as a short coarse relative string:
     'just now', '5m ago', '3h ago', '2d ago', '3w ago', '5mo ago', '2y ago'.

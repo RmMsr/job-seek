@@ -7,3 +7,7 @@ path = "data/job-seek.db"
 
 [browser]
 profile_dir = "data/browser-profile"
+
+# [tracing]
+# endpoint = "http://localhost:6006/v1/traces"   # OTLP-HTTP collector (e.g. Phoenix); omit to disable
+# project_name = "job-seek"

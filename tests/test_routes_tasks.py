@@ -47,7 +47,7 @@ def test_presentation_cv_tailor_generate_names_job_and_links_to_workbench(conn):
     p = task_presentation(conn, q.get_task(conn, t["id"]))
     assert p["title"] == "Update CV: ML Engineer @ Acme"
     assert "tailored cv" in p["goal"].lower()
-    assert {"label": "Open the CV for ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
+    assert {"label": "CV for ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
 
 
 def test_presentation_cv_tailor_plan_is_directive_eval(conn):
@@ -340,7 +340,7 @@ def test_detail_page_panelless_needs_action_shows_open_link(client, conn):
     q.set_task_needs_action(conn, t["id"])
     html = client.get(f"/tasks/{t['id']}").text
     assert "Reconnect Slack to keep fetching" in html  # subtitle
-    assert '<a class="btn btn-primary" href="/sources#source-row-1">Open</a>' in html
+    assert '<a class="btn btn-primary" href="/sources#source-row-1">Review</a>' in html
     assert f'action="/tasks/{t["id"]}/dismiss"' in html
     assert 'id="resume-page"' not in html
 
@@ -374,7 +374,7 @@ def test_root_detail_panelless_child_shows_open_link(client, conn):
                                        "action_link": "/sources#source-row-9"})
     q.set_task_needs_action(conn, child["id"])
     html = client.get(f"/tasks/{root['id']}").text
-    assert '<a class="btn btn-primary" href="/sources#source-row-9">Open</a>' in html
+    assert '<a class="btn btn-primary" href="/sources#source-row-9">Review</a>' in html
     assert f'action="/tasks/{child["id"]}/dismiss"' in html  # dismiss targets the child
 
 
@@ -730,3 +730,54 @@ def test_fetch_source_results_drop_fetch_history(conn):
     labels = [r["label"] for r in task_presentation(conn, q.get_task(conn, t["id"]))["results"]]
     assert "Fetch history" not in labels
     assert "Jobs from Cord" in labels
+
+
+def test_revisit_result_view_summarises_and_links_changed(client, conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    j1 = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    j2 = q.insert_job(conn, source_id=sid, url="http://e/2", title="J2", company="Acme", raw_text="x")
+    j3 = q.insert_job(conn, source_id=sid, url="http://e/3", title="J3", company="Acme", raw_text="x")
+    conn.execute("UPDATE jobs SET title='Gone Role' WHERE id=?", (j2,))
+    t = q.enqueue_task(conn, kind="jobs_revisit",
+                       params={"job_ids": [j1, j2, j3], "trigger": "manual"})
+    conn.execute(
+        "UPDATE tasks SET status='done', result=? WHERE id=?",
+        ('{"outcome": {"total": 3, "changed": [], "closed": [%d]}}' % j2, t["id"]))
+    conn.commit()
+    r = client.get(f"/tasks/{t['id']}")
+    assert "3 rechecked" in r.text
+    assert "1 moved to Trash" in r.text
+    assert f'/jobs/{j2}' in r.text and "Trashed: Gone Role" in r.text
+    assert "View all rechecked jobs" not in r.text
+
+
+def test_bulk_reset_result_links_jobs(client, conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    j1 = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    conn.execute("UPDATE jobs SET title='Reset Me' WHERE id=?", (j1,))
+    t = q.enqueue_task(conn, kind="jobs_bulk_reset", params={"job_ids": [j1]})
+    conn.execute("UPDATE tasks SET status='done', result='{}' WHERE id=?", (t["id"],))
+    conn.commit()
+    r = client.get(f"/tasks/{t['id']}")
+    assert "1 job reset" in r.text
+    assert f'/jobs/{j1}' in r.text and "Reset Me" in r.text
+
+
+def test_result_labels_have_no_open_prefix(client, conn):
+    t = q.enqueue_task(conn, kind="scenarios_refine_all", params={})
+    conn.execute("UPDATE tasks SET status='done', result='{}' WHERE id=?", (t["id"],))
+    conn.commit()
+    r = client.get(f"/tasks/{t['id']}")
+    assert "Scenarios" in r.text
+    assert "Open Scenarios" not in r.text
+
+
+def test_finished_task_detail_shows_duration(client, conn):
+    t = q.enqueue_task(conn, kind="jobs_revisit", params={"job_ids": [], "trigger": "manual"})
+    conn.execute(
+        "UPDATE tasks SET status='done', started_at='2026-09-10T10:00:00', "
+        "finished_at='2026-09-10T10:02:30' WHERE id=?", (t["id"],))
+    conn.commit()
+    r = client.get(f"/tasks/{t['id']}")
+    assert "Finished" in r.text
+    assert "in 2m 30s" in r.text

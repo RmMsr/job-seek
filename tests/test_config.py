@@ -197,3 +197,32 @@ def test_write_config_recovers_from_corrupt_existing_file(tmp_path):
     assert 'provider = "custom"' in content
     assert 'path = "job-seek.db"' in content
     assert 'profile_dir = "job-seek"' in content
+
+
+def test_tracing_absent_by_default(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[llm]\nprovider="custom"\nendpoint="http://x"\n\n'
+                 '[database]\npath="j.db"\n\n[browser]\nprofile_dir="j"\n')
+    cfg = load_config(str(p))
+    assert cfg.tracing_endpoint is None
+    assert cfg.tracing_project == "job-seek"
+
+
+def test_tracing_section_loaded(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[llm]\nprovider="custom"\nendpoint="http://x"\n\n'
+                 '[database]\npath="j.db"\n\n[browser]\nprofile_dir="j"\n\n'
+                 '[tracing]\nendpoint="http://localhost:6006/v1/traces"\nproject_name="js-dev"\n')
+    cfg = load_config(str(p))
+    assert cfg.tracing_endpoint == "http://localhost:6006/v1/traces"
+    assert cfg.tracing_project == "js-dev"
+
+
+def test_write_config_preserves_tracing(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[llm]\nprovider="custom"\nendpoint="http://x"\n\n'
+                 '[database]\npath="j.db"\n\n[browser]\nprofile_dir="j"\n\n'
+                 '[tracing]\nendpoint="http://localhost:6006/v1/traces"\n')
+    write_config(str(p), provider="openai", api_key="k", model="gpt-4o")
+    assert "[tracing]" in p.read_text()
+    assert "localhost:6006" in p.read_text()

@@ -13,6 +13,7 @@
 <input type="hidden" name="source_id_filter" value="{{ filter.source_id or '' }}" form="bulk-form">
 <input type="hidden" name="org_filter" value="{% if filter.org_none %}none{% else %}{{ filter.org or '' }}{% endif %}" form="bulk-form">
 <input type="hidden" name="order_filter" value="{{ filter.order }}" form="bulk-form">
+<input type="hidden" name="q_filter" value="{{ filter.q }}" form="bulk-form">
 {% set scope_tabs = active_tabs if active_tabs is defined else filter.statuses %}
 <div class="filter-row">
   <div class="filter-selects">
@@ -55,8 +56,8 @@
     <a class="filter-clear" href="/jobs?{{ filter.cleared().query_params() | urlencode }}">Clear all filters</a>
     {% endif %}
   </div>
-  {% if not filter.searching %}
   <div class="filter-tools">
+    {% if not filter.searching %}
     <label>Sort
       <select name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
               hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
@@ -66,6 +67,7 @@
         <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
       </select>
     </label>
+    {% endif %}
     {% if jobs %}
     <label class="select-all">
       <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
@@ -73,7 +75,6 @@
     </label>
     {% endif %}
   </div>
-  {% endif %}
 </div>
 <div class="filter-bar">
   {% set scope_filter = filter.with_statuses(scope_tabs) if filter.searching else filter %}
@@ -94,7 +95,6 @@
     {% endfor %}
   </div>
 </div>
-{% if not filter.searching %}
 <div class="bulk-bar decision-panel">
   <button type="button" class="bulk-clear bulk-clear-x" aria-label="Clear selection" title="Clear selection">×</button>
   <label class="decision-panel-note">Note (optional):
@@ -125,7 +125,6 @@
   <div class="reset-progress" id="bulk-reevaluate-progress" aria-live="polite"></div>
   <div class="reset-progress" id="bulk-reset-progress" aria-live="polite"></div>
 </div>
-{% endif %}
 {% if jobs %}
   {% for job in jobs %}
     {% include "jobs/_row.html" %}

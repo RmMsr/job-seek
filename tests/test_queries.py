@@ -1941,7 +1941,16 @@ def test_update_job_feedback_logs_status_change_with_note(conn):
     events = q.get_job_events(conn, jid)
     assert len(events) == 1
     assert events[0]["kind"] == "status"
-    assert events[0]["message"] == 'Status: new → rejected — "role moved to London"'
+    assert events[0]["message"] == "Status: new → rejected"
+
+
+def test_status_change_event_omits_note_text(conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    q.update_job_feedback(conn, jid, "rejected", "salary too low, wrong stack")
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert "Status: new → rejected" in msgs
+    assert all("salary too low" not in m for m in msgs)
 
 
 def test_update_job_feedback_no_event_when_status_unchanged(conn):
@@ -1963,6 +1972,27 @@ def test_update_job_feedback_logs_without_note(conn):
     jid = q.insert_job(conn, source_id=sid, url="https://x.test/fb4", title="A", company="", raw_text="")
     q.update_job_feedback(conn, jid, "accepted", None)
     assert q.get_job_events(conn, jid)[0]["message"] == "Status: new → accepted"
+
+
+def test_set_job_note_persists_without_status_change(conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    q.update_job_feedback(conn, jid, "accepted", "")
+    q.set_job_note(conn, jid, "  keep an eye on comp band  ")
+    job = q.get_job(conn, jid)
+    assert job["feedback_note"] == "keep an eye on comp band"
+    assert job["status"] == "accepted"  # unchanged
+    assert job["feedback_handled_at"] is None
+    events = q.get_job_events(conn, jid)
+    assert all("keep an eye" not in e["message"] for e in events)
+
+
+def test_set_job_note_clears_when_blank(conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    q.set_job_note(conn, jid, "something")
+    q.set_job_note(conn, jid, "   ")
+    assert q.get_job(conn, jid)["feedback_note"] is None
 
 
 def test_mark_job_gate_override_logs_event(conn):

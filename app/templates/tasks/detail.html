@@ -10,7 +10,7 @@
   <dt>State</dt><dd id="task-log-status">{{ pres.status if is_group else task.status }}{% if task.error and not is_group %} — {{ task.error }}{% endif %}</dd>
   <dt>Created</dt><dd>{{ task.created_at | age }}</dd>
   {% if task.started_at %}<dt>Started</dt><dd>{{ task.started_at | age }}</dd>{% endif %}
-  {% if task.finished_at and not is_group %}<dt>{{ 'Needs you since' if task.status == 'needs_action' else 'Finished' }}</dt><dd>{{ task.finished_at | age }}</dd>{% endif %}
+  {% if task.finished_at and not is_group %}<dt>{{ 'Needs you since' if task.status == 'needs_action' else 'Finished' }}</dt><dd>{% if task.status != 'needs_action' and task.started_at %}in {{ task.started_at | duration(task.finished_at) }} · {{ task.finished_at | age }}{% else %}{{ task.finished_at | age }}{% endif %}</dd>{% endif %}
 </dl>
 
 {% set _stoppable = (pres.status if is_group else task.status) in ("queued", "running") %}
@@ -28,7 +28,7 @@
 {% elif awaiting %}
 {# needs-you but no inline panel — the subtitle already shows action_message #}
 <div class="task-li-actions" style="margin-top:1.25rem;">
-  {% if pres.action_link %}<a class="btn btn-primary" href="{{ pres.action_link }}">Open</a>{% endif %}
+  {% if pres.action_link %}<a class="btn btn-primary" href="{{ pres.action_link }}">Review</a>{% endif %}
   <form method="post" action="/tasks/{{ panel_task_id }}/dismiss"><button type="submit" class="btn">Dismiss</button></form>
 </div>
 {% elif resolved_panel %}
@@ -50,7 +50,7 @@
 
 {% if pres.results %}
 <h2>Results</h2>
-<ul>{% for r in pres.results %}<li><a href="{{ r.href }}">{{ r.label }}</a></li>{% endfor %}</ul>
+<ul>{% for r in pres.results %}<li>{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 
 {% if not is_group %}

@@ -77,3 +77,24 @@ def test_age_years():
 def test_age_six_days_still_days():
     ts = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
     assert age(ts) == "6d ago"
+
+
+from app.dates import duration
+
+
+def test_duration_seconds():
+    assert duration("2026-09-10T10:00:00", "2026-09-10T10:00:08") == "8s"
+
+
+def test_duration_minutes_seconds():
+    assert duration("2026-09-10T10:00:00", "2026-09-10T10:02:30") == "2m 30s"
+
+
+def test_duration_hours_minutes():
+    assert duration("2026-09-10T10:00:00", "2026-09-10T11:04:12") == "1h 4m"
+
+
+def test_duration_missing_or_reversed():
+    assert duration(None, "2026-09-10T10:00:00") == ""
+    assert duration("2026-09-10T10:00:00", None) == ""
+    assert duration("2026-09-10T10:05:00", "2026-09-10T10:00:00") == ""

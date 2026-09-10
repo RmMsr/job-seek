@@ -42,11 +42,12 @@ def test_summarize_returns_empty_strings_on_malformed_json():
     assert result == JobSummary()
 
 
-def test_summarize_returns_empty_strings_on_api_error():
+def test_summarize_propagates_api_error():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = Exception("boom")
-    result = summarize(client, "llama3.2", "content")
-    assert result == JobSummary()
+    with pytest.raises(Exception, match="boom"):
+        summarize(client, "llama3.2", "content")
 
 
 def test_summarize_disables_model_thinking():
@@ -154,12 +155,13 @@ def test_summarize_lead_falls_back_to_original_message_on_malformed_json():
     assert result == JobSummary(summary=original)
 
 
-def test_summarize_lead_falls_back_to_original_message_on_api_error():
+def test_summarize_lead_propagates_api_error():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = Exception("boom")
     original = "Posted by U123:\n\noriginal message"
-    result = summarize(client, "llama3.2", original, content_type="lead")
-    assert result == JobSummary(summary=original)
+    with pytest.raises(Exception, match="boom"):
+        summarize(client, "llama3.2", original, content_type="lead")
 
 
 def test_summarize_non_slack_lead_gets_ai_summary_not_raw_body():
@@ -179,11 +181,12 @@ def test_summarize_non_slack_lead_uses_job_posting_prompt():
     assert "job posting" in system.lower()
 
 
-def test_summarize_non_slack_lead_empty_summary_on_api_error():
+def test_summarize_non_slack_lead_propagates_api_error():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = Exception("boom")
-    result = summarize(client, "llama3.2", "raw", content_type="lead", raw_passthrough=False)
-    assert result == JobSummary()
+    with pytest.raises(Exception, match="boom"):
+        summarize(client, "llama3.2", "raw", content_type="lead", raw_passthrough=False)
 
 
 def test_summarize_extracts_company_and_posted_date():

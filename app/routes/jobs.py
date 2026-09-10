@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sqlite3
 from urllib.parse import urlsplit
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from app.deps import get_db
 from app.db import queries as q
@@ -207,6 +207,7 @@ def _filter_from_bulk_form(
     source_id_filter: str | None,
     org_filter: str | None,
     order_filter: str | None = None,
+    q_filter: str | None = None,
 ) -> JobFilter:
     return JobFilter.from_params({
         "status": status_filter or "new",
@@ -214,6 +215,7 @@ def _filter_from_bulk_form(
         "source_id": source_id_filter or "",
         "org": org_filter or "",
         "order": order_filter or "",
+        "q": q_filter or "",
     })
 
 
@@ -344,6 +346,18 @@ def job_feedback(
     return HTMLResponse(content=row_html + counts_html, headers=headers)
 
 
+@router.post("/jobs/{job_id}/note")
+def job_save_note(
+    job_id: int,
+    note: str | None = Form(None),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Autosave target for the job-note field (fire-and-forget, like the CV
+    tuning-directives editor). No body — the client discards the response."""
+    q.set_job_note(conn, job_id, note)
+    return Response(status_code=204)
+
+
 @router.post("/jobs/{job_id}/scenario-feedback", response_class=HTMLResponse)
 def job_scenario_feedback(
     job_id: int,
@@ -458,7 +472,7 @@ def _task_jobs_revisit(conn, client, model, config, params):
     profile = q.get_profile(conn)
     outcomes = []
     for i, job in enumerate(jobs, start=1):
-        prefix = f"[{i}/{len(jobs)}] " if len(jobs) > 1 else ""
+        prefix = f"[{i}/{len(jobs)}] job {job['id']}: " if len(jobs) > 1 else f"job {job['id']}: "
         gen = run_revisit_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
         outcome = None
         try:
@@ -503,8 +517,13 @@ def _task_jobs_revisit(conn, client, model, config, params):
         )
         result["html_chunks"] = [notice_html, row_html, counts_html]
     else:
-        summary = f"Revisited {len(outcomes)} · closed {len(closed)} · changed {changed}"
+        changed_ids = [j["id"] for j, o in outcomes if o and o.verdict == "changed"]
+        closed_ids = [j["id"] for j, o in outcomes if o and o.verdict == "closed"]
+        summary = f"Revisited {len(outcomes)} · closed {len(closed_ids)} · changed {len(changed_ids)}"
         yield summary
+        result["outcome"] = {
+            "total": len(outcomes), "changed": changed_ids, "closed": closed_ids,
+        }
         result["notices"] = [{"level": "info", "html": f"<p>{summary}</p>"}]
     return result
 
@@ -567,7 +586,7 @@ def _task_jobs_bulk_reset(conn, client, model, config, params):
         job = q.get_job(conn, job_id)
         if not job:
             continue
-        prefix = f"[{idx}/{len(job_ids)}] "
+        prefix = f"[{idx}/{len(job_ids)}] job {job_id}: "
         gen = run_reprocess_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
         try:
             while True:
@@ -596,7 +615,7 @@ def _task_jobs_bulk_reevaluate(conn, client, model, config, params):
         job = q.get_job(conn, job_id)
         if not job:
             continue
-        prefix = f"[{idx}/{len(job_ids)}] "
+        prefix = f"[{idx}/{len(job_ids)}] job {job_id}: "
         gen = run_reevaluate_job(conn, client, model, job, scenarios, profile, progress_prefix=prefix)
         try:
             while True:
@@ -640,6 +659,7 @@ def job_bulk_feedback(
     source_id_filter: str | None = Form(None),
     org_filter: str | None = Form(None),
     order_filter: str | None = Form(None),
+    q_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -654,7 +674,7 @@ def job_bulk_feedback(
             q.enqueue_task(conn, kind="jobs_revisit",
                            params={"job_ids": revisitable, "trigger": "status_change"})
 
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter)
     jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     matched_ids = {j["id"] for j in jobs}
 
@@ -699,10 +719,11 @@ def job_bulk_delete(
     source_id_filter: str | None = Form(None),
     org_filter: str | None = Form(None),
     order_filter: str | None = Form(None),
+    q_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter)
     return templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
 
 

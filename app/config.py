@@ -13,18 +13,23 @@ class Config:
     llm_api_key: str
     browser_profile_dir: str
     db_path: str
+    tracing_endpoint: str | None = None
+    tracing_project: str = "job-seek"
 
 
 def load_config(path: str = "config.toml") -> Config:
     with open(path, "rb") as f:
         raw = tomllib.load(f)
     llm_endpoint, llm_model, llm_api_key = resolve_llm(raw.get("llm", {}))
+    tracing = raw.get("tracing", {})
     return Config(
         llm_endpoint=llm_endpoint,
         llm_model=llm_model,
         llm_api_key=llm_api_key,
         browser_profile_dir=raw["browser"]["profile_dir"],
         db_path=raw["database"]["path"],
+        tracing_endpoint=tracing.get("endpoint") or None,
+        tracing_project=tracing.get("project_name") or "job-seek",
     )
 
 
@@ -110,12 +115,14 @@ def write_config(
     p = Path(path)
     db_path = "job-seek.db"
     browser_profile_dir = "job-seek"
+    tracing_raw: dict = {}
     if p.exists():
         try:
             with open(p, "rb") as f:
                 raw = tomllib.load(f)
             db_path = raw.get("database", {}).get("path", db_path)
             browser_profile_dir = raw.get("browser", {}).get("profile_dir", browser_profile_dir)
+            tracing_raw = raw.get("tracing", {})
         except tomllib.TOMLDecodeError:
             pass
 
@@ -135,6 +142,12 @@ def write_config(
     lines.append("[browser]")
     lines.append(f'profile_dir = {json.dumps(browser_profile_dir)}')
     lines.append("")
+    if tracing_raw.get("endpoint"):
+        lines.append("[tracing]")
+        lines.append(f'endpoint = {json.dumps(tracing_raw["endpoint"])}')
+        if tracing_raw.get("project_name"):
+            lines.append(f'project_name = {json.dumps(tracing_raw["project_name"])}')
+        lines.append("")
 
     # Write directly (follow symlink if present) — do not rename-replace
     p.write_text("\n".join(lines))

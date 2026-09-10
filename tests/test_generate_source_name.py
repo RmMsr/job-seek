@@ -34,8 +34,9 @@ def test_generate_source_name_returns_none_on_invalid_json():
     assert name is None
 
 
-def test_generate_source_name_returns_none_on_client_error():
+def test_generate_source_name_propagates_client_error():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = RuntimeError("boom")
-    name = generate_source_name(client, "llama3.2", "example.com", "Some Title")
-    assert name is None
+    with pytest.raises(RuntimeError, match="boom"):
+        generate_source_name(client, "llama3.2", "example.com", "Some Title")

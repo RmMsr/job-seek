@@ -418,6 +418,7 @@
     .page-head h1 { margin: 0; }
     .page-head .add-panel { margin: 0; }
     .page-head .add-panel.add-panel-open { flex: 1 1 100%; }
+    .page-head-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
     /* ---- Jobs page toolbar ------------------------------------------------ */
     /* Every band above the first job row — heading, Add, search, selects,
@@ -1238,6 +1239,33 @@
     })();
   </script>
   <script>
+    // After a job card collapses (accept / reject / header-click), keep it in
+    // view and flash it once. Accepting from an expanded card — its buttons sit
+    // at the bottom — swaps it for a short collapsed row while the browser holds
+    // scrollTop, so the card the user had scrolled to can end up off-screen.
+    (function () {
+      document.body.addEventListener("htmx:afterSwap", function (e) {
+        var xhr = e.detail && e.detail.xhr;
+        if (!xhr || xhr.getResponseHeader("HX-Redirect")) return;
+        var m = (xhr.responseURL || "").match(/\/jobs\/(\d+)\/(feedback|collapse)\b/);
+        if (!m) return;
+        var row = document.getElementById("job-" + m[1]);
+        if (!row || !row.classList.contains("job-row")) return;
+        var r = row.getBoundingClientRect();
+        var vh = window.innerHeight || document.documentElement.clientHeight;
+        if (r.top < 0 || r.bottom > vh) {
+          row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+        row.classList.remove("job-row-target-highlight");
+        void row.offsetWidth;  // restart the animation if it was mid-flight
+        row.classList.add("job-row-target-highlight");
+        row.addEventListener("animationend", function () {
+          row.classList.remove("job-row-target-highlight");
+        }, { once: true });
+      });
+    })();
+  </script>
+  <script>
     (function () {
       var mouseIsDown = false;
       var dragging = false;
@@ -1486,33 +1514,48 @@ document.body.addEventListener('input', function (e) {
       .catch(function () {});
   });
 
-  // Directives autosave (moved out of _plan_pane.html so it survives the OOB
-  // plan-pane swap), with a visible Saving/Saved hint.
+  // Debounced autosave with a visible Saving/Saved hint. Two entry points:
+  //  - #cv-directives-form: POST the whole form to its action (survives the OOB
+  //    plan-pane swap, hence living here rather than in _plan_pane.html).
+  //  - any field with [data-autosave-url]: POST just that field to the URL
+  //    (job-note editor). The response body is discarded either way.
   var t = null;
-  function setHint(form, text, fading) {
-    var wrap = form.querySelector(".cv-editor-wrap");
-    var hint = wrap && wrap.querySelector(".cv-save-hint");
+  function setHint(hint, text, fading) {
     if (!hint) return;
     hint.hidden = false;
     hint.textContent = text;
     hint.classList.toggle("is-fading", !!fading);
   }
-  function scheduleSave(form) {
+  function scheduleSave(url, bodyFn, hint) {
     clearTimeout(t);
-    setHint(form, "Saving…", false);
+    setHint(hint, "Saving…", false);
     t = setTimeout(function () {
-      fetch(form.action, { method: "POST", body: new FormData(form) })
+      fetch(url, { method: "POST", body: bodyFn() })
         .then(function (r) {
           if (!r.ok) throw new Error();
-          setHint(form, "Saved", false);
-          setTimeout(function () { setHint(form, "Saved", true); }, 1500);
+          setHint(hint, "Saved", false);
+          setTimeout(function () { setHint(hint, "Saved", true); }, 1500);
         })
-        .catch(function () { setHint(form, "Not saved — retrying", false); scheduleSave(form); });
+        .catch(function () { setHint(hint, "Not saved — retrying", false); scheduleSave(url, bodyFn, hint); });
     }, 600);
   }
   document.body.addEventListener("input", function (e) {
     var form = e.target.closest("#cv-directives-form");
-    if (form) scheduleSave(form);
+    if (form) {
+      var fwrap = form.querySelector(".cv-editor-wrap");
+      scheduleSave(form.action, function () { return new FormData(form); },
+                   fwrap && fwrap.querySelector(".cv-save-hint"));
+      return;
+    }
+    var field = e.target.closest("[data-autosave-url]");
+    if (field) {
+      var wrap = field.closest(".cv-editor-wrap");
+      scheduleSave(field.dataset.autosaveUrl, function () {
+        var fd = new FormData();
+        fd.append(field.name, field.value);
+        return fd;
+      }, wrap && wrap.querySelector(".cv-save-hint"));
+    }
   });
 })();
   </script>

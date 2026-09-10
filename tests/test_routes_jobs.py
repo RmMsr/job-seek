@@ -748,6 +748,24 @@ def test_job_pass_as_new_task_execution_shows_moved_to_new_badge(conn):
     assert "Moved to New" in fetched["result"]["html_chunks"][0]
 
 
+def test_save_note_route_persists_without_status_change(client, conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    r = client.post(f"/jobs/{jid}/note", data={"note": "watch this one"})
+    assert r.status_code == 204
+    job = q.get_job(conn, jid)
+    assert job["feedback_note"] == "watch this one"
+    assert job["status"] == "new"
+
+
+def test_note_field_autosaves_no_button(client, conn):
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    jid = q.insert_job(conn, source_id=sid, url="http://e/1", title="T", company="Acme", raw_text="x")
+    html = client.get(f"/jobs/{jid}/expand").text
+    assert f'data-autosave-url="/jobs/{jid}/note"' in html
+    assert "Save note" not in html
+
+
 def test_job_feedback_with_redirect_field_returns_hx_redirect_header(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(
@@ -2466,13 +2484,36 @@ def test_search_rows_show_status_pill(client, conn):
     assert ">Accepted</span>" in html
 
 
-def test_search_rows_have_no_bulk_checkbox(client, conn):
+def test_search_rows_have_bulk_checkbox(client, conn):
     sid = q.insert_source(conn, "s", "https://s", "generic_listing")
     _seed_searchable(conn, sid, "http://s/1", "Go Engineer")
     html = client.get("/jobs?q=go").text
-    # base.html's stylesheet/scripts reference input[name="job_ids"], so assert
-    # on the per-row checkbox's own class instead of the bare name= attribute.
-    assert 'class="job-select"' not in html
+    # multi-select is now allowed during a text search (#3)
+    assert 'class="job-select"' in html
+    assert 'class="select-all-checkbox"' in html
+
+
+def test_bulk_reject_during_search_keeps_search_view(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    a = _seed_searchable(conn, sid, "http://s/a", "Python dev")
+    b = _seed_searchable(conn, sid, "http://s/b", "Python engineer", status="accepted")
+    r = client.post("/jobs/bulk-feedback", data={
+        "job_ids": [a, b], "status": "rejected",
+        "status_filter": "new,accepted", "q_filter": "python",
+    })
+    assert r.status_code == 200
+    assert q.get_job(conn, a)["status"] == "rejected"
+    assert q.get_job(conn, b)["status"] == "rejected"
+    # response is still the filtered search render, not a full "new" tab
+    assert "Python dev" in r.text
+
+
+def test_select_all_present_during_search(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    jid = _seed_searchable(conn, sid, "http://s/a", "Python dev")
+    r = client.get("/jobs?q=python")
+    assert 'class="select-all-checkbox"' in r.text
+    assert f'name="job_ids" value="{jid}"' in r.text
 
 
 def test_job_list_multi_status_shows_union(client, conn):
@@ -2673,6 +2714,34 @@ def test_revisit_sweep_result_is_oob_notice_no_chunks(conn):
     ]
 
 
+def test_multi_job_revisit_result_lists_changed_and_closed(conn):
+    from app.pipeline import RevisitOutcome
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    j_closed = q.insert_job(conn, source_id=sid, url="http://e/x", title="X", company="Acme", raw_text="x")
+    j_ok = q.insert_job(conn, source_id=sid, url="http://e/y", title="Y", company="Acme", raw_text="y")
+    for jid in (j_closed, j_ok):
+        conn.execute("UPDATE jobs SET summary='ref', simplified_content='ref' WHERE id=?", (jid,))
+    conn.commit()
+
+    def fake_revisit(conn, client, model, job, scenarios, profile, *, progress_prefix=""):
+        yield f"{progress_prefix}checking"
+        if job["id"] == j_closed:
+            q.mark_job_closed(conn, job["id"], "gone")
+            return RevisitOutcome("closed", "gone")
+        return RevisitOutcome("unchanged")
+
+    task = q.enqueue_task(conn, kind="jobs_revisit",
+                          params={"job_ids": [j_closed, j_ok], "trigger": "manual"})
+    with patch("app.routes.jobs.run_revisit_job", side_effect=fake_revisit):
+        execute_task(conn, MagicMock(), "model", MagicMock(), q.get_task(conn, task["id"]))
+
+    result = q.get_task(conn, task["id"])["result"]
+    assert result["outcome"]["closed"] == [j_closed]
+    assert result["outcome"]["total"] == 2
+    log = q.get_task(conn, task["id"])["log"]
+    assert f"job {j_closed}:" in log
+
+
 def test_accept_enqueues_status_change_revisit(client, conn):
     sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://example.com/j", title="J",
@@ -2734,7 +2803,9 @@ def test_job_detail_shows_history_block(client, conn):
     resp = client.get(f"/jobs/{jid}")
     assert resp.status_code == 200
     assert "History (1)" in resp.text
-    assert 'Status: new → rejected — &#34;not remote&#34;' in resp.text or "Status: new → rejected" in resp.text
+    assert "Status: new → rejected" in resp.text
+    # the note text is no longer echoed into the history line itself
+    assert 'Status: new → rejected — ' not in resp.text
 
 
 def test_job_detail_no_history_block_when_empty(client, conn):

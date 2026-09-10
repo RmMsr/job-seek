@@ -136,6 +136,7 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
 def _cv_page_ctx(conn: sqlite3.Connection) -> dict:
     return {
         "settings": q.get_cv_settings(conn),
+        "has_doc_write": doc_write_available(),
         "app_version": get_app_version(),
         "build_date": get_build_date(),
     }
@@ -302,7 +303,6 @@ async def cv_save(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     )
     ctx = _cv_page_ctx(conn)
     ctx["saved"] = True
-    ctx["has_doc_write"] = doc_write_available()
     return templates.TemplateResponse(request, "cv/index.html", ctx)
 
 
@@ -315,6 +315,19 @@ def cv_preview_base_html(conn: sqlite3.Connection = Depends(get_db)):
         return HTMLResponse(render_preview_html(settings["base_cv"], settings["css"]))
     except CvRenderError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/cv.pdf")
+def cv_base_pdf(conn: sqlite3.Connection = Depends(get_db)):
+    settings = q.get_cv_settings(conn)
+    if not settings["base_cv"].strip():
+        raise HTTPException(status_code=404, detail="No base CV")
+    try:
+        data = render_pdf(settings["base_cv"], settings["css"])
+    except CvRenderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="cv.pdf"'})
 
 
 @router.get("/cv/advanced", response_class=HTMLResponse)

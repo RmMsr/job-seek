@@ -184,6 +184,17 @@ def _next_step(conn: sqlite3.Connection, task: dict) -> str:
     return _done_summary(conn, task)
 
 
+_RESULT_LINK_CAP = 10
+
+
+def _job_links(conn, job_ids, *, prefix="") -> list[dict]:
+    out = []
+    for jid in job_ids[:_RESULT_LINK_CAP]:
+        title = _job_title(conn, jid) or f"job {jid}"
+        out.append({"label": f"{prefix} {title}".strip(), "href": f"/jobs/{jid}"})
+    return out
+
+
 def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
     r = task.get("result") or {}
     kind, params = task["kind"], task["params"]
@@ -205,14 +216,33 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{rjid}"})
     elif kind == "cv_tailor" and params.get("job_id"):
         title = _job_title(conn, params["job_id"])
-        out.append({"label": f"Open the CV for {title}" if title else "Open the CV workbench",
+        out.append({"label": f"CV for {title}" if title else "CV workbench",
                     "href": f"/jobs/{params['job_id']}/cv"})
+    elif kind == "jobs_revisit" and (outcome := r.get("outcome")):
+        total = outcome.get("total", 0)
+        changed, closed = outcome.get("changed", []), outcome.get("closed", [])
+        unchanged = max(0, total - len(changed) - len(closed))
+        parts = [f"{total} rechecked"]
+        if closed:
+            parts.append(f"{len(closed)} moved to Trash")
+        if changed:
+            parts.append(f"{len(changed)} updated")
+        if unchanged:
+            parts.append(f"{unchanged} unchanged")
+        out.append({"label": " · ".join(parts), "href": None})
+        out.extend(_job_links(conn, closed, prefix="Trashed:"))
+        out.extend(_job_links(conn, changed, prefix="Updated:"))
     elif kind in ("jobs_bulk_reset", "jobs_bulk_reevaluate"):
-        out.append({"label": "Back to jobs", "href": "/jobs"})
+        ids = params.get("job_ids") or []
+        verb = "reset" if kind == "jobs_bulk_reset" else "re-evaluated"
+        out.append({"label": f"{len(ids)} job{'s' if len(ids) != 1 else ''} {verb}", "href": None})
+        out.extend(_job_links(conn, ids))
+        if len(ids) > _RESULT_LINK_CAP:
+            out.append({"label": "Back to jobs", "href": "/jobs"})
     elif kind in ("source_confirm", "job_add_listing_source", "source_detect") and r.get("source_id"):
         out.append({"label": "View source", "href": f"/sources#source-{r['source_id']}"})
     elif kind in ("scenarios_refine_all", "scenario_refine_one", "scenarios_reevaluate_all"):
-        out.append({"label": "Open Scenarios", "href": "/scenarios"})
+        out.append({"label": "Scenarios", "href": "/scenarios"})
     elif kind == "profile_refine":
         out.append({"label": "Review profile suggestions", "href": "/profile"})
     return out

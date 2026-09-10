@@ -158,6 +158,19 @@ def test_home_done_task_with_results_still_shows_them(client, conn):
     assert "Jobs from Cord" in li
 
 
+def test_home_multi_result_task_shows_only_the_headline(client, conn):
+    _use_test_db(conn)
+    sid = q.insert_source(conn, "s", "http://e", "manual")
+    a = q.insert_job(conn, source_id=sid, url="http://e/a", title="Alpha", company="X", raw_text="x")
+    b = q.insert_job(conn, source_id=sid, url="http://e/b", title="Beta", company="X", raw_text="x")
+    t = q.enqueue_task(conn, kind="jobs_revisit", params={"job_ids": [a, b], "trigger": "manual"})
+    q.complete_task(conn, t["id"], {"outcome": {"total": 2, "changed": [b], "closed": [a]}})
+    li = _card_li(client.get("/").text, t["id"])
+    assert "2 rechecked" in li
+    # the per-job links belong on the task page, not the compact home card
+    assert "Trashed: Alpha" not in li and "Updated: Beta" not in li
+
+
 def _card_li(html, task_id):
     return html.split(f'task-card-{task_id}', 1)[1].split("</li>", 1)[0]
 

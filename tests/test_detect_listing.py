@@ -47,11 +47,12 @@ def test_detect_listing_sends_numbered_list_with_urls():
     assert "1. Staff Engineer [https://example.com/jobs/2]" in user_msg
 
 
-def test_detect_listing_fails_open_on_llm_exception():
+def test_detect_listing_propagates_llm_exception():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = RuntimeError("connection refused")
-    result = detect_listing(client, "m", _LINKS, "https://example.com")
-    assert result == {"is_listing": False, "job_links": []}
+    with pytest.raises(RuntimeError, match="connection refused"):
+        detect_listing(client, "m", _LINKS, "https://example.com")
 
 
 def test_detect_listing_logs_warning_on_unparseable_response(caplog):

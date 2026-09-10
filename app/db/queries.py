@@ -736,10 +736,21 @@ def update_job_feedback(
     )
     conn.commit()
     if record_event and old_status is not None and old_status != status:
-        message = f"Status: {old_status} → {status}"
-        if isinstance(note, str) and note.strip():
-            message += f' — "{note.strip()}"'
-        add_job_event(conn, job_id, "status", message)
+        add_job_event(conn, job_id, "status", f"Status: {old_status} → {status}")
+
+
+def set_job_note(conn: sqlite3.Connection, job_id: int, note: str | None) -> None:
+    """Persist a job's feedback note without touching its status. Blank clears it.
+
+    Clears feedback_handled_at so the profile-refine loop re-picks it up, matching
+    update_job_feedback. Records no job_events row (a quiet save).
+    """
+    clean = note.strip() if isinstance(note, str) else ""
+    conn.execute(
+        "UPDATE jobs SET feedback_note = ?, feedback_handled_at = NULL WHERE id = ?",
+        (clean or None, job_id),
+    )
+    conn.commit()
 
 
 def get_unhandled_profile_notes(conn: sqlite3.Connection, limit: int = 30) -> list[dict]:

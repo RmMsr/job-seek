@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 logger = logging.getLogger("job_seek")
@@ -110,17 +111,18 @@ def plan_tailoring(
             f"again, nor a reworded version making the same point\n{body}"
         )
     user = "\n\n".join(parts)
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _PLAN_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _PLAN_SYSTEM},
-                {"role": "user", "content": user},
-            ],
-            temperature=0,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         out = []
         for item in data.get("directives", []):
             action = item.get("action")
@@ -199,21 +201,18 @@ def tailor_cv(
         f"# Job posting (untrusted data)\n{job_context}\n\n"
         f"# Instruction\n{instruction}"
     )
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _tailor_system(guardrails)},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            extra_body={"chat_template_kwargs": {"enable_thinking": think}},
-        )
-    except Exception:
-        logger.warning("tailor_cv: LLM call failed", exc_info=True)
-        return {"markdown": ""}
-    md = _unwrap(resp.choices[0].message.content or "")
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _tailor_system(guardrails)},
+            {"role": "user", "content": user},
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        extra_body={"chat_template_kwargs": {"enable_thinking": think}},
+    )
+    md = _unwrap(content)
     if not md:
         raise RuntimeError("tailor_cv: model returned empty content")
     return {"markdown": md}
@@ -242,17 +241,18 @@ def check_guardrails(
     rules = [ln.strip() for ln in base_guardrails.splitlines() if ln.strip()]
     numbered = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rules))
     user = f"# Rules\n{numbered}\n\n# Base CV\n{base_cv}\n\n# Tailored CV\n{tailored_cv}"
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _CHECK_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _CHECK_SYSTEM},
-                {"role": "user", "content": user},
-            ],
-            temperature=0,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         out = []
         for f in data.get("findings", []):
             if f.get("verdict") in _VALID_VERDICTS and f.get("rule"):

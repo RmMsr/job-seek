@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 
@@ -104,21 +105,22 @@ def summarize(
     user_content = simplified_content[:6000]
     if not raw_lead:
         user_content = f"Today is {today.isoformat()}.\n\n{user_content}"
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _LEAD_SYSTEM if raw_lead else _SYSTEM},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0.3,
+        # This model emits a hidden chain-of-thought by default, which is slow and,
+        # per A/B testing against real postings, sometimes runs long enough to exhaust
+        # the response budget before ever emitting the actual summary. Disabling it
+        # was faster and at least as reliable/complete for this text-transformation task.
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _LEAD_SYSTEM if raw_lead else _SYSTEM},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.3,
-            # This model emits a hidden chain-of-thought by default, which is slow and,
-            # per A/B testing against real postings, sometimes runs long enough to exhaust
-            # the response budget before ever emitting the actual summary. Disabling it
-            # was faster and at least as reliable/complete for this text-transformation task.
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         if raw_lead:
             # Leads are short/vague by nature, so the retained original message
             # (already including its author, see SlackFetcher) is more useful

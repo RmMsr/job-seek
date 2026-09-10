@@ -7,7 +7,8 @@
     </div>
     <div class="task-li-sub">
       <span>{{ pres.next_step }}</span>
-      {% for r in pres.results %}<a href="{{ r.href }}">{{ r.label }}</a>{% endfor %}
+      {# Home card stays compact — just the headline result; the task page has the full list. #}
+      {% for r in pres.results[:1] %}{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}<span>{{ r.label }}</span>{% endif %}{% endfor %}
     </div>
     {% if pres.status == "needs_action" %}
     <div class="task-li-actions">

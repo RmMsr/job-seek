@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import logging
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 logger = logging.getLogger("job_seek")
@@ -37,22 +38,17 @@ def detect_listing(
 ) -> dict:
     link_lines = "\n".join(f"{i}. {text} [{href}]" for i, (href, text) in enumerate(links))
     user_message = f"Page: {page_url}\n\nLinks:\n{link_lines}"
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": user_message[:16000]},
-            ],
-            temperature=0,
-            max_tokens=4000,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-    except Exception:
-        logger.warning("detect_listing: LLM call failed for %s", page_url, exc_info=True)
-        return {"is_listing": False, "job_links": []}
-
-    content = resp.choices[0].message.content
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_message[:16000]},
+        ],
+        temperature=0,
+        max_tokens=4000,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
         data = json.loads(extract_json(content))
     except (ValueError, TypeError):

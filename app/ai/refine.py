@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 _SYSTEM = """You refine job search criteria based on feedback about how a scenario's gate scored
@@ -51,17 +52,18 @@ def propose_criteria(
         f"## Existing Criteria\n{existing_text}\n\n"
         f"## Recent Feedback Notes\n{notes_text}"
     )
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        items = json.loads(extract_json(resp.choices[0].message.content))
+        items = json.loads(extract_json(content))
         proposals = []
         for item in items:
             if item.get("weight") not in ("must", "prefer", "avoid"):

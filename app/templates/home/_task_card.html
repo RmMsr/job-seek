@@ -19,7 +19,8 @@
       {% if was_na or pres.results %}
       <div class="task-li-sub">
         {% if was_na %}<span>✓ {{ pres.next_step }}</span>{% endif %}
-        {% for r in pres.results %}<a href="{{ r.href }}">{{ r.label }}</a>{% endfor %}
+        {# Home card stays compact — just the headline result; the task page has the full list. #}
+        {% for r in pres.results[:1] %}{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}<span>{{ r.label }}</span>{% endif %}{% endfor %}
       </div>
       {% endif %}
     {% elif task.status in ("queued", "running") %}

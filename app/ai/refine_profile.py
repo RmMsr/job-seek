@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 _SYSTEM = """You propose improvements to a candidate's job-search profile based on feedback
@@ -66,17 +67,18 @@ def propose_profile_changes(
 ) -> list[ProfileProposal]:
     notes_text = "\n".join(f"[{n['status'].upper()}] {n['feedback_note']}" for n in feedback_notes)
     user_content = f"## Current Profile\n{profile_text}\n\n## Job Feedback Notes\n{notes_text}"
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_content},
+        ],
+        temperature=0,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        items = json.loads(extract_json(resp.choices[0].message.content))
+        items = json.loads(extract_json(content))
         proposals = []
         for item in items:
             action = item.get("action")

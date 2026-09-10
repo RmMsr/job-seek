@@ -80,7 +80,19 @@ def test_stable_blocks_precede_the_instruction():
     assert user.index("# Job posting") < user.index("# Instruction")
 
 
-def test_transport_error_returns_empty_markdown():
+def test_transport_error_propagates():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = RuntimeError("boom")
-    assert tailor_cv(client, "m", "# base", "instr", "job")["markdown"] == ""
+    with pytest.raises(RuntimeError, match="boom"):
+        tailor_cv(client, "m", "# base", "instr", "job")
+
+
+def test_plan_tailoring_propagates_connection_error():
+    import httpx, openai, pytest
+    from app.ai.tailor_cv import plan_tailoring
+    client = MagicMock()
+    client.chat.completions.create.side_effect = openai.APIConnectionError(
+        request=httpx.Request("POST", "http://x"))
+    with pytest.raises(openai.APIConnectionError):
+        plan_tailoring(client, "m", "base", "job", "")

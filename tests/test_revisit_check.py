@@ -47,12 +47,12 @@ def test_unparseable_response_falls_back_to_unchanged():
     assert state == "unchanged"
 
 
-def test_api_error_falls_back_to_unchanged():
+def test_api_error_propagates():
+    import pytest
     client = MagicMock()
     client.chat.completions.create.side_effect = RuntimeError("boom")
-    state, reason = revisit_check(client, "llama3.2", "page text", "known summary")
-    assert state == "unchanged"
-    assert "boom" in reason
+    with pytest.raises(RuntimeError, match="boom"):
+        revisit_check(client, "llama3.2", "page text", "known summary")
 
 
 def test_strips_markdown_fence():

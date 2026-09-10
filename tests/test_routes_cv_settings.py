@@ -9,6 +9,43 @@ def test_cv_page_renders_base_cv_and_save_preview_button(client):
     assert "Advanced" in r.text  # link to /cv/advanced
 
 
+def test_cv_page_shows_download_pdf_when_doc_write_available(client):
+    from unittest.mock import patch
+    with patch("app.routes.cv.doc_write_available", return_value=True):
+        r = client.get("/cv")
+    assert 'href="/cv.pdf"' in r.text and "Download PDF" in r.text
+    with patch("app.routes.cv.doc_write_available", return_value=False):
+        r = client.get("/cv")
+    assert 'href="/cv.pdf"' not in r.text
+
+
+def test_cv_base_pdf_renders(client, conn):
+    from unittest.mock import patch
+    q.save_cv_settings(conn, base_cv="# Me\n\n- x\n", base_instruction="", base_guardrails="",
+                       css="", default_scope=[])
+    with patch("app.routes.cv.render_pdf", return_value=b"%PDF-1.7 fake") as rp:
+        r = client.get("/cv.pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+    rp.assert_called_once()
+
+
+def test_cv_base_pdf_404_without_base_cv(client, conn):
+    q.save_cv_settings(conn, base_cv="   ", base_instruction="", base_guardrails="",
+                       css="", default_scope=[])
+    assert client.get("/cv.pdf").status_code == 404
+
+
+def test_cv_base_pdf_render_error_returns_503(client, conn):
+    from unittest.mock import patch
+    from app.cv.render import CvRenderError
+    q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
+                       css="", default_scope=[])
+    with patch("app.routes.cv.render_pdf", side_effect=CvRenderError("doc-write-cli is not installed")):
+        assert client.get("/cv.pdf").status_code == 503
+
+
 def test_cv_page_has_no_guardrails_field(client):
     r = client.get("/cv")
     assert "base_guardrails" not in r.text

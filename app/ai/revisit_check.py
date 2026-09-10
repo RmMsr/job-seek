@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 _STATES = ("gone", "closed", "unchanged", "changed")
@@ -30,30 +31,32 @@ def revisit_check(
     """Compare a live page against the summary we stored for that job.
 
     Returns ``(state, reason)`` where state is one of gone/closed/unchanged/
-    changed. A failed or unparseable call returns ``("unchanged", <detail>)`` —
-    an unreliable judgement must never be the thing that trashes a job.
+    changed. An unparseable response returns ``("unchanged", <detail>)`` — an
+    unreliable judgement must never be the thing that trashes a job; a transport
+    / API failure raises and fails the task.
     """
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"(A) Recorded summary:\n{known_summary[:2000]}\n\n"
+                    f"(B) Current page text:\n{page_text[:4000]}"
+                ),
+            },
+        ],
+        temperature=0,
+        max_tokens=120,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {
-                    "role": "user",
-                    "content": (
-                        f"(A) Recorded summary:\n{known_summary[:2000]}\n\n"
-                        f"(B) Current page text:\n{page_text[:4000]}"
-                    ),
-                },
-            ],
-            temperature=0,
-            max_tokens=120,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         state = data.get("state", "unchanged")
         if state not in _STATES:
             state = "unchanged"
         return state, data.get("reason", "")
-    except Exception as exc:  # noqa: BLE001 — any failure is a non-verdict
+    except Exception as exc:  # noqa: BLE001 — an unparseable response is a non-verdict
         return "unchanged", str(exc)

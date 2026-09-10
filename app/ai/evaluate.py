@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 _SYSTEM = """You screen whether a job posting is even in the right search space for a scenario.
@@ -36,21 +37,22 @@ def evaluate(
         f"## Criteria\n{criteria_text}\n\n"
         f"## Job Summary\n{summary}"
     )
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_content[:8000]},
+        ],
+        temperature=0,
+        # This model emits a hidden chain-of-thought by default, which is slow and,
+        # per A/B testing against real postings, sometimes runs long enough to exhaust
+        # the response budget before ever emitting a score. Disabling it was faster
+        # and at least as reliable/accurate for this text-transformation task.
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": user_content[:8000]},
-            ],
-            temperature=0,
-            # This model emits a hidden chain-of-thought by default, which is slow and,
-            # per A/B testing against real postings, sometimes runs long enough to exhaust
-            # the response budget before ever emitting a score. Disabling it was faster
-            # and at least as reliable/accurate for this text-transformation task.
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         score = max(0.0, min(1.0, float(data.get("score", 0.0))))
         return score, data.get("reasoning", "")
     except Exception as exc:

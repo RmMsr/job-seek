@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import openai
+from app.ai._client import complete
 from app.ai.json_utils import extract_json
 
 _SYSTEM = (
@@ -20,18 +21,19 @@ _SYSTEM = (
 
 
 def generate_source_name(client: openai.OpenAI, model: str, domain: str, page_title: str) -> str | None:
+    content = complete(
+        client,
+        model,
+        [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": f"Domain: {domain}\nTitle: {page_title}"[:2000]},
+        ],
+        temperature=0,
+        max_tokens=60,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": f"Domain: {domain}\nTitle: {page_title}"[:2000]},
-            ],
-            temperature=0,
-            max_tokens=60,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        )
-        data = json.loads(extract_json(resp.choices[0].message.content))
+        data = json.loads(extract_json(content))
         name = data.get("name", "").strip()
         return name or None
     except Exception:

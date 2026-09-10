@@ -2,7 +2,7 @@
 
 You need:
 
-1. **Job sources**: URLs where job offers are published. Like job boards or Slack channels.
+1. **Job sources**: URLs where job offers are published. Like job boards or Slack channels. See [docs/job-boards.md](docs/job-boards.md) for the list of supported job boards.
 2. **Your portfolio**: A text describing your skills, experience expectations and dislikes.
 3. **Work scenarios**: A set of definitions and rules what you are looking for.
 4. **GenAI LLM API key**: Credentials (API_KEY) for an Open AI compatible chat completions API. Either a local LLM (ollama, llama.cpp, LM-Studio, ...) or one of the public providers.
