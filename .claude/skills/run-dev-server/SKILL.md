@@ -49,7 +49,14 @@ Always snapshot it with `sqlite3 .backup`, **never `cp`** — the source may be
 open in WAL mode and a plain `cp` of a live WAL database yields a malformed
 copy (missing the `-wal` sidecar).
 
+**Run the `sqlite3 .backup` with the Bash sandbox disabled** (`dangerouslyDisableSandbox: true`).
+The source DB is in the main checkout, outside the worktree's write-allowlist,
+and `.backup` needs to touch its `-wal` sidecar — under the sandbox it fails
+with `unable to open database file`. Same for the `rm -f` of stale sidecars
+and any `curl` to `127.0.0.1` below.
+
 ```bash
+# All sqlite3 / rm / curl steps below: run with dangerouslyDisableSandbox: true.
 if [ ! -e job-seek.db ]; then
     # Fresh worktree — the common case. Snapshot and proceed, no prompt.
     sqlite3 "$MAIN_ROOT/job-seek.db" ".backup 'job-seek.db'"

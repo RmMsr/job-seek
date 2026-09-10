@@ -22,7 +22,7 @@ If you seed sample data into the throwaway DB so the user has something to look 
 
 ## Finishing a change
 
-Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main` — there's no remote configured for this repo, so a local squash merge is the whole integration path, not a PR.
+Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main`. This repo has `github` and `gitlab` remotes, but the integration path is still a **local** `git merge --squash` into `main` — never a PR, and **do not push** unless the user explicitly asks. Expect local `main` to have moved on since the worktree was created (parallel worktrees land commits); the squash merges onto whatever `main` is at now, so re-run the full test suite on `main` after the merge commit.
 
 If a background subagent drove the implementation and left a dev server running for UI handoff, `TaskStop` that subagent **before** killing the dev server or merging — while it's still resumable it will relaunch the server each time you kill it, and you'll chase it in circles.
 
