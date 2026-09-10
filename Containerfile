@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrandr2 libgbm1 libasound2t64 libatspi2.0-0 \
         libwayland-client0 libwayland-server0 libxshmfence1 \
         fonts-dejavu-core \
+        fonts-linuxlibertine \
     && rm -rf /var/lib/apt/lists/* \
     # Install modern variable fonts (all weights 100–900, single file each)
     && mkdir -p /usr/share/fonts/truetype/noto /usr/share/fonts/truetype/inter \
