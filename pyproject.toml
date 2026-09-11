@@ -29,6 +29,16 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",
 ]
+# doc-write is AGPL and invoked only as a subprocess for per-job CV rendering;
+# kept out of [project.dependencies] so it isn't a distributed dependency of
+# this BSD-licensed package. Pinned via uv.lock to the current main; bump with
+# `uv lock --upgrade-package doc-write`.
+doc-write = [
+    "doc-write",
+]
+
+[tool.uv.sources]
+doc-write = { git = "https://gitlab.com/RmMsr/doc-write-mcp.git", branch = "main" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

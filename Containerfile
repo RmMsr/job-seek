@@ -6,14 +6,18 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
+# git is needed to fetch the doc-write dependency (git source, no PyPI).
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Deps layer cached separately from app code.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --group doc-write
 
 COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --group doc-write
 
 
 FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
@@ -33,10 +37,9 @@ COPY --from=builder /app/.venv /app/.venv
 # puts it in the venv so it's found regardless of runtime uid.
 RUN playwright install chromium
 
-# doc-write (AGPL, invoked only as a subprocess) for per-job CV rendering, plus
-# the system libraries WeasyPrint needs, plus Chromium deps.
+# System libraries WeasyPrint (used by doc-write, invoked as a subprocess for
+# per-job CV rendering) needs, plus Chromium deps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git \
         wget \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8 \
         libjpeg62-turbo libgdk-pixbuf-2.0-0 \
@@ -58,9 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          -O /usr/share/fonts/truetype/inter/Inter-VF.ttf \
     && wget -q https://github.com/JetBrains/JetBrainsMono/raw/master/fonts/variable/JetBrainsMono%5Bwght%5D.ttf \
          -O /usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-VF.ttf \
-    && fc-cache -fv \
-    && uv pip install --python /app/.venv/bin/python \
-        "doc-write @ git+https://gitlab.com/RmMsr/doc-write-mcp.git"
+    && fc-cache -fv
 
 COPY app ./app
 
