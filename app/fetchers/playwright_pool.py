@@ -18,6 +18,10 @@ MAX_BROWSER_INSTANCES = 1  # single dedicated worker thread owns at most one bro
 # won't render.
 _BROWSER_MISSING_RE = re.compile(r"Executable doesn't exist|playwright install", re.IGNORECASE)
 
+# Sentinel queue item telling the worker thread to exit its loop, distinct from
+# a real (url, timeout_ms, result_q) render job.
+_STOP = object()
+
 
 class BrowserPool:
     """Owns a single headless Chromium instance on a dedicated background
@@ -52,12 +56,22 @@ class BrowserPool:
                 self._thread = threading.Thread(target=self._worker_loop, daemon=True)
                 self._thread.start()
 
+    def stop(self, timeout: float = 5.0) -> None:
+        """Signal the worker thread to exit and wait for it. A no-op if no
+        thread has been started (nothing has called render() yet)."""
+        with self._lock:
+            thread = self._thread
+        if thread is None or not thread.is_alive():
+            return
+        self._jobs.put(_STOP)
+        thread.join(timeout=timeout)
+
     def _worker_loop(self) -> None:
         pw = None
         browser = None
         while True:
             try:
-                url, timeout_ms, result_q = self._jobs.get(timeout=self._idle_timeout_seconds)
+                item = self._jobs.get(timeout=self._idle_timeout_seconds)
             except queue.Empty:
                 if browser is not None:
                     browser.close()
@@ -69,6 +83,12 @@ class BrowserPool:
                         MAX_BROWSER_INSTANCES,
                     )
                 continue
+            if item is _STOP:
+                if browser is not None:
+                    browser.close()
+                    pw.stop()
+                return
+            url, timeout_ms, result_q = item
             try:
                 if browser is None:
                     pw = sync_playwright().start()

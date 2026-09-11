@@ -1,7 +1,24 @@
 import time
 from unittest.mock import MagicMock, patch
+import pytest
 from app.fetchers import playwright_pool as pp
 from app.fetchers.playwright_pool import BrowserPool, browser_install_missing
+
+
+@pytest.fixture
+def make_pool():
+    """Builds BrowserPool instances and stops each one's worker thread at
+    teardown, so tests don't leak daemon threads for the rest of the run."""
+    pools = []
+
+    def _make(*args, **kwargs):
+        pool = BrowserPool(*args, **kwargs)
+        pools.append(pool)
+        return pool
+
+    yield _make
+    for pool in pools:
+        pool.stop()
 
 
 def _mock_playwright():
@@ -23,9 +40,9 @@ def _mock_playwright():
     return sync_playwright_mock, pw, browser, page
 
 
-def test_render_returns_page_content():
+def test_render_returns_page_content(make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com")
     assert html == "<html>rendered</html>"
@@ -35,9 +52,9 @@ def test_render_returns_page_content():
     page.wait_for_timeout.assert_called_once_with(2000)
 
 
-def test_render_reuses_browser_across_calls_within_idle_window():
+def test_render_reuses_browser_across_calls_within_idle_window(make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         pool.render("https://example.com/a")
         pool.render("https://example.com/b")
@@ -45,9 +62,9 @@ def test_render_reuses_browser_across_calls_within_idle_window():
     assert browser.new_context.call_count == 2
 
 
-def test_render_closes_browser_after_idle_timeout_and_relaunches():
+def test_render_closes_browser_after_idle_timeout_and_relaunches(make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=0.05)
+    pool = make_pool(idle_timeout_seconds=0.05)
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         pool.render("https://example.com")
         time.sleep(0.2)
@@ -57,18 +74,18 @@ def test_render_closes_browser_after_idle_timeout_and_relaunches():
     assert pw.chromium.launch.call_count == 2
 
 
-def test_render_returns_none_on_navigation_error():
+def test_render_returns_none_on_navigation_error(make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
     page.goto.side_effect = RuntimeError("timeout")
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com")
     assert html is None
 
 
-def test_render_logs_escalation_to_headless_browser(caplog):
+def test_render_logs_escalation_to_headless_browser(caplog, make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with caplog.at_level("INFO", logger="job_seek"), \
          patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         pool.render("https://example.com/js-app")
@@ -78,9 +95,9 @@ def test_render_logs_escalation_to_headless_browser(caplog):
     )
 
 
-def test_pool_logs_active_instance_count_on_launch_and_idle_close(caplog):
+def test_pool_logs_active_instance_count_on_launch_and_idle_close(caplog, make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=0.05)
+    pool = make_pool(idle_timeout_seconds=0.05)
     with caplog.at_level("INFO", logger="job_seek"), \
          patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         pool.render("https://example.com")
@@ -96,10 +113,10 @@ _BROWSER_MISSING_ERROR = (
 )
 
 
-def test_render_flags_browser_missing_and_logs_actionable_warning(caplog):
+def test_render_flags_browser_missing_and_logs_actionable_warning(caplog, make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
     pw.chromium.launch.side_effect = RuntimeError(_BROWSER_MISSING_ERROR)
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with caplog.at_level("INFO", logger="job_seek"), \
          patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com/js-app")
@@ -111,9 +128,9 @@ def test_render_flags_browser_missing_and_logs_actionable_warning(caplog):
     assert not any(r.exc_info for r in warnings)
 
 
-def test_browser_missing_flag_clears_after_successful_launch():
+def test_browser_missing_flag_clears_after_successful_launch(make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     pool.browser_missing = True
     with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         pool.render("https://example.com")
@@ -131,10 +148,26 @@ def test_browser_install_missing_reflects_pool_state():
         pp._pool.browser_missing = original
 
 
-def test_render_logs_failure_with_exception_on_navigation_error(caplog):
+def test_stop_terminates_worker_thread(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render("https://example.com")
+    thread = pool._thread
+    assert thread.is_alive()
+    pool.stop()
+    assert not thread.is_alive()
+
+
+def test_stop_on_pool_with_no_thread_started_is_a_noop(make_pool):
+    pool = make_pool(idle_timeout_seconds=1.0)
+    pool.stop()
+
+
+def test_render_logs_failure_with_exception_on_navigation_error(caplog, make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
     page.goto.side_effect = RuntimeError("nav timeout")
-    pool = BrowserPool(idle_timeout_seconds=1.0)
+    pool = make_pool(idle_timeout_seconds=1.0)
     with caplog.at_level("INFO", logger="job_seek"), \
          patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
         html = pool.render("https://example.com/broken")
