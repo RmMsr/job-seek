@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}CV — Job Seek{% endblock %}
 {% block content %}
-{% from "_ink_editor.html" import ink_editor %}
+{% from "_markdown_editor.html" import markdown_editor %}
 <div id="cv-page">
 <h1>CV</h1>
 <p style="color:var(--text-muted);">Your base CV — what every tailored, per-job version starts from.</p>
@@ -11,7 +11,7 @@
 <form method="post" action="/cv"
       hx-post="/cv" hx-target="#cv-page" hx-select="#cv-page" hx-swap="outerHTML">
   <label>Base CV (markdown)<br>
-    {{ ink_editor("base_cv", settings.base_cv, min_height="420px") }}
+    {{ markdown_editor("base_cv", settings.base_cv, min_height="420px") }}
   </label>
   {% include "cv/_frontmatter_hint.html" %}
   <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;">

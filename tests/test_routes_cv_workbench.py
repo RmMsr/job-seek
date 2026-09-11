@@ -314,7 +314,7 @@ def test_workbench_has_edit_tab_and_mount_when_draft(client, conn):
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get(f"/jobs/{jid}/cv")
     assert 'data-variant="edit"' in r.text
-    assert 'data-ink-autosave-url="/jobs/%d/cv/save-tailored"' % jid in r.text
+    assert 'data-md-editor-autosave-url="/jobs/%d/cv/save-tailored"' % jid in r.text
     assert "# Draft body" in r.text
     # Edit tab sits before Differences, not after
     assert r.text.index('data-variant="edit"') < r.text.index('data-variant="diff"')
@@ -335,7 +335,7 @@ def test_workbench_no_docwrite_uses_editor_not_readonly_div(client, conn):
     from unittest.mock import patch
     with patch("app.routes.cv.doc_write_available", return_value=False):
         r = client.get(f"/jobs/{jid}/cv")
-    assert "data-ink" in r.text
+    assert "data-md-editor" in r.text
 
 
 def test_preview_pane_markdown_fallback_without_doc_write(client, conn):

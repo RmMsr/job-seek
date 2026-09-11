@@ -39,8 +39,8 @@
           sandbox="allow-scripts allow-same-origin"></iframe>
   {% if editable %}
   <div class="cv-preview-doc cv-preview-editor" data-variant="edit" title="Edit markdown">
-    {% from "_ink_editor.html" import ink_editor %}
-    {{ ink_editor("markdown", job_cv.tailored_cv,
+    {% from "_markdown_editor.html" import markdown_editor %}
+    {{ markdown_editor("markdown", job_cv.tailored_cv,
                   autosave_url="/jobs/" ~ job.id ~ "/cv/save-tailored") }}
   </div>
   {% endif %}

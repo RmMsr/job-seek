@@ -1,0 +1,9 @@
+{% macro markdown_editor(name, value, min_height="300px", autosave_url=None) -%}
+<div class="md-editor-wrap">
+  <textarea class="md-editor-source" name="{{ name }}" data-md-editor
+    data-md-editor-min-height="{{ min_height }}"
+    {%- if autosave_url %} data-md-editor-autosave-url="{{ autosave_url }}"{% endif %}
+    hidden>{{ value }}</textarea>
+  <div class="md-editor-mount" aria-label="Markdown editor"></div>
+</div>
+{%- endmacro %}

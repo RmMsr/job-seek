@@ -53,9 +53,9 @@ def test_profile_page_returns_200(client):
     assert resp.status_code == 200
 
 
-def test_profile_editor_uses_ink(client, conn):
+def test_profile_editor_uses_markdown_editor(client, conn):
     r = client.get("/profile")
-    assert 'name="content"' in r.text and "data-ink" in r.text
+    assert 'name="content"' in r.text and "data-md-editor" in r.text
 
 
 def test_profile_still_saves(client, conn):

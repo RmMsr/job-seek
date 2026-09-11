@@ -3,26 +3,26 @@ from app.template_env import templates
 
 def _render(**kw):
     tmpl = templates.env.from_string(
-        '{% from "_ink_editor.html" import ink_editor %}'
-        '{{ ink_editor(name, value, min_height, autosave_url) }}'
+        '{% from "_markdown_editor.html" import markdown_editor %}'
+        '{{ markdown_editor(name, value, min_height, autosave_url) }}'
     )
     return tmpl.render(**kw)
 
 
-def test_macro_emits_hidden_textarea_with_data_ink():
+def test_macro_emits_hidden_textarea_with_data_md_editor():
     html = _render(name="base_cv", value="# Hi", min_height="420px", autosave_url=None)
     assert 'name="base_cv"' in html
-    assert "data-ink" in html
-    assert 'data-ink-min-height="420px"' in html
+    assert "data-md-editor" in html
+    assert 'data-md-editor-min-height="420px"' in html
     assert "# Hi" in html
-    assert "ink-mount" in html
-    assert "data-ink-autosave-url" not in html
+    assert "md-editor-mount" in html
+    assert "data-md-editor-autosave-url" not in html
 
 
 def test_macro_includes_autosave_url_when_given():
     html = _render(name="markdown", value="x", min_height="300px",
                    autosave_url="/jobs/7/cv/save-tailored")
-    assert 'data-ink-autosave-url="/jobs/7/cv/save-tailored"' in html
+    assert 'data-md-editor-autosave-url="/jobs/7/cv/save-tailored"' in html
 
 
 def test_macro_escapes_value():

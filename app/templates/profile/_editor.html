@@ -1,9 +1,9 @@
-{% from "_ink_editor.html" import ink_editor %}
+{% from "_markdown_editor.html" import markdown_editor %}
 <div id="profile-editor">
   {% if saved %}<div class="save-confirmation" aria-live="polite">{{ proposal_summary or "Saved." }}</div>{% endif %}
   <form method="post" action="/profile" id="profile-save-form">
     <label>Your skills, interests, and constraints (markdown supported):<br>
-      {{ ink_editor("content", content, min_height="300px") }}
+      {{ markdown_editor("content", content, min_height="300px") }}
     </label>
     <details style="margin:0.3rem 0 0.75rem; font-size:0.85em; color:#666;">
       <summary style="cursor:pointer; color:#888;">Formatting tips</summary>
@@ -79,8 +79,8 @@
     textarea.readOnly = locked;
     textarea.style.background = locked ? "#e9ecef" : "";
     suggestBtn.disabled = locked;
-    var mountEl = container.querySelector('.ink-mount');
-    if (mountEl && mountEl._inkSetReadonly) mountEl._inkSetReadonly(locked);
+    var mountEl = container.querySelector('.md-editor-mount');
+    if (mountEl && mountEl._mdeSetReadonly) mountEl._mdeSetReadonly(locked);
   }
 
   function hasProposalsShown() {

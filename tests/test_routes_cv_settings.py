@@ -57,9 +57,9 @@ def test_cv_form_posts_and_swaps_cv_page(client):
     assert 'hx-select="#cv-page"' in r.text
 
 
-def test_cv_page_base_cv_uses_ink_editor(client, conn):
+def test_cv_page_base_cv_uses_markdown_editor(client, conn):
     r = client.get("/cv")
-    assert 'name="base_cv"' in r.text and "data-ink" in r.text
+    assert 'name="base_cv"' in r.text and "data-md-editor" in r.text
 
 
 def test_cv_page_base_cv_still_saves(client, conn):
