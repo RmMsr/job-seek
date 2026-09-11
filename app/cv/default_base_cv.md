@@ -10,11 +10,13 @@ Please fill in your content using markdown.
 
 ```
 Use code blocks
+    to add
+mono spaced lines.
 ```
 
-Add [links](https://example.org/)
+Add [links](https://example.org/).
 
-> quote
+> Or a quote
 
 ## Layout
 
@@ -22,5 +24,5 @@ Add [links](https://example.org/)
 Add an optional sidebar...
 </aside>
 
-... beside your content.
+that floats beside your content.
 

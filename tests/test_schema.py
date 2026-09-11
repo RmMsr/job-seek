@@ -1267,7 +1267,7 @@ def test_job_cv_table_columns_and_cascade():
         "job_id", "scope", "tuning_directives", "plan", "handled_suggestions", "tailored_cv",
         "guardrail_findings", "change_report", "base_hash", "base_cv_snapshot",
         "plan_generated_at", "directives_edited_at", "generated_at",
-        "scope_edited_at", "plan_context_hash",
+        "scope_edited_at", "plan_context_hash", "edited_at", "guardrails_checked_at",
         "finalized_at", "updated_at",
     }
     conn.execute(
@@ -1509,6 +1509,26 @@ def test_job_cv_has_scope_edited_at_and_plan_context_hash(conn):
     init_db(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)").fetchall()}
     assert {"scope_edited_at", "plan_context_hash"} <= cols
+
+
+def test_job_cv_has_edited_at_and_guardrails_checked_at(conn):
+    init_db(conn)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert {"edited_at", "guardrails_checked_at"} <= cols
+
+
+def test_job_cv_add_edited_at_migrations_are_idempotent(conn):
+    from app.db.schema import (
+        _migrate_job_cv_add_edited_at, _migrate_job_cv_add_guardrails_checked_at,
+    )
+    init_db(conn)
+    _migrate_job_cv_add_edited_at(conn)
+    _migrate_job_cv_add_edited_at(conn)
+    _migrate_job_cv_add_guardrails_checked_at(conn)
+    _migrate_job_cv_add_guardrails_checked_at(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(job_cv)")]
+    assert cols.count("edited_at") == 1
+    assert cols.count("guardrails_checked_at") == 1
 
 
 def test_job_cv_new_columns_migration_is_idempotent(conn):

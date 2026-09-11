@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS job_cv (
     directives_edited_at TEXT,
     generated_at TEXT,
     scope_edited_at TEXT,
+    edited_at TEXT,
+    guardrails_checked_at TEXT,
     plan_context_hash TEXT,
     finalized_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -994,6 +996,20 @@ def _migrate_job_cv_add_plan_context_hash(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_job_cv_add_edited_at(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "edited_at" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN edited_at TEXT")
+        conn.commit()
+
+
+def _migrate_job_cv_add_guardrails_checked_at(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "guardrails_checked_at" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN guardrails_checked_at TEXT")
+        conn.commit()
+
+
 def _migrate_cv_scope_options_drop_is_baseline(conn: sqlite3.Connection) -> None:
     # The auto baseline draft is gone — the first manual Update uses the default
     # scope, so is_baseline has no reader. Direct DROP COLUMN.
@@ -1043,4 +1059,6 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_job_cv_add_base_cv_snapshot(conn)
     _migrate_job_cv_add_scope_edited_at(conn)
     _migrate_job_cv_add_plan_context_hash(conn)
+    _migrate_job_cv_add_edited_at(conn)
+    _migrate_job_cv_add_guardrails_checked_at(conn)
     _migrate_cv_scope_options_drop_is_baseline(conn)

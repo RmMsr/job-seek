@@ -293,6 +293,47 @@ def test_plan_run_stamps_plan_context_hash(conn, cfg):
     assert all(c in "0123456789abcdef" for c in row["plan_context_hash"])
 
 
+def test_recheck_mode_updates_findings_and_stamp(conn, cfg):
+    jid = _seed(conn)
+    q.save_cv_settings(conn, base_cv="# Me\n\n- Kafka work\n", base_instruction="",
+                       base_guardrails="no fabrication", css="", default_scope=[1, 2])
+    q.upsert_job_cv(conn, jid, tailored_cv="# Tailored\n\n- Kafka\n",
+                    guardrail_findings=[{"rule": "old", "verdict": "ok", "explanation": ""}])
+    with patch("app.routes.cv.check_guardrails",
+               return_value={"findings": [{"rule": "no fabrication", "verdict": "violated",
+                                           "explanation": "claim X"}]}):
+        task = q.enqueue_task(conn, kind="cv_tailor",
+                              params={"job_id": jid, "mode": "recheck", "render": "findings"})
+        execute_task(conn, MagicMock(), "m", cfg, task)
+    row = q.get_job_cv(conn, jid)
+    assert row["guardrail_findings"][0]["rule"] == "no fabrication"
+    assert row["guardrails_checked_at"] is not None
+    result = q.get_task(conn, task["id"])["result"]
+    assert any('id="cv-findings"' in c for c in result["html_chunks"])
+    assert not any('id="cv-preview-pane"' in c for c in result["html_chunks"])
+
+
+def test_recheck_mode_keeps_prior_findings_on_empty_result(conn, cfg):
+    jid = _seed(conn)
+    q.save_cv_settings(conn, base_cv="# Me\n", base_instruction="",
+                       base_guardrails="no fabrication", css="", default_scope=[1, 2])
+    q.upsert_job_cv(conn, jid, tailored_cv="# T\n",
+                    guardrail_findings=[{"rule": "keep me", "verdict": "ok", "explanation": ""}])
+    with patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        task = q.enqueue_task(conn, kind="cv_tailor",
+                              params={"job_id": jid, "mode": "recheck", "render": "findings"})
+        execute_task(conn, MagicMock(), "m", cfg, task)
+    assert q.get_job_cv(conn, jid)["guardrail_findings"][0]["rule"] == "keep me"
+
+
+def test_recheck_mode_noop_without_draft(conn, cfg):
+    jid = _seed(conn)
+    task = q.enqueue_task(conn, kind="cv_tailor",
+                          params={"job_id": jid, "mode": "recheck", "render": "findings"})
+    execute_task(conn, MagicMock(), "m", cfg, task)  # must not raise
+    assert q.get_job_cv(conn, jid) is None or not q.get_job_cv(conn, jid)["tailored_cv"]
+
+
 def test_plan_mode_logs_timed_steps(conn, cfg, caplog):
     import logging
     jid = _seed(conn)

@@ -2136,6 +2136,14 @@ def test_set_directives_stamps_edited_at(conn):
     assert row["directives_edited_at"] is not None
 
 
+def test_set_job_cv_tailored_persists_and_stamps_edited_at(conn):
+    jid = _seed_job_for_cv(conn)
+    q.set_job_cv_tailored(conn, jid, "# Edited by hand\n")
+    row = q.get_job_cv(conn, jid)
+    assert row["tailored_cv"] == "# Edited by hand\n"
+    assert row["edited_at"] is not None
+
+
 def test_finalize_and_unfinalize(conn):
     jid = _seed_job_for_cv(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="x")

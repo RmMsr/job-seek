@@ -1,0 +1,9 @@
+{# Response body for POST /jobs/{id}/cv/save-scope. A scope (edit-latitude)
+   change only ever affects draft/guardrail *freshness* (via
+   job_cv.scope_edited_at feeding _draft_stale) — never the tailored markdown
+   itself — so this returns just the two status fragments the change can
+   affect, each carrying its own id. The client (base.html) replaces each by
+   id and leaves the rest of the preview pane (tabs, iframes, the Edit-tab
+   editor) untouched. #}
+{% include "cv/_draft_status.html" %}
+<div id="cv-findings">{% include "cv/_findings.html" %}</div>

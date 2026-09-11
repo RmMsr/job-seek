@@ -6,6 +6,9 @@
   <title>{% block title %}Job Seek{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Fira+Sans:wght@400;500;600&display=swap">
+  {# Comparison swap: EasyMDE in place of ink-mde (see the mount() script near
+     the end of <body>). Plain UMD build, no ESM/bundling needed. #}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
   <style>
     :root {
       --ground: #faf8f5;
@@ -337,6 +340,14 @@
       grid-template-columns: max-content 1fr; gap: 0.2rem 0.6rem; }
     .cv-scope-help dt { font-weight: 600; font-size: 0.85em; }
     .cv-scope-help dd { margin: 0; font-size: 0.85em; color: var(--text-muted); }
+    .cv-hint { font-size: 0.85em; margin: 0.4rem 0; color: var(--text-muted); }
+    .cv-hint summary { cursor: pointer; }
+    .cv-hint p { margin: 0.4rem 0; }
+    .cv-hint pre {
+      margin: 0; padding: 0.6rem 0.75rem; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--ground); color: var(--text-primary);
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+    }
     .cv-scope-label { font-weight: 600; }
     .cv-latitude { margin-bottom: 0.75rem; }
     .cv-latitude .cv-scope-row { margin-top: 0.3rem; }
@@ -788,6 +799,61 @@
       .job-row-header, .job-detail-title-row { display: block; padding-right: 0; }
       .job-row-header .job-age { margin-right: 0.6rem; }
     }
+    .ink-editor-wrap { display: block; }
+    .ink-mount { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .cv-editor-status { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; }
+    .cv-preview-editor { padding: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+    .cv-preview-editor .ink-mount { border: none; border-radius: 0; height: 100%; }
+    /* EasyMDE theming (comparison swap — was ink-mde's --ink-* custom
+       properties above; EasyMDE has no theming API, so these are plain
+       overrides of its fixed class names instead). */
+    .ink-editor-wrap .EasyMDEContainer,
+    .cv-preview-editor .EasyMDEContainer { font-family: var(--font-sans); }
+    /* .cv-preview-editor is a fixed-height absolutely-positioned tab panel
+       (see .cv-preview-doc) — without this, EasyMDE's container just takes
+       its own natural/minHeight-based height and spills past the panel's
+       bounds instead of filling and internally scrolling within it. */
+    .cv-preview-editor .EasyMDEContainer {
+      display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    }
+    .cv-preview-editor .EasyMDEContainer .CodeMirror {
+      flex: 1 1 auto; min-height: 0; height: auto;
+    }
+    .ink-editor-wrap .editor-toolbar,
+    .cv-preview-editor .editor-toolbar {
+      border-color: var(--border); background: var(--surface); opacity: 1;
+    }
+    .ink-editor-wrap .editor-toolbar button,
+    .cv-preview-editor .editor-toolbar button { color: var(--text-secondary); }
+    .ink-editor-wrap .editor-toolbar button:hover,
+    .ink-editor-wrap .editor-toolbar button.active,
+    .cv-preview-editor .editor-toolbar button:hover,
+    .cv-preview-editor .editor-toolbar button.active {
+      background: var(--accent-tint); border-color: var(--accent-light);
+    }
+    .ink-editor-wrap .CodeMirror,
+    .cv-preview-editor .CodeMirror {
+      border-color: var(--border); background: var(--surface); color: var(--text-primary);
+      font-family: var(--font-sans);
+    }
+    .cv-preview-editor .CodeMirror { border: none; }
+    .ink-editor-wrap .CodeMirror-cursor,
+    .cv-preview-editor .CodeMirror-cursor { border-left-color: var(--text-primary); }
+    .ink-editor-wrap .cm-header,
+    .cv-preview-editor .cm-header { color: var(--accent); }
+    .ink-editor-wrap .cm-link, .ink-editor-wrap .cm-url,
+    .cv-preview-editor .cm-link, .cv-preview-editor .cm-url { color: var(--accent); }
+    .ink-editor-wrap .editor-preview, .ink-editor-wrap .editor-preview-side,
+    .cv-preview-editor .editor-preview, .cv-preview-editor .editor-preview-side {
+      background: var(--ground); color: var(--text-primary);
+    }
+    /* Leading frontmatter block (see FRONTMATTER_OVERLAY) reads as inert
+       metadata, not prose — monospace and muted, no heading/emphasis colors. */
+    .ink-editor-wrap .cm-frontmatter,
+    .cv-preview-editor .cm-frontmatter {
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      color: var(--text-muted);
+    }
   </style>
 </head>
 <body>
@@ -854,6 +920,9 @@
           if (replaced && window.htmx) window.htmx.process(replaced);
         });
       }
+      // Shared with the edit-latitude handler below (a separate IIFE) — same
+      // by-id fragment-replace used for task-poll OOB results.
+      window.applyOob = applyOob;
 
       function flashHighlight(el, className, onComplete) {
         if (!el) return;
@@ -1446,6 +1515,10 @@ document.body.addEventListener('input', function (e) {
       }
     });
     syncNotice(stage);
+    if (variant === 'edit') {
+      var m = stage.querySelector('.cv-preview-editor');
+      if (m && window.initInkEditors) window.initInkEditors(m);
+    }
   }
   function initStages() {
     document.querySelectorAll('.cv-preview-stage:not([data-wired])').forEach(function (stage) {
@@ -1500,16 +1573,19 @@ document.body.addEventListener('input', function (e) {
 })();
 
 (function () {
-  // Edit-latitude chips: POST on change, swap the preview pane in place so its
-  // freshness indicator updates. Delegated so it survives pane re-renders.
+  // Edit-latitude chips: POST on change, then patch in just the freshness
+  // badges the scope change can affect (draft + guardrail status) by id.
+  // Scope never touches the tailored markdown itself, so the rest of the
+  // preview pane — active tab, iframes, the Edit-tab editor — is left alone;
+  // replacing the whole pane here used to reset all of that on every click.
+  // Delegated so it survives pane re-renders.
   document.body.addEventListener("change", function (e) {
     var form = e.target.closest("#cv-latitude-form");
     if (!form) return;
     fetch(form.action, { method: "POST", body: new FormData(form) })
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        var pane = document.getElementById("cv-preview-pane");
-        if (pane) { pane.innerHTML = html; if (window.htmx) window.htmx.process(pane); }
+        if (window.applyOob) window.applyOob(html);
       })
       .catch(function () {});
   });
@@ -1732,6 +1808,147 @@ document.body.addEventListener('click', function (e) {
         src.hidden = true;
       }
     });
+  </script>
+  <script>
+  (function () {
+    var DEBOUNCE_MS = 1000;
+
+    // CodeMirror overlay: a leading YAML-style frontmatter block (---\n...\n---\n
+    // — used on the CV to carry header/footer metadata, see app/cv/sanitize.py)
+    // is metadata, not prose. Left to the plain gfm/markdown mode it gets styled
+    // like a heading-underline/hr and body text. This overlay recognizes the
+    // block (only when it's truly the document's first line) and forces its own
+    // 'frontmatter' token for every line in it; combine:false below means that
+    // token *replaces* the base mode's styling for those lines instead of
+    // layering on top of it. One shared, stateless mode object — the actual
+    // per-document state lives in what CodeMirror threads through startState().
+    var FRONTMATTER_OVERLAY = {
+      startState: function () { return { checked: false, active: false, done: false }; },
+      token: function (stream, state) {
+        if (state.done) { stream.skipToEnd(); return null; }
+        if (!state.checked) {
+          state.checked = true;
+          if (stream.match(/^---\s*$/)) { state.active = true; return 'frontmatter'; }
+          state.done = true;
+          stream.skipToEnd();
+          return null;
+        }
+        if (stream.match(/^---\s*$/)) { state.active = false; state.done = true; return 'frontmatter'; }
+        if (state.active) { stream.skipToEnd(); return 'frontmatter'; }
+        stream.skipToEnd();
+        return null;
+      },
+    };
+
+    // Comparison swap: EasyMDE instead of ink-mde. EasyMDE renders its own
+    // toolbar+CodeMirror UI as a sibling right after `textarea` rather than
+    // into a mount div — but `.ink-mount` stays the attachment point for the
+    // instance/readonly-setter (hidden instead of used) so every other
+    // template/script that looks up `.ink-mount._ink*` keeps working
+    // unchanged.
+    function mount(textarea) {
+      if (textarea.dataset.inkReady) return;
+      var wrap = textarea.closest('.ink-editor-wrap') || textarea.parentNode;
+      var mountEl = wrap.querySelector('.ink-mount');
+      if (!mountEl || !window.EasyMDE) return;
+      textarea.dataset.inkReady = '1';
+      mountEl.hidden = true;
+
+      var saveTimer = null;
+      var autosaveUrl = textarea.dataset.inkAutosaveUrl;
+
+      // Re-look-up on every call, not cached: the save response OOB-swaps
+      // #cv-editor-status's outerHTML (see cv/_save_tailored_oob.html), which
+      // replaces the node entirely — a cached reference from mount time goes
+      // stale after the first successful save and further updates would
+      // silently land on a detached element.
+      function setStatus(text) {
+        var status = document.getElementById('cv-editor-status');
+        if (status) status.textContent = text;
+      }
+
+      function invalidateStyledPreviews() {
+        document.querySelectorAll('.cv-preview-doc[data-variant="tailored"], .cv-preview-doc[data-variant="diff"]')
+          .forEach(function (f) {
+            var src = f.getAttribute('src');
+            if (src) { f.setAttribute('data-src', src); f.removeAttribute('src'); }
+          });
+      }
+
+      function doSave(doc) {
+        if (!autosaveUrl || !window.htmx) return;
+        setStatus('Saving…');
+        window.htmx.ajax('POST', autosaveUrl, { values: { markdown: doc }, swap: 'none' })
+          .then(function () { setStatus('Saved'); invalidateStyledPreviews(); })
+          .catch(function () { setStatus('Save failed — will retry'); });
+      }
+
+      var mde = new EasyMDE({
+        element: textarea,
+        minHeight: textarea.dataset.inkMinHeight || '300px',
+        spellChecker: false,
+        status: false,
+        autofocus: false,
+        overlayMode: { mode: FRONTMATTER_OVERLAY, combine: false },
+        // No toolbar at all — its buttons (bold/italic/etc., and the ones we'd
+        // already dropped: image/preview/side-by-side/fullscreen) needed
+        // either Font Awesome or hand-drawn replacements to look right, and
+        // this is simpler and lighter than either. Markdown syntax still
+        // works by typing it directly. autoDownloadFontAwesome:false as a
+        // second guard — without a toolbar EasyMDE has no icons to need it
+        // for, but nothing here should ever silently pull in a CDN <link>.
+        toolbar: false,
+        autoDownloadFontAwesome: false,
+      });
+
+      mde.codemirror.on('change', function () {
+        var doc = mde.value();
+        textarea.value = doc;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        if (autosaveUrl) {
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(function () { doSave(doc); }, DEBOUNCE_MS);
+        }
+      });
+
+      mountEl._ink = mde;
+      mountEl._inkSetReadonly = function (ro) {
+        try { mde.codemirror.setOption('readOnly', ro ? 'nocursor' : false); } catch (e) {}
+      };
+    }
+
+    window.initInkEditors = function (root) {
+      (root || document).querySelectorAll('textarea[data-ink]:not([data-ink-ready])').forEach(mount);
+    };
+
+    // `htmx:afterSwap` is not a reliable re-init hook here: for an outerHTML
+    // swap whose *triggering* element sits inside the swapped target (e.g.
+    // the profile "accept suggestions" form, which lives inside
+    // #profile-editor and swaps #profile-editor itself), htmx dispatches
+    // that event on the old, now-detached triggering element — it never
+    // bubbles to a document-level listener, so a handler here would just
+    // silently never run and the editor never re-mounts. A MutationObserver
+    // has no such blind spot: it fires for any DOM change, swapped-in
+    // content included.
+    new MutationObserver(function (mutations) {
+      var added = mutations.some(function (m) {
+        return Array.prototype.some.call(m.addedNodes, function (n) {
+          return n.nodeType === 1 && (
+            (n.matches && n.matches('textarea[data-ink]')) ||
+            (n.querySelector && n.querySelector('textarea[data-ink]'))
+          );
+        });
+      });
+      if (added) window.initInkEditors(document);
+    }).observe(document.body, { childList: true, subtree: true });
+  })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
+  <script>
+    // Plain UMD global (window.EasyMDE) — no ESM bundling needed, unlike
+    // ink-mde. Mount now that the wrapper above is defined; DOM is already
+    // parsed at </body>.
+    if (window.initInkEditors) window.initInkEditors(document);
   </script>
 </body>
 </html>

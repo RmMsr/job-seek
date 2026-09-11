@@ -1,0 +1,5 @@
+{# Out-of-band fragments returned by POST /jobs/{id}/cv/save-tailored, applied
+   by htmx.ajax() after a debounced autosave. Rendered with _workbench_ctx. #}
+<div id="cv-diff-summary" hx-swap-oob="true">{% include "cv/_cv_diff_summary.html" %}</div>
+<div id="cv-findings" hx-swap-oob="true">{% include "cv/_findings.html" %}</div>
+<span id="cv-editor-status" class="cv-editor-status" hx-swap-oob="true" aria-live="polite">Saved</span>

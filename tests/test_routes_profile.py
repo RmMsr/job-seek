@@ -53,6 +53,18 @@ def test_profile_page_returns_200(client):
     assert resp.status_code == 200
 
 
+def test_profile_editor_uses_ink(client, conn):
+    r = client.get("/profile")
+    assert 'name="content"' in r.text and "data-ink" in r.text
+
+
+def test_profile_still_saves(client, conn):
+    r = client.post("/profile", data={"content": "# Skills\n\n- Python\n"})
+    assert r.status_code == 200
+    from app.db import queries as q
+    assert q.get_profile(conn) == "# Skills\n\n- Python\n"
+
+
 def test_profile_save_and_display(client, conn):
     resp = client.post("/profile", data={"content": "I am a senior ML engineer."})
     assert resp.status_code == 200

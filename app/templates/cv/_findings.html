@@ -7,9 +7,14 @@
 <section class="guardrail-summary" aria-label="Guardrail check">
   <h3 style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">Guardrails
     <span class="cv-stage-status" data-state="{{ guardrail_status }}">{{ {
-      "none": "Not checked yet", "fresh": "Checked", "stale": "Re-check with Update",
+      "none": "Not checked yet", "fresh": "Checked", "stale": "Re-check needed",
       "running": "Re-checking…",
     }.get(guardrail_status, "") }}</span>
+    {% if job and job_cv and job_cv.tailored_cv and settings and settings.base_guardrails %}
+    <button type="button" class="btn btn-subtle"
+            data-progress-url="/jobs/{{ job.id }}/cv/recheck-guardrails"
+            data-progress-label="Re-checking guardrails" data-progress-oob>Re-check</button>
+    {% endif %}
     {% if findings %}
     <span class="guardrail-bar" role="img"
           aria-label="{{ ok|length }} ok, {{ failed|length }} failed, {{ unclear|length }} unclear">

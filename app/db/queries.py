@@ -175,6 +175,16 @@ def set_job_cv_directives(conn: sqlite3.Connection, job_id: int, text: str) -> N
     conn.commit()
 
 
+def set_job_cv_tailored(conn: sqlite3.Connection, job_id: int, markdown: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    conn.execute(
+        "UPDATE job_cv SET tailored_cv = ?, edited_at = datetime('now'), "
+        "updated_at = datetime('now') WHERE job_id = ?",
+        (markdown, job_id),
+    )
+    conn.commit()
+
+
 def set_job_cv_scope(conn: sqlite3.Connection, job_id: int, scope: list[int]) -> None:
     conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
     conn.execute(

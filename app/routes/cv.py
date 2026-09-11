@@ -85,7 +85,11 @@ def _persist_draft(conn, job_id: int, *, draft: str, findings: list, settings: d
     else:
         logger.warning("cv_tailor: guardrail check returned nothing for job %s — keeping prior findings", job_id)
     q.upsert_job_cv(conn, job_id, **fields)
-    conn.execute("UPDATE job_cv SET generated_at = datetime('now') WHERE job_id = ?", (job_id,))
+    conn.execute(
+        "UPDATE job_cv SET generated_at = datetime('now'), "
+        "guardrails_checked_at = datetime('now') WHERE job_id = ?",
+        (job_id,),
+    )
     conn.commit()
 
 
@@ -103,6 +107,19 @@ def _draft_stale(job_cv: dict | None, settings: dict) -> bool:
     de = job_cv.get("directives_edited_at")
     se = job_cv.get("scope_edited_at")
     return bool((de and de > ge) or (se and se > ge))
+
+
+def _edited_since_guardrail_check(job_cv: dict | None) -> bool:
+    """The CV was hand-edited (autosave stamps edited_at) after its guardrail
+    findings were last computed — so the findings no longer describe the shown
+    markdown."""
+    if not job_cv:
+        return False
+    ea = job_cv.get("edited_at")
+    if not ea:
+        return False
+    ca = job_cv.get("guardrails_checked_at")
+    return not ca or ca < ea
 
 
 def _plan_status(conn: sqlite3.Connection, job: dict, job_cv: dict | None, running: bool) -> str:
@@ -130,6 +147,8 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
         return "running"
     if not job_cv or not job_cv.get("tailored_cv") or not job_cv.get("guardrail_findings"):
         return "none"
+    if _edited_since_guardrail_check(job_cv):
+        return "stale"
     return "stale" if _draft_stale(job_cv, settings) else "fresh"
 
 
@@ -165,8 +184,12 @@ def _rendered_chunk(conn: sqlite3.Connection, job_id: int, which: str, **ctx_ove
         ctx["plan_status"] = _plan_status(
             conn, ctx["job"], ctx["job_cv"], bool(ctx["plan_task_id"])
         )
-    inner = "cv/_plan_pane.html" if which == "plan_pane" else "cv/_preview_pane.html"
-    wrapper = "cv-plan-pane" if which == "plan_pane" else "cv-preview-pane"
+    _PANE_TEMPLATES = {
+        "plan_pane": ("cv/_plan_pane.html", "cv-plan-pane"),
+        "preview_pane": ("cv/_preview_pane.html", "cv-preview-pane"),
+        "findings": ("cv/_findings.html", "cv-findings"),
+    }
+    inner, wrapper = _PANE_TEMPLATES.get(which, _PANE_TEMPLATES["preview_pane"])
     body = templates.get_template(inner).render(request=None, **ctx)
     return f'<div id="{wrapper}">{body}</div>'
 
@@ -179,7 +202,7 @@ def _tailor_result(conn: sqlite3.Connection, job_id: int, params: dict) -> dict:
         # or the 'plan' mode) — it's still 'running' in the DB, so _workbench_ctx
         # would see it as an in-flight regen. It isn't: the updating_task_id=None
         # override keeps this render from painting the pane as still-updating.
-        panes = [which] + (["plan_pane"] if which == "preview_pane" else [])
+        panes = ["preview_pane", "plan_pane"] if which == "preview_pane" else [which]
         chunks = []
         for p in panes:
             overrides = {"updating_task_id": None}
@@ -536,6 +559,30 @@ def _task_cv_tailor(conn, client, model, config, params):
         q.add_job_event(conn, job_id, "cv", "CV plan generated")
         return _tailor_result(conn, job_id, params)
 
+    if mode == "recheck":
+        if row is None or not row["tailored_cv"]:
+            return {"job_id": job_id}
+        if not settings["base_guardrails"].strip():
+            return {"job_id": job_id}
+        yield "Checking against your guardrails… (LLM call: check_guardrails)"
+        t0 = time.monotonic()
+        findings = check_guardrails(client, model, settings["base_guardrails"],
+                                    settings["base_cv"], row["tailored_cv"])["findings"]
+        elapsed = time.monotonic() - t0
+        logger.info("cv_tailor: recheck check_guardrails for job %s took %.1fs", job_id, elapsed)
+        if findings:
+            q.upsert_job_cv(conn, job_id, guardrail_findings=findings)
+        else:
+            logger.warning("cv_tailor: recheck guardrail check returned nothing for job %s — keeping prior findings", job_id)
+        conn.execute(
+            "UPDATE job_cv SET guardrails_checked_at = datetime('now') WHERE job_id = ?",
+            (job_id,),
+        )
+        conn.commit()
+        yield f"Checked guardrails — took {elapsed:.1f}s ({len(findings)} finding(s))"
+        q.add_job_event(conn, job_id, "cv", "Guardrails re-checked")
+        return _tailor_result(conn, job_id, params)
+
     # mode == "generate"
     if row is None:
         q.upsert_job_cv(conn, job_id, scope=[o["id"] for o in scope_options if o["default_enabled"]])
@@ -606,6 +653,14 @@ def cv_generate(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return {"task_id": task["id"], "already_active": task["already_active"]}
 
 
+@router.post("/jobs/{job_id}/cv/recheck-guardrails")
+def cv_recheck_guardrails(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    _require_editable(conn, job_id)
+    task = q.enqueue_task(conn, kind="cv_tailor",
+                          params={"job_id": job_id, "mode": "recheck", "render": "findings"})
+    return {"task_id": task["id"], "already_active": task["already_active"]}
+
+
 @router.post("/jobs/{job_id}/cv/save-directives", response_class=HTMLResponse)
 async def cv_save_directives(job_id: int, request: Request,
                              conn: sqlite3.Connection = Depends(get_db)):
@@ -623,8 +678,19 @@ async def cv_save_scope(job_id: int, request: Request,
     valid_ids = {o["id"] for o in q.get_scope_options(conn)}
     scope = [int(s) for s in form.getlist("scope") if s.isdigit() and int(s) in valid_ids]
     q.set_job_cv_scope(conn, job_id, scope)
-    return templates.TemplateResponse(request, "cv/_preview_pane.html",
+    return templates.TemplateResponse(request, "cv/_scope_status_update.html",
                                       _workbench_ctx(conn, job_id))
+
+
+@router.post("/jobs/{job_id}/cv/save-tailored", response_class=HTMLResponse)
+async def cv_save_tailored(job_id: int, request: Request,
+                          conn: sqlite3.Connection = Depends(get_db)):
+    _require_editable(conn, job_id)
+    form = await request.form()
+    q.set_job_cv_tailored(conn, job_id, form.get("markdown", ""))
+    return templates.TemplateResponse(
+        request, "cv/_save_tailored_oob.html", _workbench_ctx(conn, job_id),
+    )
 
 
 @router.post("/jobs/{job_id}/cv/reset-directives", response_class=HTMLResponse)

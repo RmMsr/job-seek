@@ -57,6 +57,17 @@ def test_cv_form_posts_and_swaps_cv_page(client):
     assert 'hx-select="#cv-page"' in r.text
 
 
+def test_cv_page_base_cv_uses_ink_editor(client, conn):
+    r = client.get("/cv")
+    assert 'name="base_cv"' in r.text and "data-ink" in r.text
+
+
+def test_cv_page_base_cv_still_saves(client, conn):
+    r = client.post("/cv", data={"base_cv": "# New base\n"})
+    assert r.status_code == 200
+    assert q.get_cv_settings(conn)["base_cv"] == "# New base\n"
+
+
 def test_cv_save_persists_base_cv_only(client, conn):
     q.save_cv_settings(conn, base_cv="old", base_instruction="keep me",
                        base_guardrails="keep me too", css="keep", default_scope=[1])

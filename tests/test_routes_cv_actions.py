@@ -57,6 +57,22 @@ def test_save_scope_persists_and_marks_draft_stale(client, conn):
     assert 'data-state="stale"' in r.text  # preview pane reports the draft as stale
 
 
+def test_save_scope_only_returns_status_fragments_not_the_whole_pane(client, conn):
+    # A scope change only ever affects draft/guardrail freshness, never the
+    # tailored markdown — the response must be small status fragments, not a
+    # full preview-pane re-render (which would reset the active tab, the
+    # iframes, and the Edit-tab editor on every checkbox click).
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft", scope=[1])
+    r = client.post(f"/jobs/{jid}/cv/save-scope", data={"scope": ["1", "2"]})
+    assert r.status_code == 200
+    assert 'id="cv-draft-status"' in r.text
+    assert 'id="cv-findings"' in r.text
+    assert 'cv-preview-tab' not in r.text       # no tab bar
+    assert 'cv-preview-doc' not in r.text        # no iframes / editor mount
+    assert 'cv-latitude-form' not in r.text      # the checkboxes themselves aren't re-rendered
+
+
 def test_save_scope_is_read_only_for_finalized_cv(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
@@ -350,3 +366,54 @@ def test_reset_directives_replaces_with_configured_template(client, conn):
     r = client.post(f"/jobs/{jid}/cv/reset-directives", data={})
     assert r.status_code == 200
     assert q.get_job_cv(conn, jid)["tuning_directives"] == "## A\n## B"
+
+
+def test_save_tailored_persists_and_returns_oob(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Old", base_cv_snapshot="# Me\n")
+    r = client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "# New hand-edited\n\n- extra\n"})
+    assert r.status_code == 200
+    assert q.get_job_cv(conn, jid)["tailored_cv"] == "# New hand-edited\n\n- extra\n"
+    assert q.get_job_cv(conn, jid)["edited_at"] is not None
+    assert 'id="cv-diff-summary"' in r.text and 'hx-swap-oob="true"' in r.text
+    assert 'id="cv-findings"' in r.text
+    assert 'id="cv-editor-status"' in r.text
+
+
+def test_save_tailored_marks_guardrails_stale(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Old",
+                    guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
+    conn.execute("UPDATE job_cv SET guardrails_checked_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
+    conn.commit()
+    r = client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "# changed\n"})
+    assert 'data-state="stale"' in r.text
+
+
+def test_save_tailored_404_missing_job(client, conn):
+    assert client.post("/jobs/999/cv/save-tailored", data={"markdown": "x"}).status_code == 404
+
+
+def test_save_tailored_409_when_finalized(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Done")
+    q.finalize_job_cv(conn, jid)
+    assert client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "x"}).status_code == 409
+
+
+def test_recheck_guardrails_endpoint_enqueues_task(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
+    r = client.post(f"/jobs/{jid}/cv/recheck-guardrails")
+    assert r.status_code == 200
+    task = q.get_task(conn, r.json()["task_id"])
+    assert task["kind"] == "cv_tailor"
+    assert task["params"]["mode"] == "recheck"
+    assert task["params"]["render"] == "findings"
+
+
+def test_recheck_guardrails_409_when_finalized(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Done")
+    q.finalize_job_cv(conn, jid)
+    assert client.post(f"/jobs/{jid}/cv/recheck-guardrails").status_code == 409

@@ -1,0 +1,9 @@
+{% macro ink_editor(name, value, min_height="300px", autosave_url=None) -%}
+<div class="ink-editor-wrap">
+  <textarea class="ink-source" name="{{ name }}" data-ink
+    data-ink-min-height="{{ min_height }}"
+    {%- if autosave_url %} data-ink-autosave-url="{{ autosave_url }}"{% endif %}
+    hidden>{{ value }}</textarea>
+  <div class="ink-mount" aria-label="Markdown editor"></div>
+</div>
+{%- endmacro %}

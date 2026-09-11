@@ -1,10 +1,7 @@
 {% set has_draft = job_cv and job_cv.tailored_cv %}
 
 <h2>Preview
-  <span class="cv-stage-status" data-state="{{ draft_status }}">{{ {
-    "none": "No draft yet", "fresh": "Up to date",
-    "stale": "Outdated", "running": "Working…",
-  }.get(draft_status, "") }}</span>
+  {% include "cv/_draft_status.html" %}
 </h2>
 
 <form id="cv-latitude-form" class="cv-latitude" method="post"
@@ -30,10 +27,13 @@
   </details>
 </form>
 
+{% include "cv/_frontmatter_hint.html" %}
+
 <div class="cv-preview-actions">
   <button type="button" class="btn btn-primary" data-progress-url="/jobs/{{ job.id }}/cv/generate"
           data-progress-label="Updating the tailored CV" data-progress-oob>Update</button>
   <span class="cv-preview-progress" aria-live="polite"{% if not updating_task_id %} hidden{% endif %}>&#9203; A tailored update is in progress&hellip;</span>
+  <span id="cv-editor-status" class="cv-editor-status" aria-live="polite"></span>
   {% if not has_doc_write %}<span class="muted">(doc-write-cli not installed)</span>{% endif %}
 </div>
 
@@ -42,15 +42,21 @@
   <strong>Update</strong>. Your base CV is shown below for reference.</p>
 {% endif %}
 
-{% include "cv/_cv_diff_summary.html" %}
+<div id="cv-diff-summary">{% include "cv/_cv_diff_summary.html" %}</div>
 
 {% if has_doc_write %}
-  {% with mid_label = 'Tailored', title_prefix = '', active = '' %}
+  {% with mid_label = 'Tailored', title_prefix = '', active = '', editable = true %}
     {% include "cv/_preview_tabs.html" %}
   {% endwith %}
 {% else %}
   <p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
-  <div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ (job_cv.tailored_cv if has_draft else settings.base_cv) | markdown }}</div>
+  {% if has_draft %}
+    {% from "_ink_editor.html" import ink_editor %}
+    {{ ink_editor("markdown", job_cv.tailored_cv,
+                  autosave_url="/jobs/" ~ job.id ~ "/cv/save-tailored") }}
+  {% else %}
+    <div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ settings.base_cv | markdown }}</div>
+  {% endif %}
 {% endif %}
 
 {% if has_draft %}
