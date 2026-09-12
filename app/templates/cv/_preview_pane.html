@@ -6,10 +6,10 @@
 
 <form id="cv-latitude-form" class="cv-latitude" method="post"
       action="/jobs/{{ job.id }}/cv/save-scope">
-  <span class="cv-scope-label">Edit latitude</span>
+  <span class="cv-scope-label">Edit scope</span>
   <span class="muted" style="font-size:.85em;"> — how far the rewrite may go.
-    The levels are configurable in <a href="/cv/advanced#cv-scope-options">edit scope</a>.</span>
-  <div class="cv-scope-row" role="group" aria-label="Edit latitude">
+    The levels are configurable in <a href="/cv/advanced#cv-scope-options">Advanced CV settings</a>.</span>
+  <div class="cv-scope-row" role="group" aria-label="Edit scope">
     {% for opt in scope_options %}
     <label class="cv-scope-chip">
       <input type="checkbox" name="scope" value="{{ opt.id }}"{% if job_cv %}{% if opt.id in job_cv.scope %} checked{% endif %}{% elif opt.default_enabled %} checked{% endif %}>
@@ -27,8 +27,6 @@
   </details>
 </form>
 
-{% include "cv/_frontmatter_hint.html" %}
-
 <div class="cv-preview-actions">
   <button type="button" class="btn btn-primary" data-progress-url="/jobs/{{ job.id }}/cv/generate"
           data-progress-label="Updating the tailored CV" data-progress-oob>Update</button>
@@ -38,7 +36,8 @@
 </div>
 
 {% if not has_draft %}
-<p class="cv-preview-empty muted">No tailored CV yet — review the plan above, then hit
+<p class="cv-preview-empty muted">No tailored CV yet — review the plan on the
+  <a href="/jobs/{{ job.id }}/cv">Tailor CV</a> page, then hit
   <strong>Update</strong>. Your base CV is shown below for reference.</p>
 {% endif %}
 
@@ -58,6 +57,8 @@
     <div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ settings.base_cv | markdown }}</div>
   {% endif %}
 {% endif %}
+
+{% include "cv/_frontmatter_hint.html" %}
 
 {% if has_draft %}
   <div class="cv-preview-decision">

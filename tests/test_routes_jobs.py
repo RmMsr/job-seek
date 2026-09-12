@@ -205,13 +205,6 @@ def test_job_expand_has_full_meta_parity_with_card(client, conn):
     assert '<h2 class="job-detail-title">ML Eng</h2>' in resp.text
 
 
-def test_job_expand_keeps_tailor_cv_link_on_detail(client, conn):
-    sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/expand?detail=1")
-    assert resp.status_code == 200
-    assert f"/jobs/{jid}/cv" in resp.text
-
-
 def test_job_expand_shows_tab_per_scored_scenario(client, conn):
     sid, jid, scenario_a = _seed(conn)
     scenario_b = q.insert_scenario(conn, "Other Scenario", "")
@@ -415,26 +408,26 @@ def test_job_expand_note_field_is_optional(client, conn):
     assert '<textarea name="note" required' not in resp.text
 
 
-def test_job_expand_reject_trash_buttons_have_tooltips(client, conn):
+def test_job_detail_reject_trash_buttons_have_tooltips(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/expand")
+    resp = client.get(f"/jobs/{jid}")
     assert resp.status_code == 200
     assert 'title="Does not match your criteria."' in resp.text
     assert 'title="Not a usable posting (expired, spam, duplicate, wrong content)."' in resp.text
 
 
-def test_job_expand_shows_delete_instead_of_trash_when_already_trash(client, conn):
+def test_job_detail_shows_delete_instead_of_trash_when_already_trash(client, conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "trash", None)
-    resp = client.get(f"/jobs/{jid}/expand")
+    resp = client.get(f"/jobs/{jid}")
     assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/delete-confirm?status=new"' in resp.text
+    assert f'hx-get="/jobs/{jid}/delete-confirm?detail=1"' in resp.text
     assert 'name="status" value="trash"' not in resp.text
 
 
-def test_job_expand_shows_trash_when_not_trash(client, conn):
+def test_job_detail_shows_trash_when_not_trash(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/expand")
+    resp = client.get(f"/jobs/{jid}")
     assert resp.status_code == 200
     assert 'name="status" value="trash"' in resp.text
     assert "delete-confirm" not in resp.text
@@ -1516,12 +1509,50 @@ def test_job_detail_has_back_to_list_link(client, conn):
     assert 'href="/jobs"' in resp.text
 
 
+def test_back_to_list_link_lives_in_the_subnav_right_of_the_tabs(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    text = resp.text
+    subnav_start = text.index('<nav class="job-subnav">')
+    subnav = text[subnav_start:text.index('</nav>', subnav_start)]
+    assert 'href="/jobs" class="job-subnav-back"' in subnav
+    assert subnav.index('job-subnav-tabs') < subnav.index('job-subnav-back')
+    assert '<p class="back-to-list">' not in text
+
+
 def test_job_detail_omits_bulk_select_checkbox(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}")
     assert resp.status_code == 200
     assert '<label class="job-select-wrap">' not in resp.text
     assert f'<input type="checkbox" class="job-select" name="job_ids" value="{jid}" form="bulk-form"' not in resp.text
+
+
+def test_job_detail_shows_common_header(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert resp.status_code == 200
+    assert '<h1 class="job-header-title">ML Eng</h1>' in resp.text
+    assert '<p class="job-header-org">Acme</p>' in resp.text
+    assert '<nav class="job-subnav">' in resp.text
+
+
+def test_job_detail_subnav_marks_offering_active(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    subnav_start = resp.text.index('<nav class="job-subnav">')
+    subnav = resp.text[subnav_start:resp.text.index('</nav>', subnav_start)]
+    offering_link = subnav[subnav.index(f'href="/jobs/{jid}"'):]
+    assert 'class="active"' in offering_link[:60]
+
+
+def test_job_detail_subnav_links_to_all_four_views(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}")
+    assert f'href="/jobs/{jid}"' in resp.text
+    assert f'href="/jobs/{jid}/cv"' in resp.text
+    assert f'href="/jobs/{jid}/cv/preview"' in resp.text
+    assert f'href="/jobs/{jid}/history"' in resp.text
 
 
 def test_job_expand_still_has_bulk_select_checkbox(client, conn):
@@ -1646,29 +1677,6 @@ def test_base_page_includes_target_highlight_script(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
     assert "job-row-target-highlight" in resp.text
-
-
-def test_job_detail_collapse_link_carries_detail_flag(client, conn):
-    sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}")
-    assert resp.status_code == 200
-    assert f'hx-get="/jobs/{jid}/collapse?detail=1"' in resp.text
-
-
-def test_job_detail_collapse_keeps_checkbox_hidden(client, conn):
-    sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/collapse?detail=1")
-    assert resp.status_code == 200
-    assert '<label class="job-select-wrap">' not in resp.text
-    assert f'hx-get="/jobs/{jid}/expand?detail=1"' in resp.text
-
-
-def test_job_detail_collapsed_then_reexpanded_still_hides_checkbox_and_redirect(client, conn):
-    sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}/expand?detail=1")
-    assert resp.status_code == 200
-    assert '<label class="job-select-wrap">' not in resp.text
-    assert '<input type="hidden" name="redirect" value="/jobs">' in resp.text
 
 
 def test_job_collapse_without_detail_flag_shows_checkbox(client, conn):
@@ -2797,22 +2805,41 @@ def test_job_card_hides_revisit_button_for_slack(client, conn):
     assert f'/jobs/{jid}/revisit' not in html
 
 
-def test_job_detail_shows_history_block(client, conn):
+def test_job_history_page_lists_events(client, conn):
     sid, jid, scenario_id = _seed(conn)
     q.update_job_feedback(conn, jid, "rejected", "not remote")
-    resp = client.get(f"/jobs/{jid}")
+    resp = client.get(f"/jobs/{jid}/history")
     assert resp.status_code == 200
-    assert "History (1)" in resp.text
     assert "Status: new → rejected" in resp.text
-    # the note text is no longer echoed into the history line itself
     assert 'Status: new → rejected — ' not in resp.text
 
 
-def test_job_detail_no_history_block_when_empty(client, conn):
+def test_job_history_page_empty_state(client, conn):
     sid, jid, scenario_id = _seed(conn)
-    resp = client.get(f"/jobs/{jid}")
+    resp = client.get(f"/jobs/{jid}/history")
     assert resp.status_code == 200
+    assert "No history yet" in resp.text
+
+
+def test_job_history_page_404_for_missing_job(client, conn):
+    assert client.get("/jobs/999/history").status_code == 404
+
+
+def test_job_history_page_shows_header_with_active_subnav_link(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    page = client.get(f"/jobs/{jid}/history").text
+    assert '<nav class="job-subnav">' in page
+    subnav = page[page.index('<nav class="job-subnav">'):page.index('</nav>', page.index('<nav class="job-subnav">'))]
+    history_link = subnav[subnav.index(f'href="/jobs/{jid}/history"'):]
+    assert 'class="active"' in history_link[:60]
+
+
+def test_job_detail_offering_page_has_no_history_block(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "rejected", "not remote")
+    resp = client.get(f"/jobs/{jid}")
     assert 'class="job-history"' not in resp.text
+    assert "Status: new → rejected" not in resp.text
 
 
 def test_job_expand_shows_data_age(client, conn):
@@ -2822,35 +2849,20 @@ def test_job_expand_shows_data_age(client, conn):
     assert "job-data-age" in resp.text
 
 
-def test_job_detail_shows_tailor_cv_link(client, conn):
-    conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
-    conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
-    conn.commit()
-    r = client.get("/jobs/1")
-    assert r.status_code == 200
-    assert "/jobs/1/cv" in r.text
-
-
-def test_job_detail_tailor_cv_sits_in_actions_group_before_organize(client, conn):
+def test_job_detail_has_no_tailor_cv_cta_button(client, conn):
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
     r = client.get("/jobs/1")
     text = r.text
-    assert 'aria-label="Actions"' in text
-    assert 'aria-label="Organize"' in text
-    assert 'btn-tailor-cv' in text
-    # Actions group renders before Organize group
-    assert text.index('aria-label="Actions"') < text.index('aria-label="Organize"')
-    # the Tailor CV link is no longer inside the Advanced disclosure
-    advanced_start = text.index('class="job-advanced"')
-    assert text.index('btn-tailor-cv') < advanced_start
+    assert '<a class="btn btn-primary btn-tailor-cv"' not in text
+    assert 'aria-label="Actions"' not in text
 
 
 def test_job_list_row_expand_shows_actions_and_organize(client, conn):
-    """Regression: /jobs/{id}/expand (list-view row expansion) used to only
-    attach job_cv when the request came from the detail page,
-    so the Actions group silently never appeared on the jobs list."""
+    """The edit icon is a shortcut to the job view, but Actions (Tailor CV)
+    and Organize (Accept/Reject/Trash) still render directly on the card
+    too — deliberately redundant, so triage doesn't require a page jump."""
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
@@ -2862,17 +2874,14 @@ def test_job_list_row_expand_shows_actions_and_organize(client, conn):
     assert text.index('aria-label="Actions"') < text.index('aria-label="Organize"')
 
 
-def test_job_feedback_response_keeps_actions_group(client, conn):
-    """Regression: _render_updated_job_html (the row re-render used after
-    feedback/reset/pass-as-new/reevaluate/revisit) built jobs/_feedback.html
-    without job_cv at all, so the Actions group vanished from a
-    row the instant you accepted/rejected/trashed it."""
+def test_job_list_row_expand_has_edit_icon_linking_to_job_view(client, conn):
     conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
-    conn.execute("INSERT INTO jobs (source_id,url,title,content_type,status) VALUES (1,'http://x/1','Role','job_posting','new')")
+    conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
     conn.commit()
-    r = client.post("/jobs/1/feedback?detail=1", data={"status": "accepted"})
-    assert 'aria-label="Actions"' in r.text
-    assert 'btn-tailor-cv' in r.text
+    r = client.get("/jobs/1/expand")
+    assert '<a href="/jobs/1" class="job-link-icon job-edit-icon"' in r.text
+    # sits left of (i.e. after, in source order) the permalink icon
+    assert r.text.index('class="job-link-icon"') < r.text.index('class="job-link-icon job-edit-icon"')
 
 
 def test_main_nav_shows_cv_link_after_profile(client):

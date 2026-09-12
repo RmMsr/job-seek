@@ -9,6 +9,17 @@ def test_cv_page_renders_base_cv_and_save_preview_button(client):
     assert "Advanced" in r.text  # link to /cv/advanced
 
 
+def test_cv_page_advanced_link_sits_beside_the_heading(client):
+    r = client.get("/cv")
+    text = r.text
+    heading_start = text.index("<h1")
+    advanced_start = text.index('href="/cv/advanced"')
+    h1_close = text.index("</h1>", heading_start)
+    # the link comes right after the h1, in the same flex row, not at the page's end
+    assert heading_start < h1_close < advanced_start
+    assert advanced_start < text.index("Your base CV")
+
+
 def test_cv_page_shows_download_pdf_when_doc_write_available(client):
     from unittest.mock import patch
     with patch("app.routes.cv.doc_write_available", return_value=True):

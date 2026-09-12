@@ -230,19 +230,27 @@ def job_list(request: Request, conn: sqlite3.Connection = Depends(get_db)):
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
 def job_detail(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    job = q.get_job(conn, job_id)
+    job = q.get_job_with_source_name(conn, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    sources = {s["id"]: s for s in q.get_sources(conn)}
-    job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
     scenarios = q.get_scenarios(conn)
     job_scores = q.get_job_scores(conn, job_id)
-    job_events = q.get_job_events(conn, job_id)
     return templates.TemplateResponse(
         request, "jobs/detail.html",
         {"job": job, "scenarios": scenarios, "job_scores": job_scores,
-         "job_events": job_events, "is_detail_page": True, "filter": None,
+         "is_detail_page": True, "filter": None,
          "job_cv": q.get_job_cv(conn, job_id)},
+    )
+
+
+@router.get("/jobs/{job_id}/history", response_class=HTMLResponse)
+def job_history(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    job = q.get_job_with_source_name(conn, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job_events = q.get_job_events(conn, job_id)
+    return templates.TemplateResponse(
+        request, "jobs/history.html", {"job": job, "job_events": job_events},
     )
 
 

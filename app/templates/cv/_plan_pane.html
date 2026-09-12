@@ -7,14 +7,16 @@
 
 <form id="cv-directives-form" method="post" action="/jobs/{{ job.id }}/cv/save-directives">
   <p class="muted" style="font-size:.85em;margin:.2rem 0 .6rem;">
-    Suggestions below cover the full opportunity. You choose how much to apply with
-    <strong>Edit latitude</strong>, next to the preview.
+    Your <a href="/cv">base CV</a> can be optimized to fit this job. The instructions
+    below identify potential improvements and guide the automated CV adjustments.
+    You choose how much to apply with <strong>Edit scope</strong>, on the
+    <a href="/jobs/{{ job.id }}/cv/preview">Preview CV</a> page.
   </p>
 
   <label style="display:block;margin-top:.75rem;">Tuning directives<br>
     <span class="cv-editor-wrap">
-      <textarea name="tuning_directives" rows="10"
-        style="width:100%;font-family:monospace;box-sizing:border-box;">{{ job_cv.tuning_directives if job_cv else settings.directives_template }}</textarea>
+      <textarea name="tuning_directives" rows="20"
+        style="width:100%;min-height:55vh;font-family:monospace;box-sizing:border-box;">{{ job_cv.tuning_directives if job_cv else settings.directives_template }}</textarea>
       <span class="cv-save-hint" aria-live="polite" hidden></span>
     </span>
   </label>

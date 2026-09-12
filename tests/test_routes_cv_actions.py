@@ -85,28 +85,29 @@ def test_accept_finalizes_and_shows_read_only_view(client, conn):
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     r = client.post(f"/jobs/{jid}/cv/accept", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == f"/jobs/{jid}/cv"
+    assert r.headers["location"] == f"/jobs/{jid}/cv/preview"
     assert q.get_job_cv(conn, jid)["finalized_at"] is not None
     assert "cv" in [e["kind"] for e in q.get_job_events(conn, jid)]
-    # the accepted view: preview + downloads + start over, no tailoring UI
-    page = client.get(f"/jobs/{jid}/cv").text
-    assert "read-only" in page
-    assert "Start over" in page and "Download PDF" in page
-    assert "Accept this CV" not in page
-    assert 'id="cv-plan-pane"' not in page
-    assert ">Update</button>" not in page
+    # Preview CV: the accepted, read-only view — downloads + start over, no tailoring UI
+    preview = client.get(f"/jobs/{jid}/cv/preview").text
+    assert "read-only" in preview
+    assert "Start over" in preview and "Download PDF" in preview
+    assert "Accept this CV" not in preview
+    assert ">Update</button>" not in preview
+    # Tailor CV: a locked notice, no directives form
+    tailor = client.get(f"/jobs/{jid}/cv").text
+    assert "read-only" in tailor
+    assert 'id="cv-plan-pane"' not in tailor
 
 
 def test_copy_markdown_available_in_both_states(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Tailored\n\n- a bullet with <special> & chars\n")
-    # draft state
-    page = client.get(f"/jobs/{jid}/cv").text
+    page = client.get(f"/jobs/{jid}/cv/preview").text
     assert "Copy markdown" in page and 'class="cv-md-source"' in page
     assert "a bullet with" in page
-    # accepted state
     q.finalize_job_cv(conn, jid)
-    page = client.get(f"/jobs/{jid}/cv").text
+    page = client.get(f"/jobs/{jid}/cv/preview").text
     assert "Copy markdown" in page and "a bullet with" in page
 
 
@@ -116,9 +117,10 @@ def test_reopen_clears_finalized_and_restores_workbench(client, conn):
     q.finalize_job_cv(conn, jid)
     r = client.post(f"/jobs/{jid}/cv/reopen", follow_redirects=False)
     assert r.status_code == 303
+    assert r.headers["location"] == f"/jobs/{jid}/cv"
     assert q.get_job_cv(conn, jid)["finalized_at"] is None
-    page = client.get(f"/jobs/{jid}/cv").text
-    assert 'id="cv-plan-pane"' in page and 'id="cv-preview-pane"' in page
+    assert 'id="cv-plan-pane"' in client.get(f"/jobs/{jid}/cv").text
+    assert 'id="cv-preview-pane"' in client.get(f"/jobs/{jid}/cv/preview").text
 
 
 def test_editing_routes_are_read_only_for_a_finalized_cv(client, conn):
@@ -182,29 +184,31 @@ def test_directives_autosave_handler_is_in_base(client, conn):
 
 def test_scope_control_lives_in_the_preview_pane_not_the_plan_pane(client, conn):
     jid = _job(conn)
-    page = client.get(f"/jobs/{jid}/cv").text
-    plan_pane = page[page.index('id="cv-plan-pane"'):page.index('id="cv-preview-pane"')]
-    preview_pane = page[page.index('id="cv-preview-pane"'):]
-    assert 'name="scope"' not in plan_pane
-    assert "Edit scope:" not in plan_pane
-    assert 'id="cv-latitude-form"' in preview_pane
-    assert 'name="scope"' in preview_pane
-    assert "Edit latitude" in preview_pane
+    plan_page = client.get(f"/jobs/{jid}/cv").text
+    preview_page = client.get(f"/jobs/{jid}/cv/preview").text
+    assert 'name="scope"' not in plan_page
+    assert "Edit scope:" not in plan_page
+    assert 'id="cv-latitude-form"' in preview_page
+    assert 'name="scope"' in preview_page
+    assert "Edit scope" in preview_page
 
 
-def test_plan_pane_points_at_edit_latitude(client, conn):
+def test_plan_pane_points_at_edit_scope(client, conn):
     jid = _job(conn)
     page = client.get(f"/jobs/{jid}/cv").text
-    plan_pane = page[page.index('id="cv-plan-pane"'):page.index('id="cv-preview-pane"')]
-    assert "Edit latitude" in plan_pane  # the pointer line lives in the plan pane
+    assert "Edit scope" in page  # the pointer line lives in the plan pane
 
 
 def test_directives_still_autosave_without_inline_script(client, conn):
     jid = _job(conn)
+    q.upsert_job_cv(conn, jid)  # avoids the first-visit autostart <script>
     page = client.get(f"/jobs/{jid}/cv").text
     assert 'id="cv-directives-form"' in page
-    plan_pane = page[page.index('id="cv-plan-pane"'):page.index('id="cv-preview-pane"')]
-    assert "<script" not in plan_pane
+    # base.html's own <main> wrapper is the page content; scope past it to
+    # avoid tripping over base.html's persistent infrastructure <script> tags
+    # (htmx, editor mounts) which are unrelated to this page's content.
+    main = page[page.index("<main>"):page.index("</main>")]
+    assert "<script" not in main
 
 
 def test_directives_editor_has_a_saved_hint(client, conn):
@@ -215,11 +219,9 @@ def test_directives_editor_has_a_saved_hint(client, conn):
 
 
 def test_accept_button_is_a_plain_post(client, conn):
-    # accept changes the whole page (workbench -> read-only view), so it's a
-    # normal form POST + redirect, not an htmx pane swap
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
-    text = client.get(f"/jobs/{jid}/cv").text
+    text = client.get(f"/jobs/{jid}/cv/preview").text
     accept_start = text.index("Accept this CV")
     accept_form = text[max(0, accept_start - 300):accept_start]
     assert 'action="/jobs/{}/cv/accept"'.format(jid) in accept_form

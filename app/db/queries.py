@@ -1089,6 +1089,15 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> dict | None:
     return _row_to_dict(conn.execute(sql, (job_id,)).fetchone())
 
 
+def get_job_with_source_name(conn: sqlite3.Connection, job_id: int) -> dict | None:
+    job = get_job(conn, job_id)
+    if job is None:
+        return None
+    sources = {s["id"]: s for s in get_sources(conn)}
+    job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
+    return job
+
+
 def _recent_scenario_feedback_rows(conn: sqlite3.Connection, scenario_id: int, limit: int, days: int = 30) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(

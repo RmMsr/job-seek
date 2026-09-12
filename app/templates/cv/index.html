@@ -3,7 +3,10 @@
 {% block content %}
 {% from "_markdown_editor.html" import markdown_editor %}
 <div id="cv-page">
-<h1>CV</h1>
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">CV</h1>
+  <a href="/cv/advanced">Advanced CV settings &rarr;</a>
+</div>
 <p style="color:var(--text-muted);">Your base CV — what every tailored, per-job version starts from.</p>
 
 {% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
@@ -23,7 +26,5 @@
 <div id="cv-base-preview" style="margin-top:1rem;">
   {% if saved %}{% include "cv/_preview_result.html" %}{% endif %}
 </div>
-
-<p style="margin-top:1.5rem;"><a href="/cv/advanced">Advanced CV settings &rarr;</a></p>
 </div>
 {% endblock %}

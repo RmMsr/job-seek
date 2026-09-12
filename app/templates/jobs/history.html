@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}History — {{ job.title or "Job" }}{% endblock %}
+{% block content %}
+{% include "jobs/_job_header.html" %}
+<h1>History</h1>
+{% if job_events %}
+<ul class="job-history-list">
+  {% include "jobs/_job_events_list.html" %}
+</ul>
+{% else %}
+<p class="muted">No history yet.</p>
+{% endif %}
+{% endblock %}

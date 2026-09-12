@@ -204,3 +204,185 @@ Browser-review round 1 (user, commit "workbench UX polish from browser review"):
 
 NOT YET DONE: final whole-branch review (skipped for spend limit); user browser test round 2; squash-merge.
 Minor findings for triage: (Task 4) cv_plan_task_id queried twice per _workbench_ctx; (Task 3) plan_context_hash test asserts only truthiness; (Task 1) DDL vs migrated column order diverges (codebase norm).
+
+# Progress ledger — job-centric-cv-views
+
+Plan: docs/superpowers/plans/2026-09-11-job-centric-cv-views.md
+Spec: docs/superpowers/specs/2026-09-11-job-centric-cv-views-design.md
+Base before implementation: 4552a17
+
+- [x] Task 1: get_job_with_source_name query helper  (commits 4552a17..b606494, review clean; full suite 1760 passed, 3 pre-existing unrelated failures)
+- [x] Task 2: Common header + subnav, Offering view restructuring  (commits 5cc497d..50bfe98, review clean)
+      - implementer fixed 2 buggy test assertions in the brief itself (btn-tailor-cv substring collided with base.html's global CSS rule; </nav> index matched the site-wide nav before the job subnav) and deleted 1 pre-existing test (test_job_feedback_response_keeps_actions_group) as the POST analog of a brief-mandated deletion — all independently verified correct by reviewer
+      - minor (final triage): job.company now renders twice on the detail page (job-header-org + job-detail-meta span) — by design per brief, possible later UX polish
+      - full suite 1757 passed, 3 pre-existing unrelated failures (test_routes_home.py); one flaky test_pipeline.py failure seen once, confirmed unrelated on rerun
+- [x] Task 3: History view  (commits 8434031..7da2caa, review clean; fix cbde867 extracted duplicated job-events <li> loop into jobs/_job_events_list.html, re-review approved)
+      - re-review Important (accepted, non-blocking): the fix's "byte-identical" claim was inaccurate — actual Jinja render shows minor whitespace/indentation differences in the <li> output (not visible in a browser, no test regression). Report/commit wording overstated verification; functionally and visually equivalent regardless.
+      - full suite 1759 passed, 3 pre-existing unrelated failures (test_routes_home.py)
+- [x] Task 4: Preview CV view, trim Tailor CV to plan-only  (commit 988fde6, review clean)
+      - implementer fixed 1 buggy test assertion in the brief (test_directives_still_autosave_without_inline_script checked the whole page for <script>, but base.html unconditionally emits several script tags outside <main> — rescoped to <main>...</main>), independently verified correct by reviewer against base.html
+      - full suite 1761 passed, 3 pre-existing unrelated failures (test_routes_home.py) + 1 confirmed test_pipeline.py flake (passes on rerun); test count reconciles exactly (+3 net: -47 workbench, +10 kept, +8 tailor, +32 preview)
+
+ALL 4 CODE TASKS COMPLETE (Task 5 is manual verification, no implementer subagent).
+
+Final whole-branch review (92f9fdf..5d38152, opus): "Ready to merge: with fixes" —
+1 Important functional regression (base.html's CV-preview-stages MutationObserver
+lost its mount point after the .cv-workbench wrapper was removed, leaving the
+"Loading preview..." overlay stuck after Update on Preview CV) + 2 more Important
+(coverage gaps) + 1 Minor folded in.
+Fix wave (commit 7cf21df): host lookup -> document.querySelector('main');
+restored+retargeted test_job_feedback_response_keeps_actions_group (list-row path,
+needed ?status=accepted to hit the right code branch, verified against
+_render_updated_job_html/_stale_badge); added active-subnav-link tests for
+Tailor CV/Preview CV/History (verified as real guards via temporary break+revert);
+CSS badge-alignment selector retargeted to #cv-plan-pane h2, #cv-preview-pane h2.
+Re-review: both verdicts Approved, no Critical/Important remaining (one harmless
+arithmetic typo in the fix's own report text, not in code).
+Deferred, non-blocking follow-ups (Minor, from final review): dead .cv-workbench/
+.cv-workbench-crumb CSS rules; copy in _preview_pane.html/_plan_pane.html still
+describes the old combined page ("review the plan above", "next to the preview");
+tasks.py's cv_tailor follow-up link always points at /cv even for generate-mode
+results (should point at /cv/preview); History page has two <h1>s (job-header-title
++ its own "History" h1); stale comment in test_plan_pane_points_at_edit_latitude.
+
+Full suite: 1766 passed, 3 pre-existing unrelated failures (test_routes_home.py).
+HEAD = 7cf21df.
+
+ALL CODE WORK COMPLETE — awaiting manual dev-server verification + user browser test before squash-merge.
+
+Task 5 (manual verification) — done by controller directly (curl-based, browser
+extension not connected this session):
+- All 4 routes (/jobs/292, /cv, /cv/preview, /history) return 200
+- Subnav active-class correct on all 4 pages incl. no Tailor-CV/Preview-CV prefix collision
+- Content split confirmed scoped to <main> (excluding global CSS false-positives on
+  "btn-tailor-cv"/"guardrail-summary" substrings, both of which are also global CSS
+  class names present on every page): Offering has neither CTA nor history nor CV
+  panes; Tailor CV has only #cv-plan-pane; Preview CV has #cv-preview-pane + guardrails
+- History page: empty state renders correctly
+- Accept/reopen round-trip tested live against a real job (292) using the real
+  save-tailored endpoint to seed a draft (no synthetic SQL, no LLM call): accept ->
+  303 to /cv/preview, accepted read-only view renders (read-only/Start over/Download
+  PDF present, no Accept-this-CV/Update); Tailor CV shows the locked notice with a
+  working reopen form; reopen -> 303 to /cv, #cv-plan-pane restored
+- Confirmed the fix-wave's `document.querySelector('main')` line is present in the
+  served base.html (could not exercise the actual JS/MutationObserver behavior
+  live — browser extension not connected this session; deferred to user's own
+  click-through, specifically Update -> switch tabs on Preview CV)
+Full suite re-confirmed clean just before this pass: 1766 passed, 3 pre-existing
+unrelated failures.
+
+DEV SERVER RUNNING: http://127.0.0.1:8931 (--reload), throwaway job-seek.db copy
+in this worktree (job 292 now has a small test draft/history entry from the
+verification pass above — harmless, in the throwaway copy only).
+
+AWAITING USER BROWSER TEST before squash-merge, in particular: Update on Preview CV
+then switch tabs (Base/Differences) to confirm the "Loading preview..." overlay
+clears (this was the regression fixed in the final-review fix wave).
+
+Follow-on refinement (user request, after Task 5 handoff, commit 8b724b7):
+- Job card (list row expanded): added an edit icon (left of permalink icon)
+  linking to /jobs/{id}; removed the Tailor CV button, Organize
+  (Accept/Reject/Trash) group, and history block from the card entirely —
+  Organize now renders only on the standalone job page (is_detail_page).
+  Delete-confirm and reject/trash tooltip tests retargeted from
+  /jobs/{id}/expand to /jobs/{id} accordingly; obsolete list-row
+  Actions/Organize regression tests replaced with tests asserting their
+  absence + the new edit icon's presence.
+- Tailor CV: reworded intro copy (links to base CV + Preview CV); directives
+  textarea enlarged (rows=20, min-height:55vh).
+- Preview CV: "Edit latitude" renamed to "Edit scope" everywhere (label,
+  aria-labels, cross-reference on Tailor CV, empty-state copy fixed to
+  point at Tailor CV instead of stale "review the plan above"); frontmatter
+  hint moved below the rendered preview, above Accept/export.
+Full suite: 1769 passed (0 failures — the previously-flaky test_routes_home.py
+trio did not reproduce in this run, consistent with the pre-existing,
+unrelated flake noted earlier in this ledger).
+Manually verified via curl against the still-running dev server (job 292):
+edit icon present on list row, Actions/Organize absent there, Organize
+still present on Offering, reworded Tailor CV copy, "Edit scope" label,
+frontmatter hint confirmed positioned after the preview stage and before
+the accept/export block, textarea rows/min-height confirmed in served HTML.
+
+Follow-on refinement round 2 (user request, commit effe201):
+- Edit icon glyph changed from pencil (&#9999;, hard to spot) to memo
+  (&#128221;) for better visibility/recognition.
+- Restored Actions (Tailor CV) and Organize (Accept/Reject/Trash) on the
+  list card, unconditional again as before this session's changes —
+  deliberately redundant with the edit icon per user ("I don't mind the
+  redundancy").
+- "Back to list" moved from the bottom of the Offering page into the
+  shared job-subnav header (jobs/_job_header.html), right-aligned via
+  flex justify-content:space-between, matching the existing
+  .setup-subnav/.setup-subnav-tabs pattern — now appears on all 4 views,
+  not just Offering.
+- /cv page: "Advanced CV settings" link moved from page-bottom to sit
+  beside the <h1>CV</h1> heading.
+Full suite: 1771 passed, 0 failures. Verified live against the dev server.
+
+Follow-on refinement round 3 (user request, commit e0eaf94):
+- Traced "mint green" to EasyMDE's default cm-s-easymde theme: .cm-tag
+  {color:#63a35c} (colors HTML tags — this CV format uses <aside> markup,
+  see test_cv_instruction.py). Retinted to var(--success-strong), the
+  app's own muted green, instead of the CDN's bright default; also toned
+  down .cm-attribute to var(--text-secondary).
+- Headings were using EasyMDE's fluid/viewport-scaled default sizes
+  (.cm-header-1 through -6, calc(...vw...)). Replaced with a flat scale:
+  h1 1.6rem (60% over 1rem body text), h2 1.35rem, h3-h6 1rem (body size).
+  Confirmed CSS specificity: base.html's own <style> block loads after
+  easymde.min.css and uses equal-specificity 2-class selectors, so these
+  overrides win on cascade order.
+Full suite: 1771 passed (CSS-only change, no test impact). Verified served
+HTML on the dev server contains the new rules.
+
+Follow-on refinement round 4 (user request, commit bc0a641):
+- Traced the preview iframe's "fully white, no page separation" look to
+  doc-write-cli (vendored paged-with-floats fork of Paged.js): neither its
+  default.css nor the polyfill itself set a background/shadow on the
+  .paged_page box or body — confirmed via a real doc-write-cli render
+  (scratchpad test) and reading its installed source
+  (~/.local/share/pipx/venvs/doc-write). The page-box has no border either;
+  the visible border was the OUTER <iframe> element's own CSS
+  (.cv-preview-doc in base.html).
+- Added app/cv/render.py's _PREVIEW_CHROME_CSS (parallel to _DIFF_CSS,
+  same trusted-constant-appended-to-css pattern): tints html/body, gives
+  .paged_page (paginated preview) / body.output-html (continuous diff)
+  a white background + soft box-shadow. Applied in render_preview_html
+  and render_diff_html only — never render_pdf (a physical page has no
+  surrounding canvas to tint).
+- Dropped .cv-preview-doc's own 1px border + white background in favor
+  of var(--ground), so the outer iframe element matches during load.
+- 2 new tests confirm the chrome CSS is actually injected into real
+  doc-write-cli output (both @needs_docwrite, doc-write-cli is installed
+  in this environment).
+Full suite: 1773 passed. Verified live against the dev server (both the
+outer iframe CSS and the injected chrome CSS appear in served output).
+
+Follow-on refinement round 5 (user request, commit e21a131):
+- Reverted round 4's _PREVIEW_CHROME_CSS injection into doc-write-cli's
+  output per user decision: the media/page background will be fixed
+  upstream in doc-write-cli itself, not injected from job-seek.
+  render_preview_html/render_diff_html are back to passing the user's
+  css argument through unmodified (byte-identical to before round 4);
+  removed the 2 tests that asserted the injected CSS's presence.
+- The outer .cv-preview-doc iframe fix from round 4 (no border,
+  background: var(--ground) instead of #fff) is UNCHANGED/kept — that's
+  app-owned UI chrome around the iframe element, not anything injected
+  into doc-write-cli's rendered document, so it wasn't part of this revert.
+Full suite: 1771 passed (net -2 from round 4's 1773, matching the removed
+tests). Verified live: doc-write-cli output no longer contains the chrome
+CSS; outer iframe CSS fix still present.
+
+Follow-on refinement round 6 (user request, commit 972984a):
+- The iframe border was still visible after round 4's fix because that
+  only removed the app's own `border: 1px solid var(--border)` rule —
+  it never added `border: none`, so the browser's UA-stylesheet default
+  iframe border (many browsers ship `iframe { border: 2px inset }`)
+  was still showing through. Added an explicit `border: none` to
+  .cv-preview-doc.
+- Added a small "Preview" <h2> above the base-CV preview on /cv
+  (app/templates/cv/_preview_result.html), matching the per-job
+  Preview CV page's own "Preview" heading convention — the /cv page's
+  preview area previously had no heading at all.
+Full suite: 1771 passed (no test changes needed). Verified live: served
+CSS now has explicit border:none; POSTing to /cv and checking the
+returned fragment confirms the new <h2>Preview</h2> renders.

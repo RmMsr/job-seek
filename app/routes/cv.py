@@ -202,14 +202,10 @@ def _tailor_result(conn: sqlite3.Connection, job_id: int, params: dict) -> dict:
         # or the 'plan' mode) — it's still 'running' in the DB, so _workbench_ctx
         # would see it as an in-flight regen. It isn't: the updating_task_id=None
         # override keeps this render from painting the pane as still-updating.
-        panes = ["preview_pane", "plan_pane"] if which == "preview_pane" else [which]
-        chunks = []
-        for p in panes:
-            overrides = {"updating_task_id": None}
-            if p == "plan_pane":
-                overrides["plan_task_id"] = None
-            chunks.append(_rendered_chunk(conn, job_id, p, **overrides))
-        result["html_chunks"] = chunks
+        overrides = {"updating_task_id": None}
+        if which == "plan_pane":
+            overrides["plan_task_id"] = None
+        result["html_chunks"] = [_rendered_chunk(conn, job_id, which, **overrides)]
     return result
 
 
@@ -228,7 +224,7 @@ def _cv_diff_view(job_cv: dict | None) -> dict | None:
 
 
 def _workbench_ctx(conn: sqlite3.Connection, job_id: int) -> dict:
-    job = q.get_job(conn, job_id)
+    job = q.get_job_with_source_name(conn, job_id)
     job_cv = q.get_job_cv(conn, job_id)
     settings = q.get_cv_settings(conn)
     updating = q.cv_generate_task_id(conn, job_id)
@@ -254,6 +250,14 @@ def cv_workbench(job_id: int, request: Request, conn: sqlite3.Connection = Depen
     if q.get_job(conn, job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return templates.TemplateResponse(request, "cv/workbench.html", _workbench_ctx(conn, job_id))
+
+
+@router.get(
+    "/jobs/{job_id}/cv/preview", response_class=HTMLResponse)
+def cv_preview_page(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_job(conn, job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return templates.TemplateResponse(request, "cv/preview.html", _workbench_ctx(conn, job_id))
 
 
 @router.get(
@@ -749,7 +753,7 @@ def cv_accept(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
     if not row["finalized_at"]:
         q.finalize_job_cv(conn, job_id)
         q.add_job_event(conn, job_id, "cv", "CV accepted")
-    return RedirectResponse(f"/jobs/{job_id}/cv", status_code=303)
+    return RedirectResponse(f"/jobs/{job_id}/cv/preview", status_code=303)
 
 
 @router.post("/jobs/{job_id}/cv/reopen")

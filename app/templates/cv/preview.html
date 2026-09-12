@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Preview CV — {{ job.title or "Job" }}{% endblock %}
+{% block content %}
+{% include "jobs/_job_header.html" %}
+
+{% if job_cv and job_cv.finalized_at %}
+{% include "cv/_accepted.html" %}
+{% else %}
+<div id="cv-preview-pane">{% include "cv/_preview_pane.html" %}</div>
+{% endif %}
+
+{% if updating_task_id %}
+<script>
+  // A regen was already running when this page loaded (e.g. a mid-update
+  // reload). Reattach so the preview pane still refreshes when it finishes.
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.__cvWatchGenerate) window.__cvWatchGenerate({{ updating_task_id }});
+  });
+</script>
+{% endif %}
+{% endblock %}

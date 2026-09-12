@@ -10,6 +10,33 @@
   <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
     title="Copy link to this job" aria-label="Copy link to this job"
     onclick="event.stopPropagation()">&#128279;</a>
+  {% if not is_detail_page %}
+  <a href="/jobs/{{ job.id }}" class="job-link-icon job-edit-icon"
+    title="Open job" aria-label="Open job details"
+    onclick="event.stopPropagation()">&#128221;</a>
+  {% endif %}
+  {% if is_detail_page %}
+  <div class="job-detail-extra">
+    <div class="job-detail-meta">
+      {% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
+      {% if job.company %}<span>{{ job.company }}</span>{% endif %}
+      {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      <a href="{{ job.url }}" target="_blank" rel="noopener">&#8599; original</a>
+    </div>
+    {% if job.stale_badge %}
+      <p class="stale-note">
+        {% if job.stale_badge.href %}
+          <a href="{{ job.stale_badge.href }}">{{ job.stale_badge.label }} &rarr;</a>
+        {% else %}
+          <span>{{ job.stale_badge.label }}</span>
+        {% endif %}
+      </p>
+    {% endif %}
+    {% if job.headline %}
+      <p class="job-hook">{{ job.headline }}</p>
+    {% endif %}
+  </div>
+  {% else %}
   <div class="job-detail-header" role="button" tabindex="0" style="cursor:pointer"
     hx-get="/jobs/{{ job.id }}/collapse{{ macros.qsuffix(filter, detail=is_detail_page|default(false)) }}"
     hx-target="#job-{{ job.id }}"
@@ -38,6 +65,7 @@
     {% endif %}
     {{ macros.meta_tags(job, filter=filter if filter is defined else none) }}
   </div>
+  {% endif %}
   {% if job.summary %}
     <section aria-label="Summary" class="markdown-content">{{ job.summary | markdown }}</section>
   {% endif %}
@@ -81,16 +109,7 @@
       </span>
     </label>
     <p class="muted" style="font-size:.85em;margin:.15rem 0 0;">Saved automatically as you type.</p>
-    {% if job_events %}
-    <details class="job-history">
-      <summary>History ({{ job_events | length }})</summary>
-      <ul class="job-history-list">
-        {% for e in job_events %}
-        <li><time datetime="{{ e.created_at }}" title="{{ e.created_at }}">{{ e.created_at[:10] }}</time> {{ e.message }}</li>
-        {% endfor %}
-      </ul>
-    </details>
-    {% endif %}
+    {% if not is_detail_page %}
     <div class="job-action-group">
       <span class="job-actions-group-label">Actions</span>
       <div class="cv-actions-group" role="group" aria-label="Actions">
@@ -101,6 +120,7 @@
         </a>
       </div>
     </div>
+    {% endif %}
     <div class="job-action-group">
       <span class="job-actions-group-label">Organize</span>
       <div class="actions" role="group" aria-label="Organize">

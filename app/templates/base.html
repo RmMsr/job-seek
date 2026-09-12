@@ -235,6 +235,9 @@
       padding: 0 0.3rem; border-radius: 4px; color: var(--text-muted); }
     .job-row-content:has(.job-select-wrap) .job-link-icon,
     .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
+    /* The edit icon sits left of the permalink icon — one slot further right. */
+    .job-edit-icon { right: 2.3rem; }
+    .job-row-expanded:has(.job-select-wrap) .job-edit-icon { right: 4.1rem; }
     /* Collapsed card: line the permalink + checkbox up with the title's first line,
        not the card's top edge. (Expanded card keeps them at the top corner.) */
     .job-row-content > .job-link-icon { top: 0.6rem; }
@@ -257,6 +260,19 @@
     .job-detail-meta a:hover { color: var(--accent); }
     .job-detail-header .job-hook { font-size: 0.95rem; }
     .job-detail-header dl.job-tags { margin-top: 0.75rem; }
+
+    .job-header { margin-bottom: 1.25rem; }
+    .job-header-title { font-family: var(--font-serif); font-weight: 600; font-size: 1.6rem; margin: 0; }
+    .job-header-org { margin: 0.2rem 0 0; color: var(--text-secondary); font-size: 1rem; }
+    .job-header dl.job-tags { margin-top: 0.6rem; }
+    .job-subnav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+      gap: 0.5rem 1.25rem; margin-top: 0.9rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    .job-subnav-tabs { display: flex; gap: 1.25rem; }
+    .job-subnav a { text-decoration: none; color: var(--text-secondary); font-weight: 500; }
+    .job-subnav a:hover { color: var(--accent); }
+    .job-subnav a.active { font-weight: 600; color: var(--text-primary); }
+    .job-subnav-back { font-size: 0.9rem; color: var(--text-muted); }
+    .job-detail-extra { padding-top: 0.9rem; }
 
     .score-box { margin-top:0.75rem; padding:0.75rem; border:1px solid var(--border); border-radius:6px; background:var(--ground); }
     .score-box dl.job-tags { margin-bottom:0.5rem; }
@@ -303,7 +319,7 @@
       100% { background: transparent; }
     }
     .cv-workbench { display: flex; flex-direction: column; gap: 1.5rem; }
-    .cv-workbench h2, #cv-findings h3 { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    #cv-plan-pane h2, #cv-preview-pane h2, #cv-findings h3 { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .cv-workbench-crumb { margin: 0 0 -0.5rem; font-size: 0.8rem; letter-spacing: 0.02em;
       color: var(--text-muted); }
     .cv-workbench-crumb span { opacity: 0.5; margin: 0 0.15rem; }
@@ -647,9 +663,8 @@
        scale together — the fullscreen view is identical to the windowed one. */
     .cv-preview-stage:fullscreen { width: 100vw; height: 100vh; min-width: 0;
       aspect-ratio: auto; margin: 0; background: var(--surface); }
-    .cv-preview-stage:fullscreen .cv-preview-doc { border: none; }
     .cv-preview-doc { position: absolute; inset: 0; width: 100%; height: 100%;
-      border: 1px solid var(--border); background: #fff; display: block;
+      background: var(--ground); border: none; display: block;
       opacity: 0; pointer-events: none; transition: opacity 0.12s ease; }
     .cv-preview-doc.is-active { opacity: 1; pointer-events: auto; }
     /* Small "loading" note pinned top-right while a not-yet-fetched tab's
@@ -842,6 +857,25 @@
     .cv-preview-editor .cm-header { color: var(--accent); }
     .md-editor-wrap .cm-link, .md-editor-wrap .cm-url,
     .cv-preview-editor .cm-link, .cv-preview-editor .cm-url { color: var(--accent); }
+    /* EasyMDE's default theme colors HTML tags (e.g. the <aside> markup CV
+       markdown uses) a bright, off-palette green (#63a35c) — tone that down
+       to the app's own muted green instead of overriding it away entirely. */
+    .md-editor-wrap .cm-tag,
+    .cv-preview-editor .cm-tag { color: var(--success-strong); }
+    .md-editor-wrap .cm-attribute,
+    .cv-preview-editor .cm-attribute { color: var(--text-secondary); }
+    /* EasyMDE's default heading sizes are large and fluid (viewport-scaled) —
+       far bigger than this editor's own body text. Scale headings down to a
+       fixed, modest hierarchy instead: h1 60% bigger than body text, h2
+       partway between, h3 and smaller at body text size. */
+    .md-editor-wrap .cm-header-1,
+    .cv-preview-editor .cm-header-1 { font-size: 1.6rem; }
+    .md-editor-wrap .cm-header-2,
+    .cv-preview-editor .cm-header-2 { font-size: 1.35rem; }
+    .md-editor-wrap .cm-header-3, .md-editor-wrap .cm-header-4,
+    .md-editor-wrap .cm-header-5, .md-editor-wrap .cm-header-6,
+    .cv-preview-editor .cm-header-3, .cv-preview-editor .cm-header-4,
+    .cv-preview-editor .cm-header-5, .cv-preview-editor .cm-header-6 { font-size: 1rem; }
     .md-editor-wrap .editor-preview, .md-editor-wrap .editor-preview-side,
     .cv-preview-editor .editor-preview, .cv-preview-editor .editor-preview-side {
       background: var(--ground); color: var(--text-primary);
@@ -1566,7 +1600,7 @@ document.body.addEventListener('input', function (e) {
     document.querySelectorAll('.cv-preview-stage').forEach(syncNotice);
   };
 
-  var host = document.querySelector('.cv-workbench') || document.getElementById('cv-base-preview');
+  var host = document.querySelector('main');
   if (host) new MutationObserver(initStages).observe(host, { childList: true, subtree: true });
   initStages();
 })();

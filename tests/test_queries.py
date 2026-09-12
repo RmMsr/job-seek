@@ -336,6 +336,18 @@ def test_insert_and_get_job(conn):
     assert job["status"] == "new"
 
 
+def test_get_job_with_source_name(conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T", company="C", raw_text="r")
+    job = q.get_job_with_source_name(conn, jid)
+    assert job["title"] == "T"
+    assert job["source_name"] == "finn.no"
+
+
+def test_get_job_with_source_name_missing_job_returns_none(conn):
+    assert q.get_job_with_source_name(conn, 999) is None
+
+
 def test_update_job_pipeline(conn):
     source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")

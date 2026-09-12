@@ -152,11 +152,13 @@ def test_generate_task_returns_oob_preview_chunk(conn, cfg):
                               params={"job_id": jid, "mode": "generate", "render": "preview_pane"})
         execute_task(conn, MagicMock(), "m", cfg, task)
     res = q.get_task(conn, task["id"])["result"]
-    assert any('id="cv-preview-pane"' in c for c in res["html_chunks"])
-    assert any('id="cv-plan-pane"' in c for c in res["html_chunks"])
+    # Tailor CV and Preview CV are separate pages now — a generate no longer
+    # needs to also refresh the (off-page) plan pane
+    assert len(res["html_chunks"]) == 1
+    preview = res["html_chunks"][0]
+    assert 'id="cv-preview-pane"' in preview
     # the finishing task is still 'running' in the DB, but its own result render
     # must not paint the preview as still-updating
-    preview = next(c for c in res["html_chunks"] if 'id="cv-preview-pane"' in c)
     assert 'class="cv-preview-progress" aria-live="polite" hidden' in preview
     assert 'class="cv-findings-stale" aria-live="polite" hidden' in preview
     # the stage badges must not stick on "running" once the task's own render lands

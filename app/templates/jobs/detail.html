@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ job.title or "Job" }} — Job Seek{% endblock %}
 {% block content %}
-<p><a href="/jobs">&larr; Back to list</a></p>
+{% include "jobs/_job_header.html" %}
 {% include "jobs/_feedback.html" %}
 {% endblock %}

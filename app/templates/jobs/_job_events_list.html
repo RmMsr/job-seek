@@ -1,0 +1,3 @@
+{% for e in job_events %}
+<li><time datetime="{{ e.created_at }}" title="{{ e.created_at }}">{{ e.created_at[:10] }}</time> {{ e.message }}</li>
+{% endfor %}

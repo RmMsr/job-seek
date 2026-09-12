@@ -1,0 +1,16 @@
+{% import "jobs/_macros.html" as macros %}
+{% set p = request.url.path %}
+<header class="job-header">
+  <h1 class="job-header-title">{{ job.title or "(no title)" }}</h1>
+  {% if job.company %}<p class="job-header-org">{{ job.company }}</p>{% endif %}
+  {{ macros.meta_tags(job) }}
+  <nav class="job-subnav">
+    <span class="job-subnav-tabs">
+      <a href="/jobs/{{ job.id }}"{% if p == "/jobs/%d"|format(job.id) %} class="active"{% endif %}>Offering</a>
+      <a href="/jobs/{{ job.id }}/cv"{% if p == "/jobs/%d/cv"|format(job.id) %} class="active"{% endif %}>Tailor CV</a>
+      <a href="/jobs/{{ job.id }}/cv/preview"{% if p == "/jobs/%d/cv/preview"|format(job.id) %} class="active"{% endif %}>Preview CV</a>
+      <a href="/jobs/{{ job.id }}/history"{% if p == "/jobs/%d/history"|format(job.id) %} class="active"{% endif %}>History</a>
+    </span>
+    <a href="/jobs" class="job-subnav-back">&larr; Back to list</a>
+  </nav>
+</header>
