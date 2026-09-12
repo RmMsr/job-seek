@@ -16,6 +16,16 @@ def _point_config_check_at(monkeypatch, path):
     monkeypatch.setattr(check_config_status, "__defaults__", (str(path),))
 
 
+def _use_valid_config(monkeypatch, tmp_path):
+    # Points check_config_status() at a minimal config that reads as "ok"
+    # (has an llm endpoint, no provider so no model is required) — so these
+    # tests exercise the checklist/dashboard body regardless of whether a
+    # real config.toml happens to exist in the process's cwd.
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[llm]\nendpoint = "http://localhost:8080/v1"\n')
+    _point_config_check_at(monkeypatch, config_path)
+
+
 def test_home_missing_config_shows_banner(client, monkeypatch, tmp_path):
     _point_config_check_at(monkeypatch, tmp_path / "config.toml")
     resp = client.get("/")
@@ -37,8 +47,9 @@ def test_home_config_without_inference_provider_shows_banner(client, monkeypatch
     assert "How it works" in resp.text
 
 
-def test_home_valid_config_nothing_set_up_shows_checklist(client, conn):
+def test_home_valid_config_nothing_set_up_shows_checklist(client, conn, monkeypatch, tmp_path):
     _use_test_db(conn)
+    _use_valid_config(monkeypatch, tmp_path)
     resp = client.get("/")
     assert resp.status_code == 200
     assert "Fill in your profile" in resp.text
@@ -49,8 +60,9 @@ def test_home_valid_config_nothing_set_up_shows_checklist(client, conn):
     assert "awaiting review" not in resp.text
 
 
-def test_home_partial_setup_shows_mixed_checklist(client, conn):
+def test_home_partial_setup_shows_mixed_checklist(client, conn, monkeypatch, tmp_path):
     _use_test_db(conn)
+    _use_valid_config(monkeypatch, tmp_path)
     q.upsert_profile(conn, "Python engineer")
     q.insert_scenario(conn, "Remote ML", "")
     resp = client.get("/")
@@ -60,8 +72,9 @@ def test_home_partial_setup_shows_mixed_checklist(client, conn):
     assert '<a href="/sources">○ Add a source</a>' in resp.text
 
 
-def test_home_full_setup_shows_actionable_block(client, conn):
+def test_home_full_setup_shows_actionable_block(client, conn, monkeypatch, tmp_path):
     _use_test_db(conn)
+    _use_valid_config(monkeypatch, tmp_path)
     q.upsert_profile(conn, "Python engineer")
     scenario_id = q.insert_scenario(conn, "Remote ML", "")
     source_id = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
