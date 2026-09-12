@@ -68,7 +68,11 @@ def test_render_diff_html_is_continuous_and_styled():
     assert "<!doctype html" in html.lower()
     assert ".cvd-del" in html          # _DIFF_CSS injected
     assert "cvd-digest" in html
-    assert 'class="page"' not in html  # --html is continuous, not paginated
+    # --html wraps content in a single .page div (for page-background tinting)
+    # but stays continuous — no pagination controls/multiple physical pages.
+    assert html.count('class="page"') == 1
+    assert "paged_page" not in html
+    assert "dw-preview-controls" not in html
 
 
 @needs_docwrite

@@ -6,6 +6,7 @@ test:
   stage: test
   image: ghcr.io/astral-sh/uv:python3.12-trixie-slim
   before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
     - cp config-template.toml config.toml
   script:
     - uv sync --frozen
