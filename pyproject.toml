@@ -37,6 +37,9 @@ doc-write = [
     "doc-write",
 ]
 
+[tool.uv]
+default-groups = ["dev", "doc-write"]
+
 [tool.uv.sources]
 doc-write = { git = "https://gitlab.com/RmMsr/doc-write-mcp.git", branch = "main" }
 
