@@ -6,9 +6,16 @@ test:
   stage: test
   image: ghcr.io/astral-sh/uv:python3.12-trixie-slim
   before_script:
-    # git is needed to fetch the git-sourced doc-write dependency (same
-    # reason the Containerfile's builder stage installs it before its sync).
-    - apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+    # git fetches the git-sourced doc-write dependency; the rest is the
+    # WeasyPrint runtime subset of the Containerfile's system-libraries
+    # install (doc-write-cli shells out to WeasyPrint for CV rendering).
+    # Chromium/Playwright libs are skipped — the test job never launches
+    # a browser.
+    - >
+      apt-get update && apt-get install -y --no-install-recommends
+      git libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi8
+      libjpeg62-turbo libgdk-pixbuf-2.0-0
+      && rm -rf /var/lib/apt/lists/*
     - cp config-template.toml config.toml
   script:
     - uv sync --frozen
