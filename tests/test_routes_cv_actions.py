@@ -276,6 +276,7 @@ def test_accept_plan_proposals_unchecked_row_is_recorded_as_handled(client, conn
     assert row["handled_suggestions"][0]["line"] == "new suggestion"
     assert "Handled suggestions (1)" in r.text
     assert "new suggestion" in r.text
+    assert "<details" not in r.text  # always visible, not folded
 
 
 def test_accept_plan_proposals_stale_target_is_safely_skipped(client, conn):

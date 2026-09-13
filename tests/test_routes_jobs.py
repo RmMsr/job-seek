@@ -2884,6 +2884,14 @@ def test_job_list_row_expand_has_edit_icon_linking_to_job_view(client, conn):
     assert r.text.index('class="job-link-icon"') < r.text.index('class="job-link-icon job-edit-icon"')
 
 
+def test_job_list_row_has_edit_icon_linking_to_job_view(client, conn):
+    _seed(conn)
+    r = client.get("/jobs")
+    assert '<a href="/jobs/1" class="job-link-icon job-edit-icon"' in r.text
+    # sits left of (i.e. after, in source order) the permalink icon
+    assert r.text.index('class="job-link-icon"') < r.text.index('class="job-link-icon job-edit-icon"')
+
+
 def test_main_nav_shows_cv_link_after_profile(client):
     r = client.get("/jobs")
     text = r.text

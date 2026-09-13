@@ -81,13 +81,32 @@ rm -f job-seek.db job-seek.db-wal job-seek.db-shm   # drop stale WAL sidecars to
 sqlite3 "$MAIN_ROOT/job-seek.db" ".backup 'job-seek.db'"
 ```
 
-### 4. Run the server
+### 4. Sync dependencies, then run the server
+
+A worktree is a fresh checkout — its `.venv` can be missing or stale relative
+to `pyproject.toml`/`uv.lock` (e.g. after a dependency bump like doc-write).
+Sync before starting the server so the run actually reflects the worktree's
+lockfile, not whatever happens to already be on `PATH`.
+
+```bash
+# uv sync writes into uv's cache and the worktree's .venv — same read-only-cache
+# issue as `uv run`, so this also needs the Bash sandbox disabled.
+uv sync
+```
 
 ```bash
 # --reload picks up route and template changes without a manual restart.
 # Prefer `python -m` over `uv run` — `uv run` fails under the Bash sandbox
 # (read-only cache); the dev server needs run_in_background + sandbox disabled.
-python -m uvicorn app.main:app --reload --port 8931 > /tmp/job-seek-dev.log 2>&1 &
+# PATH must include .venv/bin, not just invoke .venv/bin/python directly:
+# app/cv/render.py finds doc-write-cli (a console-script entry point uv sync
+# installs into .venv/bin/) via `shutil.which`/subprocess PATH lookup, which
+# only sees .venv/bin if it's actually on PATH — running .venv/bin/python
+# alone does not add its own sibling bin/ to PATH the way venv activation
+# does, so CV preview/tailoring silently 503s ("doc-write-cli is not
+# installed") without this.
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m uvicorn app.main:app --reload --port 8931 \
+  > /tmp/job-seek-dev.log 2>&1 &
 disown
 sleep 2
 curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8931/jobs

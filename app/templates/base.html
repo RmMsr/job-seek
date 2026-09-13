@@ -237,6 +237,7 @@
     .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
     /* The edit icon sits left of the permalink icon — one slot further right. */
     .job-edit-icon { right: 2.3rem; }
+    .job-row-content:has(.job-select-wrap) .job-edit-icon,
     .job-row-expanded:has(.job-select-wrap) .job-edit-icon { right: 4.1rem; }
     /* Collapsed card: line the permalink + checkbox up with the title's first line,
        not the card's top edge. (Expanded card keeps them at the top corner.) */
@@ -373,6 +374,14 @@
       border-radius: 4px; pointer-events: none; transition: opacity 0.4s ease; }
     .cv-save-hint[hidden] { display: none; }
     .cv-save-hint.is-fading { opacity: 0; }
+    /* Expand/collapse toggle injected after plain textareas — see the
+       textarea-expand script below. Not for MDE- or autosize-backed
+       textareas, which already keep their content visible on their own. */
+    .textarea-expand-btn { display: inline-flex; align-items: center; gap: 0.3em;
+      margin: 0.3rem 0 0; padding: 0.15rem 0.5rem; font-size: 0.78rem;
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text-muted); cursor: pointer; align-self: flex-start; }
+    .textarea-expand-btn:hover { color: var(--accent); border-color: var(--accent); }
     .job-row-expanded.htmx-swapping {
       overflow: hidden;
       animation: job-fold 0.35s ease forwards;
@@ -654,13 +663,22 @@
     .cv-preview-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
       margin-bottom: 0.75rem; }
     .cv-preview-decision { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
-    /* Full content width. Height in rem so page zoom scales the preview with
-       the rest of the page; clamped to the viewport so it never needs
-       scrolling to reach the toolbar, and floored so it stays usable. */
+    /* .cv-preview-stage is just the visible *window* onto the preview, not
+       what determines the rendered content's scale — that's the doc_write
+       iframe's own job. This assumes doc_write's fit-to-frame calculation
+       has been fixed upstream to compute once rather than continuously
+       re-fitting on every resize/zoom (see docs/doc-write-zoom-bug.md,
+       filed upstream) — with that assumption, the content inside tracks zoom
+       on its own, and sizing *this* box by the viewport is fine again: it's
+       an ordinary "how much can I see without scrolling the page" layout
+       question, not something fighting zoom. Height is clamped to the
+       viewport so it never needs scrolling to reach the toolbar, and
+       floored so it stays usable; width fills the content column. */
     .cv-preview-stage { position: relative; width: 100%;
       height: 58rem; min-height: 28rem; max-height: 90vh; margin-top: 0.5rem; }
-    /* Fullscreen targets the whole stage, so the active iframe AND any overlay
-       scale together — the fullscreen view is identical to the windowed one. */
+    /* Fullscreen uses the whole screen — maximizing the viewing area is the
+       actual point of the fullscreen button, not preserving the windowed
+       size. */
     .cv-preview-stage:fullscreen { width: 100vw; height: 100vh; min-width: 0;
       aspect-ratio: auto; margin: 0; background: var(--surface); }
     .cv-preview-doc { position: absolute; inset: 0; width: 100%; height: 100%;
@@ -826,7 +844,16 @@
     /* .cv-preview-editor is a fixed-height absolutely-positioned tab panel
        (see .cv-preview-doc) — without this, EasyMDE's container just takes
        its own natural/minHeight-based height and spills past the panel's
-       bounds instead of filling and internally scrolling within it. */
+       bounds instead of filling and internally scrolling within it.
+       .EasyMDEContainer's flex:1 only takes effect on a flex *child*, but
+       its actual parent is .md-editor-wrap (plain display:block) — that
+       break in the chain left the editor sized to its content with nowhere
+       to scroll, silently clipped by .cv-preview-editor's overflow:hidden.
+       Make .md-editor-wrap a flex item/container too so the sizing (and the
+       scrolling it enables) actually reaches .EasyMDEContainer. */
+    .cv-preview-editor .md-editor-wrap {
+      display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    }
     .cv-preview-editor .EasyMDEContainer {
       display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
     }
@@ -1818,6 +1845,53 @@ document.body.addEventListener('click', function (e) {
         if (e.target.matches && e.target.matches('textarea.autosize')) autosize(e.target);
       });
       document.body.addEventListener('htmx:load', function(e){ all(e.target); });
+      // Google Fonts loads with display:swap — a box measured (via scrollHeight)
+      // before the webfont swaps in gets sized off fallback-font metrics, which
+      // wrap text differently and can undersize multi-line content. Re-measure
+      // everything once the real fonts are actually active.
+      if (window.document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function(){ all(document); });
+      }
+    })();
+  </script>
+  <script>
+    // Adds a click-to-expand/collapse toggle after every plain textarea (not
+    // MDE-backed, not already auto-growing, not hidden data carriers like
+    // .md-editor-source / .cv-md-source) so long pre-filled content — which
+    // autosize-on-input never sees — can still be made fully visible.
+    (function () {
+      function qualifies(ta) {
+        return !ta.hidden && !ta.classList.contains('autosize')
+          && !ta.closest('.md-editor-wrap') && !ta.dataset.expandBtnAdded;
+      }
+      function addButton(ta) {
+        ta.dataset.expandBtnAdded = '1';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'textarea-expand-btn';
+        btn.textContent = '⤡ Expand';
+        btn.addEventListener('click', function () {
+          if (ta.dataset.expanded === '1') {
+            ta.style.height = ta.dataset.origHeight || '';
+            ta.dataset.expanded = '0';
+            btn.textContent = '⤡ Expand';
+          } else {
+            ta.dataset.origHeight = ta.style.height || '';
+            ta.style.height = ta.scrollHeight + 'px';
+            ta.dataset.expanded = '1';
+            btn.textContent = '⤢ Collapse';
+          }
+        });
+        ta.insertAdjacentElement('afterend', btn);
+      }
+      function all(root) {
+        if (!root) return;
+        var list = root.matches && root.matches('textarea') ? [root] : [];
+        if (root.querySelectorAll) list = list.concat(Array.prototype.slice.call(root.querySelectorAll('textarea')));
+        list.forEach(function (ta) { if (qualifies(ta)) addButton(ta); });
+      }
+      document.addEventListener('DOMContentLoaded', function () { all(document); });
+      document.body.addEventListener('htmx:load', function (e) { all(e.target); });
     })();
   </script>
   <script>

@@ -20,6 +20,11 @@
     <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
       title="Copy link to this job" aria-label="Copy link to this job"
       onclick="event.stopPropagation()">&#128279;</a>
+    {% if not is_detail_page %}
+    <a href="/jobs/{{ job.id }}" class="job-link-icon job-edit-icon"
+      title="Open job" aria-label="Open job details"
+      onclick="event.stopPropagation()">&#128221;</a>
+    {% endif %}
     {% if job.stale_badge %}
       <p class="stale-note">
         {% if job.stale_badge.href %}

@@ -75,8 +75,8 @@
 {% endif %}
 
 {% if job_cv and job_cv.handled_suggestions %}
-<details style="margin-top:1rem;">
-  <summary class="muted" style="font-size:.85em; cursor:pointer;">Handled suggestions ({{ job_cv.handled_suggestions | length }}) — a judgement call was made; not proposed again</summary>
+<div style="margin-top:1rem;">
+  <p class="muted" style="font-size:.85em;">Handled suggestions ({{ job_cv.handled_suggestions | length }}) — a judgement call was made; not proposed again</p>
   <ul style="list-style:none; margin:.4rem 0 0; padding:0; font-size:.85em;">
     {% for h in job_cv.handled_suggestions %}
     <li style="display:flex; gap:.4rem; align-items:flex-start; margin-bottom:.3rem;">
@@ -95,5 +95,5 @@
     </li>
     {% endfor %}
   </ul>
-</details>
+</div>
 {% endif %}
