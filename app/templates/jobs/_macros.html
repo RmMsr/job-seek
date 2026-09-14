@@ -11,6 +11,7 @@
 
 {% macro status_pill(job) %}
 {% if job.status == "accepted" %}<span class="status-pill status-pill-accepted">Accepted</span>
+{% elif job.status == "pending" %}<span class="status-pill status-pill-pending">Pending</span>
 {% elif job.status == "rejected" %}<span class="status-pill status-pill-rejected">Rejected</span>
 {% elif job.status == "trash" %}<span class="status-pill status-pill-trash">Trash</span>
 {% elif job.content_type == "lead" %}<span class="status-pill status-pill-lead">Lead</span>

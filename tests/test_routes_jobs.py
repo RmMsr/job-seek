@@ -71,6 +71,16 @@ def test_job_list_filter_accepted(client, conn):
     assert "ML Eng" not in resp2.text
 
 
+def test_search_surfaces_pending_jobs_by_default(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://s/1", title="Rust Engineer", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", summary="s")
+    q.mark_job_evaluation_complete(conn, jid)
+    q.update_job_feedback(conn, jid, "pending", "applied")
+    resp = client.get("/jobs?q=rust")
+    assert "Rust Engineer" in resp.text
+
+
 def test_job_list_filter_bar_shows_counts(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
@@ -80,6 +90,13 @@ def test_job_list_filter_bar_shows_counts(client, conn):
     assert '<span class="tab-count" id="count-rejected">0</span>' in resp.text
     assert '<span class="tab-count" id="count-trash">0</span>' in resp.text
     assert '<span class="tab-count" id="count-lead">0</span>' in resp.text
+
+
+def test_job_list_filter_bar_shows_pending_count(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert '<span class="tab-count" id="count-pending">0</span>' in resp.text
 
 
 def test_job_list_nav_tabs_have_explanatory_tooltips(client, conn):
@@ -778,6 +795,14 @@ def test_job_feedback_without_redirect_field_has_no_redirect_header(client, conn
     assert "HX-Redirect" not in resp.headers
 
 
+def test_job_expand_organize_actions_include_mark_pending(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/expand")
+    assert resp.status_code == 200
+    assert 'name="status" value="pending"' in resp.text
+    assert ">Mark pending<" in resp.text
+
+
 def test_job_detail_feedback_form_includes_redirect_field(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}")
@@ -1036,6 +1061,14 @@ def test_job_bulk_feedback_note_is_optional(client, conn):
     )
     assert resp.status_code == 200
     assert q.get_job(conn, j1)["feedback_note"] is None
+
+
+def test_job_bulk_feedback_pending_does_not_enqueue_status_change_revisit(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    j1 = q.insert_job(conn, source_id=sid, url="http://example.com/1", title="J1", company="", raw_text="b")
+    j2 = q.insert_job(conn, source_id=sid, url="http://example.com/2", title="J2", company="", raw_text="b")
+    client.post("/jobs/bulk-feedback", data={"job_ids": [j1, j2], "status": "pending", "note": ""})
+    assert not [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
 
 
 def test_job_bulk_feedback_leaves_moved_job_as_stale_row(client, conn):
@@ -1314,6 +1347,14 @@ def test_job_list_bulk_bar_has_actions_and_no_scenario_select(client, conn):
     assert 'title="Not a usable posting (expired, spam, duplicate, wrong content)."' in resp.text
 
 
+def test_job_list_bulk_bar_has_mark_pending_button(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs")
+    assert resp.status_code == 200
+    assert 'form="bulk-form" name="status" value="pending"' in resp.text
+    assert ">Mark pending<" in resp.text
+
+
 def test_job_expand_shows_scenario_feedback_form_per_tab(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get(f"/jobs/{jid}/expand")
@@ -1453,6 +1494,15 @@ def test_job_list_shows_status_badge_for_accepted_rejected_trash(client, conn):
     assert '<span class="status-pill status-pill-trash">Trash</span>' in resp.text
 
 
+def test_job_list_shows_status_badge_for_pending(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    jid_pending = q.insert_job(conn, source_id=sid, url="http://finn.no/job/1", title="Pending Job", company="Acme", raw_text="r")
+    q.update_job_feedback(conn, jid_pending, "pending", "")
+
+    resp = client.get("/jobs?status=pending")
+    assert '<span class="status-pill status-pill-pending">Pending</span>' in resp.text
+
+
 def test_job_list_new_tab_shows_no_status_badge(client, conn):
     _seed(conn)
     resp = client.get("/jobs")
@@ -1486,6 +1536,7 @@ def test_job_feedback_updates_counts_oob(client, conn):
     assert '<span class="tab-count" id="count-new" hx-swap-oob="true">0</span>' in resp.text
     assert '<span class="tab-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
     assert '<span class="tab-count" id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tab-count" id="count-pending" hx-swap-oob="true">0</span>' in resp.text
 
 
 def test_job_detail_returns_200_with_job_content(client, conn):
@@ -1659,6 +1710,13 @@ def test_job_feedback_without_filter_query_defaults_to_new_tab_badge(client, con
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
     assert resp.status_code == 200
     assert "Moved to Accepted" in resp.text
+
+
+def test_job_feedback_pending_shows_moved_to_pending_badge(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/feedback", data={"status": "pending", "note": ""})
+    assert resp.status_code == 200
+    assert "Moved to Pending" in resp.text
 
 
 def test_job_feedback_with_redirect_still_bypasses_row_rendering(client, conn):
@@ -2595,7 +2653,7 @@ def test_tab_checkbox_link_toggles_one_status(client, conn):
     _seed(conn)
     html = client.get("/jobs?status=new").text
     # every tab renders its marker, even in single-status mode (no hover reveal)
-    assert html.count('class="tab-check"') == 6
+    assert html.count('class="tab-check"') == 7
     # an "add Accepted to the view" control pointing at status=new,accepted
     assert "status=new%2Caccepted" in html or "status=new,accepted" in html
 
@@ -2613,11 +2671,13 @@ def test_search_tab_bar_shows_seeded_scope(client, conn):
     sid = q.insert_source(conn, "s", "https://s", "generic_listing")
     _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer")
     html = client.get("/jobs?q=kappa").text
-    # the seeded buckets (new/lead/accepted/rejected) render active
-    assert html.count('class="tab-item active"') == 4
-    # a checkbox toggle to add Trash carries the whole seeded scope + the query
-    assert ("status=new%2Clead%2Caccepted%2Crejected%2Ctrash" in html
-            or "status=new,lead,accepted,rejected,trash" in html)
+    # the seeded buckets (new/lead/accepted/pending/rejected) render active --
+    # "pending" now has a tab_defs entry (this step) and was already in
+    # _SEARCH_SEED_TABS (Task 5), so it finally renders as an active tab-item.
+    assert html.count('class="tab-item active"') == 5
+    # a checkbox toggle to add Trash carries the whole seeded scope (pending included) + the query
+    assert ("status=new%2Clead%2Caccepted%2Cpending%2Crejected%2Ctrash" in html
+            or "status=new,lead,accepted,pending,rejected,trash" in html)
     assert "q=kappa" in html
 
 
@@ -2758,6 +2818,14 @@ def test_accept_enqueues_status_change_revisit(client, conn):
     tasks = [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
     assert len(tasks) == 1
     assert tasks[0]["params"] == {"job_ids": [jid], "trigger": "status_change"}
+
+
+def test_mark_pending_does_not_enqueue_status_change_revisit(client, conn):
+    sid = q.insert_source(conn, "board", "http://example.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/j", title="J",
+                       company="", raw_text="b")
+    client.post(f"/jobs/{jid}/feedback", data={"status": "pending", "note": ""})
+    assert not [t for t in q.get_active_tasks(conn) if t["kind"] == "jobs_revisit"]
 
 
 def test_slack_job_accept_does_not_enqueue_revisit(client, conn):

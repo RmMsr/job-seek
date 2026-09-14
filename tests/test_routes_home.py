@@ -98,6 +98,22 @@ def test_home_full_setup_shows_actionable_block(client, conn, monkeypatch, tmp_p
     assert "Fill in your profile" not in resp.text
 
 
+def test_home_checklist_review_job_done_via_pending_only(client, conn, monkeypatch, tmp_path):
+    _use_test_db(conn)
+    _use_valid_config(monkeypatch, tmp_path)
+    q.upsert_profile(conn, "Python engineer")
+    q.insert_scenario(conn, "Remote ML", "")
+    source_id = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+
+    job_id = q.insert_job(conn, source_id=source_id, url="http://finn.no/1", title="ML Eng", company="Acme", raw_text="r")
+    q.update_job_pipeline(conn, job_id, simplified_content="c", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, job_id, "pending", "applied, waiting to hear back")
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '<a href="/jobs">✓ Review your first job</a>' in resp.text
+
+
 def test_home_shows_no_tasks_section_when_nothing_pending_or_resolved(client, conn):
     _use_test_db(conn)
     resp = client.get("/")

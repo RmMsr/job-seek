@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Mapping
 from urllib.parse import urlencode
 
-VALID_TABS = ("new", "lead", "accepted", "rejected", "not_relevant", "trash")
+VALID_TABS = ("new", "lead", "accepted", "pending", "rejected", "not_relevant", "trash")
 VALID_ORDERS = ("change", "score", "age")
 
 

@@ -135,6 +135,16 @@ def test_statuses_comma_list_kept_in_order_and_deduped():
     assert f.status_tab == "accepted"
 
 
+def test_pending_is_a_valid_tab_recognized_by_from_params():
+    f = JobFilter.from_params({"status": "trash,pending,new"})
+    assert f.statuses == ("trash", "pending", "new")
+
+
+def test_with_status_toggled_adds_pending_after_accepted():
+    f = JobFilter.from_params({"status": "accepted"}).with_status_toggled("pending")
+    assert f.statuses == ("accepted", "pending")
+
+
 def test_statuses_all_junk_falls_back_to_new():
     assert JobFilter.from_params({"status": "bogus, ,"}).statuses == ("new",)
 

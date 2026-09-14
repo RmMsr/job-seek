@@ -889,6 +889,113 @@ def test_init_db_migrates_jobs_status_invalid_to_trash(conn):
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
 
 
+def test_jobs_status_check_allows_pending(conn):
+    init_db(conn)
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/1', 'Title', 'pending')"
+    )
+    conn.commit()
+    row = conn.execute("SELECT status FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["status"] == "pending"
+
+
+def test_init_db_migrates_jobs_add_pending_status(conn):
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('http', 'playwright', 'slack', 'finn_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT,
+            gate_override INTEGER NOT NULL DEFAULT 0,
+            evaluation_completed_at TEXT,
+            status_changed_at TEXT
+        );
+        CREATE VIRTUAL TABLE jobs_fts USING fts5(
+            title, company, headline, summary, simplified_content,
+            content='jobs', content_rowid='id',
+            tokenize='porter unicode61'
+        );
+        CREATE TRIGGER jobs_fts_ai AFTER INSERT ON jobs BEGIN
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+        CREATE TRIGGER jobs_fts_ad AFTER DELETE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+        END;
+        CREATE TRIGGER jobs_fts_au AFTER UPDATE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+        """
+    )
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'slack')")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status, summary) "
+        "VALUES (1, 'http://job/1', 'Kubernetes Engineer', 'accepted', 'runs Kubernetes clusters')"
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    # existing data preserved
+    row = conn.execute("SELECT title, status FROM jobs WHERE url = 'http://job/1'").fetchone()
+    assert row["title"] == "Kubernetes Engineer"
+    assert row["status"] == "accepted"
+
+    # widened CHECK now accepts 'pending'
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/2', 'New Title', 'pending')"
+    )
+    row2 = conn.execute("SELECT status FROM jobs WHERE url = 'http://job/2'").fetchone()
+    assert row2["status"] == "pending"
+
+    # still rejects genuinely invalid values
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO jobs (source_id, url, title, status) VALUES (1, 'http://job/3', 'Title', 'bogus')"
+        )
+
+    # FTS search still works after the rebuild (triggers recreated, content reindexed)
+    hits = conn.execute(
+        "SELECT rowid FROM jobs_fts WHERE jobs_fts MATCH ?", ('"Kubernetes"',)
+    ).fetchall()
+    assert {r["rowid"] for r in hits} == {1}
+
+    # Idempotent: running init_db again doesn't error or lose data.
+    init_db(conn)
+    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 2
+
+
 def test_sources_accepts_generic_listing_fetcher_type(conn):
     init_db(conn)
     conn.execute(

@@ -925,6 +925,7 @@ _TAB_PREDICATE: dict[str, str] = {
     "new": f"(jobs.status = 'new' AND jobs.content_type = 'job_posting' AND ({_GATE_PASSED_CLAUSE}))",
     "lead": "(jobs.status = 'new' AND jobs.content_type = 'lead')",
     "accepted": "(jobs.status = 'accepted')",
+    "pending": "(jobs.status = 'pending')",
     "rejected": "(jobs.status = 'rejected')",
     "not_relevant": f"(jobs.status = 'new' AND jobs.content_type = 'job_posting' AND ({_GATE_FAILED_CLAUSE}))",
     "trash": "(jobs.status = 'trash')",
@@ -1017,9 +1018,9 @@ def get_job_counts(
     org_none: bool = False,
 ) -> dict[str, int]:
     extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org, org_none)
-    counts = {"new": 0, "accepted": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
+    counts = {"new": 0, "accepted": 0, "pending": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
 
-    for key in ("accepted", "rejected", "trash"):
+    for key in ("accepted", "pending", "rejected", "trash"):
         counts[key] = conn.execute(
             f"SELECT COUNT(*) {_GATE_JOIN} WHERE jobs.status = ?{extra}",
             [key, *eparams],

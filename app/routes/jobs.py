@@ -46,7 +46,7 @@ def _enrich_jobs(conn: sqlite3.Connection, jobs: list[dict]) -> list[dict]:
     return jobs
 
 
-_SEARCH_SEED_TABS = ("new", "lead", "accepted", "rejected")
+_SEARCH_SEED_TABS = ("new", "lead", "accepted", "pending", "rejected")
 
 
 def _effective_tabs(f: JobFilter) -> list[str]:
@@ -134,6 +134,8 @@ def _stale_badge(
     anchor = f"#job-{job['id']}"
     if job["status"] == "accepted":
         return {"label": "Moved to Accepted", "href": f"/jobs?status=accepted{anchor}"}
+    if job["status"] == "pending":
+        return {"label": "Moved to Pending", "href": f"/jobs?status=pending{anchor}"}
     if job["status"] == "rejected":
         return {"label": "Moved to Rejected", "href": f"/jobs?status=rejected{anchor}"}
     if job["status"] == "trash":

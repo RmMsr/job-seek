@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-    status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash')),
+    status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash', 'pending')),
     feedback_note TEXT,
     feedback_handled_at TEXT,
     interest_score REAL,
@@ -1020,6 +1020,98 @@ def _migrate_cv_scope_options_drop_is_baseline(conn: sqlite3.Connection) -> None
     conn.commit()
 
 
+def _migrate_jobs_add_pending_status(conn: sqlite3.Connection) -> None:
+    # Widens jobs.status to allow 'pending' (jobs the user has applied to).
+    # Pure widen, not a rename, so no data transform is needed -- but SQLite
+    # can't alter a CHECK constraint in place, so this still needs the same
+    # drop/rebuild as _migrate_jobs_status_invalid_to_trash above.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "'pending'" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE jobs_new (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash', 'pending')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT,
+            gate_override INTEGER NOT NULL DEFAULT 0,
+            evaluation_completed_at TEXT,
+            status_changed_at TEXT
+        );
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO jobs_new (
+            id, source_id, url, title, company, raw_text, simplified_content, summary,
+            headline, published_at, content_type, created_at, fetched_at, status, feedback_note,
+            feedback_handled_at, interest_score, interest_reasoning, attainability_score,
+            attainability_reasoning, fit_score, profile_version_hash, gate_override,
+            evaluation_completed_at, status_changed_at
+        )
+        SELECT
+            id, source_id, url, title, company, raw_text, simplified_content, summary,
+            headline, published_at, content_type, created_at, fetched_at, status, feedback_note,
+            feedback_handled_at, interest_score, interest_reasoning, attainability_score,
+            attainability_reasoning, fit_score, profile_version_hash, gate_override,
+            evaluation_completed_at, status_changed_at
+        FROM jobs
+        """
+    )
+    conn.execute("DROP TABLE jobs")
+    conn.execute("ALTER TABLE jobs_new RENAME TO jobs")
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    # Rebuilding jobs dropped the jobs_fts triggers (they're defined on
+    # jobs) -- recreate them and reindex, per the note in _migrate_add_jobs_fts.
+    conn.executescript(
+        """
+        INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild');
+
+        CREATE TRIGGER jobs_fts_ai AFTER INSERT ON jobs BEGIN
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+
+        CREATE TRIGGER jobs_fts_ad AFTER DELETE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+        END;
+
+        CREATE TRIGGER jobs_fts_au AFTER UPDATE ON jobs BEGIN
+            INSERT INTO jobs_fts(jobs_fts, rowid, title, company, headline, summary, simplified_content)
+            VALUES ('delete', old.id, old.title, old.company, old.headline, old.summary, old.simplified_content);
+            INSERT INTO jobs_fts(rowid, title, company, headline, summary, simplified_content)
+            VALUES (new.id, new.title, new.company, new.headline, new.summary, new.simplified_content);
+        END;
+        """
+    )
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -1062,3 +1154,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_job_cv_add_edited_at(conn)
     _migrate_job_cv_add_guardrails_checked_at(conn)
     _migrate_cv_scope_options_drop_is_baseline(conn)
+    _migrate_jobs_add_pending_status(conn)

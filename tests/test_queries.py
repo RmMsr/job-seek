@@ -543,7 +543,15 @@ def test_get_job_counts(conn):
     q.update_job_pipeline(conn, j3, simplified_content="", content_type="lead")
     q.mark_job_evaluation_complete(conn, j3)
     counts = q.get_job_counts(conn)
-    assert counts == {"new": 0, "accepted": 1, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
+    assert counts == {"new": 0, "accepted": 1, "pending": 0, "rejected": 1, "trash": 0, "lead": 1, "not_relevant": 0}
+
+
+def test_get_job_counts_includes_pending(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    q.update_job_feedback(conn, jid, "pending", "applied")
+    counts = q.get_job_counts(conn)
+    assert counts["pending"] == 1
 
 
 def test_get_job_counts_splits_new_from_not_relevant(conn):
@@ -1864,11 +1872,12 @@ def test_get_revisitable_jobs_scope(conn):
     lead = _revisit_job(conn, gid, "http://example.com/lead", content_type="lead")
     accepted = _revisit_job(conn, gid, "http://example.com/acc", status="accepted")
 
-    # Excluded: gate-failed "Not relevant", error rows, rejected, trash, slack, unevaluated.
+    # Excluded: gate-failed "Not relevant", error rows, rejected, trash, pending, slack, unevaluated.
     _revisit_job(conn, gid, "http://example.com/notrel", evaluated=False)
     _revisit_job(conn, gid, "http://example.com/err", content_type="error")
     _revisit_job(conn, gid, "http://example.com/rej", status="rejected")
     _revisit_job(conn, gid, "http://example.com/trash", status="trash")
+    _revisit_job(conn, gid, "http://example.com/pending", status="pending")
     _revisit_job(conn, slk, "http://x.slack.com/c#1")
 
     ids = {j["id"] for j in q.get_revisitable_jobs(conn)}

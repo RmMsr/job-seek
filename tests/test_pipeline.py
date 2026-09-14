@@ -734,6 +734,25 @@ def test_run_reevaluate_job_skips_trash_job(conn, source):
     assert q.get_job(conn, jid)["status"] == "trash"
 
 
+def test_run_reevaluate_job_skips_pending_job(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, jid, "pending", "applied")
+    job = q.get_job(conn, jid)
+    scenarios = q.get_scenarios(conn)
+    profile = q.get_profile(conn)
+
+    with patch("app.pipeline.summarize") as mock_summarize:
+        messages, _ = _drain(run_reevaluate_job(conn, MagicMock(), "llama3.2", job, scenarios, profile))
+
+    mock_summarize.assert_not_called()
+    assert any("Skipped" in m for m in messages)
+    assert q.get_job(conn, jid)["status"] == "pending"
+
+
 def test_run_reevaluate_job_skips_non_scoreable_content_type(conn, source):
     jid = q.insert_job(
         conn, source_id=source["id"], url="http://example.com/job/1",

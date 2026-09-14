@@ -1,5 +1,6 @@
 <div class="actions" role="group" aria-label="Bulk decision">
   <button type="submit" form="bulk-form" name="status" value="accepted" class="btn btn-accept">Accept</button>
+  <button type="submit" form="bulk-form" name="status" value="pending" class="btn btn-pending">Mark pending</button>
   <button type="submit" form="bulk-form" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
   {% if status == "trash" %}
   <button type="button" class="btn btn-delete"

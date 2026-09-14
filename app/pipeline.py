@@ -402,7 +402,7 @@ def run_reevaluate_job(
     *,
     progress_prefix: str = "",
 ) -> Generator[str, None, None]:
-    if job["status"] in ("rejected", "trash") or job["content_type"] not in ("job_posting", "lead"):
+    if job["status"] in ("rejected", "trash", "pending") or job["content_type"] not in ("job_posting", "lead"):
         yield _progress(f"{progress_prefix}Skipped (not eligible for re-evaluation): {job['url']}")
         return
 
