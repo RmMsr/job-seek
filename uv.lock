@@ -855,7 +855,7 @@ source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
-    { name = "httpx2" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "markdown" },
     { name = "openai" },
@@ -881,7 +881,7 @@ doc-write = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx2", specifier = ">=2.12.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "markdown", specifier = ">=3.10.2" },
     { name = "openai", specifier = ">=1.30" },
