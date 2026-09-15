@@ -73,10 +73,11 @@ fi
 
 When `job-seek.db` already exists, **ask the user before replacing it** —
 they may be mid-test against that state, or another dev server may be serving
-from it. Only once they say yes:
+from it. Only once they say yes: stop that server (see Cleanup below — use
+`TaskStop` if you have its task id, otherwise find it by port and `kill` it
+directly), then:
 
 ```bash
-pkill -f "uvicorn app.main:app.*--port 8931"   # stop any server on this DB
 rm -f job-seek.db job-seek.db-wal job-seek.db-shm   # drop stale WAL sidecars too
 sqlite3 "$MAIN_ROOT/job-seek.db" ".backup 'job-seek.db'"
 ```
@@ -94,10 +95,21 @@ lockfile, not whatever happens to already be on `PATH`.
 uv sync
 ```
 
+**Start this as a background Bash task — do not use plain `&`/`disown`.** Each
+Bash tool call runs in its own PID namespace: a process backgrounded with
+`&`/`disown` is invisible to `ps`/`pkill` from any *later* call (even though
+it's still alive and bound to the port on the real host), and neither `pkill`
+nor `TaskStop` can find it again afterward, leaving a real orphan. Instead,
+call the Bash tool with **`run_in_background: true` and
+`dangerouslyDisableSandbox: true` set together on that same call** — plain
+`run_in_background` alone still gets network-isolated by the sandbox (`ss`
+shows nothing on the port, curl can't connect). Note the returned task id;
+you'll need it to stop the server later.
+
 ```bash
 # --reload picks up route and template changes without a manual restart.
 # Prefer `python -m` over `uv run` — `uv run` fails under the Bash sandbox
-# (read-only cache); the dev server needs run_in_background + sandbox disabled.
+# (read-only cache).
 # PATH must include .venv/bin, not just invoke .venv/bin/python directly:
 # app/cv/render.py finds doc-write-cli (a console-script entry point uv sync
 # installs into .venv/bin/) via `shutil.which`/subprocess PATH lookup, which
@@ -105,10 +117,16 @@ uv sync
 # alone does not add its own sibling bin/ to PATH the way venv activation
 # does, so CV preview/tailoring silently 503s ("doc-write-cli is not
 # installed") without this.
-PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m uvicorn app.main:app --reload --port 8931 \
-  > /tmp/job-seek-dev.log 2>&1 &
-disown
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m uvicorn app.main:app --reload --port 8931
+```
+
+Then, in a **separate** Bash call (sandbox-disabled), verify it actually bound
+the port — a curl 200 alone doesn't prove it was *your* server, since another
+worktree's stale process can hold the same port:
+
+```bash
 sleep 2
+ss -ltnp | grep 8931
 curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8931/jobs
 ```
 
@@ -117,9 +135,13 @@ to the user. If 8931 is taken, pick another port.
 
 ## Cleanup
 
-```bash
-pkill -f "uvicorn app.main:app.*--port 8931"
-```
+**Stop it with `TaskStop <task_id>`** (the id from when you started it),
+**not `pkill`** — `pkill` from a later Bash call can't see a process that a
+different call started, tracked task or not, so it silently does nothing.
+
+If the server was ever started the old way (plain `&`/`disown`, no task id)
+and is now a real orphan, `TaskStop` won't find it either: locate it with
+sandbox-disabled `ss -ltnp | grep <port>` and `kill <pid>` directly.
 
 No need to remove the DB/config copies or any `job-seek.db.bak.*` — they're
 gitignored and get discarded along with the rest of the worktree when the
