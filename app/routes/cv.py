@@ -161,9 +161,10 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
     return "stale" if _draft_stale(job_cv, settings) else "fresh"
 
 
-def _cv_page_ctx(conn: sqlite3.Connection, against: int | None = None) -> dict:
+def _cv_page_ctx(
+    conn: sqlite3.Connection, against: int | None = None, viewing_version_id: int | None = None,
+) -> dict:
     settings = q.get_cv_settings(conn)
-    accepted_version = q.get_accepted_base_version(conn)
     return {
         "settings": settings,
         "has_doc_write": doc_write_available(),
@@ -171,9 +172,10 @@ def _cv_page_ctx(conn: sqlite3.Connection, against: int | None = None) -> dict:
         "build_date": get_build_date(),
         "versions": q.get_versions(conn, "base", 1),
         "current_version_id": settings.get("current_version_id"),
-        "accepted_version": accepted_version,
-        "has_accepted_base": accepted_version is not None,
-        "diff_against_id": against if against is not None else q.resolve_base_version_id(conn),
+        "accepted_version": q.get_accepted_base_version(conn),
+        "diff_against_id": (
+            against if against is not None else q.resolve_base_diff_target(conn, viewing_version_id)
+        ),
         "version_base_url": "/cv",
     }
 
@@ -402,7 +404,7 @@ def cv_page(request: Request, version: int | None = None, against: int | None = 
            conn: sqlite3.Connection = Depends(get_db)):
     if against is not None and q.get_version(conn, "base", 1, against) is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    ctx = _cv_page_ctx(conn, against=against)
+    ctx = _cv_page_ctx(conn, against=against, viewing_version_id=version)
     if version is not None:
         v = q.get_version(conn, "base", 1, version)
         if v is None:
@@ -453,12 +455,13 @@ def cv_diff_base_html(request: Request, version: int | None = None, against: int
             raise HTTPException(status_code=404, detail="Version not found")
         against_content = against_v["content"]
     else:
-        against_content = q.get_accepted_base_cv(conn)
-        if against_content is None:
+        target_id = q.resolve_base_diff_target(conn, version)
+        if target_id is None:
             return templates.TemplateResponse(
                 request, "cv/_cv_diff_fallback.html",
-                {"predates": False, "body_html": "", "message": "Accept a version to see differences."},
+                {"predates": False, "body_html": "", "message": "Nothing to compare against yet."},
             )
+        against_content = q.get_version(conn, "base", 1, target_id)["content"]
     try:
         annotated = build_cv_diff(against_content, content).annotated_markdown
     except Exception:

@@ -154,6 +154,28 @@ def resolve_base_version_id(conn: sqlite3.Connection) -> int | None:
     return current[0] if current else None
 
 
+def resolve_base_diff_target(conn: sqlite3.Connection, from_version_id: int | None = None) -> int | None:
+    """Default diff-against target for the base CV's *own* Differences tab
+    (comparing an edit against something, not resolve_base_version_id()'s
+    "what does tailoring use" question). The accepted version if one exists;
+    otherwise the parent of `from_version_id` (the version currently shown —
+    the live current one, if not given), since diffing a version against
+    itself is a no-op. None when there's truly nothing to compare against
+    yet: a single, never-accepted version."""
+    accepted = get_accepted_base_version(conn)
+    if accepted is not None:
+        return accepted["id"]
+    if from_version_id is None:
+        current = conn.execute("SELECT current_version_id FROM cv_settings WHERE id = 1").fetchone()
+        from_version_id = current[0] if current else None
+    if from_version_id is None:
+        return None
+    row = conn.execute(
+        "SELECT parent_version_id FROM cv_versions WHERE id = ?", (from_version_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def get_accepted_base_version(conn: sqlite3.Connection) -> dict | None:
     """The accepted base-CV version row (whichever one it is, whether or not
     it's also current), or None if nothing has been accepted yet. Unlike

@@ -15,7 +15,7 @@
 
 {% if has_doc_write %}
 {% with active = 'preview', editable = false, version_id = viewing_version.id,
-        has_accepted_base = has_accepted_base, title_prefix = 'Version ' ~ viewing_version.hash[:6] ~ ' ' %}
+        title_prefix = 'Version ' ~ viewing_version.hash[:6] ~ ' ' %}
   {% include "cv/_base_preview_tabs.html" %}
 {% endwith %}
 {% else %}
@@ -44,7 +44,7 @@
 <span id="cv-editor-status" class="cv-editor-status" aria-live="polite"></span>
 
 {% if has_doc_write %}
-{% with active = 'preview', editable = true, has_accepted_base = has_accepted_base %}
+{% with active = 'preview', editable = true %}
   {% include "cv/_base_preview_tabs.html" %}
 {% endwith %}
 {% else %}

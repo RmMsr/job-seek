@@ -81,13 +81,37 @@ def test_cv_page_shows_preview_edit_diff_tabs(client, conn):
     assert "cv-preview-fs" in r.text  # fullscreen button
 
 
-def test_cv_page_diff_tab_disabled_until_something_is_accepted(client, conn):
+def test_cv_page_diff_tab_disabled_with_only_one_version(client, conn):
     from unittest.mock import patch
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get("/cv")
     tab = r.text[r.text.index('data-variant="diff"'):]
     assert "disabled" in tab[:200]
 
+
+def test_cv_page_diff_tab_activates_once_a_second_version_exists(client, conn):
+    # No explicit accept — merely editing past the 1h stacking window (so a
+    # genuine second version opens) is enough to have something to diff.
+    from unittest.mock import patch
+    q.get_cv_settings(conn)  # seeds version 1
+    first_id = q.get_cv_settings(conn)["current_version_id"]
+    conn.execute("UPDATE cv_versions SET updated_at = datetime('now', '-2 hours') WHERE id = ?", (first_id,))
+    conn.commit()
+    q.save_cv_settings(conn, base_cv="v2", base_instruction="", base_guardrails="",
+                       css="", default_scope=[])
+
+    with patch("app.routes.cv.doc_write_available", return_value=True):
+        r = client.get("/cv")
+    tab = r.text[r.text.index('data-variant="diff"'):r.text.index("</button>", r.text.index('data-variant="diff"'))]
+    assert "disabled" not in tab
+    assert tab.rstrip().endswith(">Differences to")
+    # Diffs against the previous version, not anything explicitly accepted.
+    assert f'data-src="/cv/diff.html?against={first_id}"' in r.text
+
+
+def test_cv_page_diff_tab_shows_accepted_badge_once_accepted(client, conn):
+    from unittest.mock import patch
+    q.get_cv_settings(conn)  # seeds version 1 so /cv/accept has a current_version_id to act on
     client.post("/cv/accept")
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get("/cv")
@@ -114,7 +138,10 @@ def test_cv_page_diff_picker_lists_all_versions_and_switches_target(client, conn
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get("/cv")
     menu = r.text[r.text.index('class="cv-version-menu"'):]
-    assert f"against={first_id}" in menu and f"against={current_id}" in menu
+    # current_id is excluded from the picker menu (self-diff is a no-op) —
+    # it remains selectable via an explicit ?against=, exercised below.
+    assert f"against={first_id}" in menu
+    assert f"against={current_id}" not in menu
 
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get(f"/cv?against={current_id}")
@@ -150,12 +177,13 @@ def test_cv_page_diff_picker_excludes_the_version_being_viewed(client, conn):
     assert f"version={first_id}&against={first_id}" not in menu
 
     # On the plain editable page (not viewing any specific historic
-    # version), nothing is excluded — the default target can legitimately
-    # equal current (e.g. once current itself has been accepted).
+    # version), the live current version is excluded too — diffing it
+    # against itself would be a no-op.
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get("/cv")
     menu = r.text[r.text.index('class="cv-version-menu"'):]
-    assert f"against={first_id}" in menu and f"against={second_id}" in menu
+    assert f"against={first_id}" in menu
+    assert f"against={second_id}" not in menu
 
 
 def test_cv_save_base_persists_base_cv_only(client, conn):
@@ -197,10 +225,25 @@ def test_cv_page_reports_missing_doc_write(client, conn):
     assert 'data-md-editor-autosave-url="/cv/save-base"' in r.text  # still autosaves
 
 
-def test_cv_diff_html_shows_placeholder_before_anything_is_accepted(client, conn):
+def test_cv_diff_html_shows_placeholder_with_only_one_version(client, conn):
     r = client.get("/cv/diff.html")
     assert r.status_code == 200
-    assert "Accept a version" in r.text
+    assert "Nothing to compare against yet" in r.text
+
+
+def test_cv_diff_html_diffs_current_against_previous_version_without_accepting(client, conn):
+    from unittest.mock import patch
+    q.get_cv_settings(conn)  # seeds version 1
+    first_id = q.get_cv_settings(conn)["current_version_id"]
+    conn.execute("UPDATE cv_versions SET updated_at = datetime('now', '-2 hours') WHERE id = ?", (first_id,))
+    conn.commit()
+    q.save_cv_settings(conn, base_cv="# Accepted content\n\n- new bullet\n", base_instruction="",
+                       base_guardrails="", css="", default_scope=[])
+    with patch("app.routes.cv.doc_write_available", return_value=True), \
+         patch("app.routes.cv.render_diff_html", side_effect=lambda md, css: f"<!DOCTYPE html>\n{md}"):
+        r = client.get("/cv/diff.html")
+    assert r.status_code == 200
+    assert "new bullet" in r.text
 
 
 def test_cv_diff_html_diffs_current_against_accepted(client, conn):
