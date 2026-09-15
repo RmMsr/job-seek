@@ -20,6 +20,10 @@ When a change is UI-facing, after implementation leave the dev server running an
 
 If you seed sample data into the throwaway DB so the user has something to look at, create it through the real code path (enqueue the real task, run the real fetch) — not hand-written rows straight into SQLite. A malformed fixture row reads as a real bug. If you must insert rows directly, tell the user exactly which ones are seeded.
 
+## Running tests
+
+Run tests with `uv run pytest`, not a bare `python -m pytest` / system interpreter — `uv run` resolves this project's pinned dependency set (matching CI), while the system interpreter's globally installed packages can silently diverge (e.g. missing `httpx2`, causing Starlette's `TestClient` to fall back to a different, broken transport) and mask real failures.
+
 ## Finishing a change
 
 Once tests are green (and manual testing passed, if applicable), squash-merge the worktree branch back into local `main`. This repo has `github` and `gitlab` remotes, but the integration path is still a **local** `git merge --squash` into `main` — never a PR, and **do not push** unless the user explicitly asks. Expect local `main` to have moved on since the worktree was created (parallel worktrees land commits); the squash merges onto whatever `main` is at now, so re-run the full test suite on `main` after the merge commit.
