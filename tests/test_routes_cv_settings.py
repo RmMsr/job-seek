@@ -561,12 +561,14 @@ def test_cv_page_read_only_version_shows_the_accepted_badge(client, conn):
 
     r = client.get(f"/cv?version={accepted_id}")
     assert r.status_code == 200
-    trigger = r.text[r.text.index('class="btn cv-version-trigger"'):r.text.index('</button>')]
+    trigger_pos = r.text.index('class="btn cv-version-trigger"')
+    trigger = r.text[trigger_pos:r.text.index('</button>', trigger_pos)]
     assert 'cv-version-badge-accepted">&#9733; Accepted' in trigger
 
     # ...and the version that is merely current, not accepted, does not.
     r = client.get(f"/cv?version={q.get_cv_settings(conn)['current_version_id']}")
-    trigger = r.text[r.text.index('class="btn cv-version-trigger"'):r.text.index('</button>')]
+    trigger_pos = r.text.index('class="btn cv-version-trigger"')
+    trigger = r.text[trigger_pos:r.text.index('</button>', trigger_pos)]
     assert 'cv-version-badge-accepted' not in trigger
 
     # ...and the version that is merely current, not accepted, does not.
@@ -600,7 +602,8 @@ def test_cv_page_version_picker_shows_hash_badges_and_parent(client, conn):
 
     # The trigger always shows the currently-visible version (here: current,
     # v2), badged as such — not just whatever happens to sort first.
-    trigger = r.text[r.text.index('class="btn cv-version-trigger"'):r.text.index('</button>')]
+    trigger_pos = r.text.index('class="btn cv-version-trigger"')
+    trigger = r.text[trigger_pos:r.text.index('</button>', trigger_pos)]
     assert second["hash"][:6] in trigger
     assert 'cv-version-badge-current">Current' in trigger
 
