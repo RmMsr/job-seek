@@ -9,91 +9,147 @@
   ("trash", "Trash", "count-trash", counts.trash, "Unusable postings (expired, spam, duplicate, wrong content) — kept temporarily."),
 ] %}
 <input type="hidden" id="jobs-status-marker" name="status" value="{{ filter.statuses | join(',') }}">
+{# Carries filter.solo across the search box's own keystrokes (it lives
+   outside #jobs-content and can't re-render its own hx-include target list
+   per swap) -- without this, typing again after an explicit tab/dropdown
+   pick would silently drop back to the search-seeded multi-tab combo. #}
+<input type="hidden" id="jobs-solo-marker" name="solo" value="{{ '1' if filter.solo else '' }}">
 <input type="hidden" name="status_filter" value="{{ filter.statuses | join(',') }}" form="bulk-form">
+<input type="hidden" name="solo_filter" value="{{ '1' if filter.solo else '' }}" form="bulk-form">
 <input type="hidden" name="scenario_filter" value="{{ filter.query_params().get('scenario', '') }}" form="bulk-form">
 <input type="hidden" name="source_id_filter" value="{{ filter.source_id or '' }}" form="bulk-form">
 <input type="hidden" name="org_filter" value="{% if filter.org_none %}none{% else %}{{ filter.org or '' }}{% endif %}" form="bulk-form">
 <input type="hidden" name="order_filter" value="{{ filter.order }}" form="bulk-form">
 <input type="hidden" name="q_filter" value="{{ filter.q }}" form="bulk-form">
+{% set primary_tabs = tab_defs[:4] %}   {# new, lead, accepted, pending #}
+{% set archive_tabs = tab_defs[4:] %}   {# rejected, not_relevant, trash #}
 {% set scope_tabs = active_tabs if active_tabs is defined else filter.statuses %}
-<div class="filter-row">
-  <div class="filter-selects">
-    <label>Scenario
-      <select name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-              hx-include="[name='source_id'],[name='org'],[name='order'],[name='q']">
-        <option value="">(All)</option>
-        <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
-        {% for s in scenarios %}
-          <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+{% set scope_filter = filter.with_statuses(scope_tabs) if filter.searching else filter %}
+{% set more_active = archive_tabs | selectattr(0, 'in', scope_tabs) | list | length > 0 %}
+{# Not filter.is_multi: while searching, scope_tabs is the search-seeded set
+   (e.g. new+lead+accepted+pending+rejected), which is what's actually shown
+   as active -- filter.statuses itself stays a single tab in that case. #}
+{% set scope_is_multi = scope_tabs | length > 1 %}
+{% set archive_total = archive_tabs | map(attribute=3) | sum %}
+{% set active_filter_count =
+     (1 if (filter.scenario_id is not none or filter.scenario_none) else 0)
+   + (1 if filter.source_id is not none else 0)
+   + (1 if (filter.org is not none or filter.org_none) else 0) %}
+
+<div class="tb-toolbar">
+  {# A plain <div>, not <nav>: base.html's bare `nav { }` selector styles the
+     site's own sticky header nav (position, margin, padding, border) -- an
+     actual <nav> here would silently inherit all of that underneath .tb-tabs,
+     since .tb-tabs's own rule never overrides those specific properties. #}
+  <div class="tb-tabs">
+    {% for tab, label, count_id, count, tip in primary_tabs %}
+    <a class="tb-tab{% if tab in scope_tabs %} active{% endif %}"
+       href="/jobs?{{ filter.for_status(tab).query_params() | urlencode }}"
+       hx-get="/jobs?{{ filter.for_status(tab).query_params() | urlencode }}"
+       hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+       title="{{ tip | safe }}">{{ label }}<span class="tb-count" id="{{ count_id }}">{{ count }}</span></a>
+    {% endfor %}
+    <details>
+      <summary class="tb-trigger{% if more_active %} active{% endif %}">More <span class="tb-badge" id="count-more-badge">{{ archive_total }}</span> <span class="tb-chev">▾</span></summary>
+      <div class="tb-panel tb-panel-more">
+        {% for tab, label, count_id, count, tip in archive_tabs %}
+        <a class="tb-more-link{% if tab in scope_tabs %} active{% endif %}"
+           href="/jobs?{{ filter.for_status(tab).query_params() | urlencode }}"
+           hx-get="/jobs?{{ filter.for_status(tab).query_params() | urlencode }}"
+           hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+           title="{{ tip | safe }}">{{ label }}<span class="tb-count" id="{{ count_id }}">{{ count }}</span></a>
         {% endfor %}
-      </select>
-    </label>
-    <label>Source
-      <select name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-              hx-include="[name='scenario'],[name='org'],[name='order'],[name='q']">
-        <option value="">(All)</option>
-        {% for s in sources %}
-          <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Organization
-      <select name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-              hx-include="[name='scenario'],[name='source_id'],[name='order'],[name='q']">
-        <option value="">(All)</option>
-        <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
-        {% for c in companies %}
-          <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    {% if filter.is_narrowed %}
-    {# Plain full-page navigation on purpose: the search <input> lives in
-       list.html outside #jobs-content, so an hx swap would leave its typed
-       text in place. A full load re-renders it empty. #}
-    <a class="filter-clear" href="/jobs?{{ filter.cleared().query_params() | urlencode }}">Clear all filters</a>
-    {% endif %}
+      </div>
+    </details>
   </div>
-  <div class="filter-tools">
-    {% if not filter.searching %}
-    <label>Sort
-      <select name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
-              hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-              hx-include="[name='scenario'],[name='source_id'],[name='org']">
-        <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
-        <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
-        <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
-      </select>
-    </label>
-    {% endif %}
+
+  <div class="tb-status-select-wrap">
+    <select class="tb-status-select" name="status"
+            hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
+            hx-vals='{"solo": "1"}'
+            hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='order'],[name='q']">
+      {% if scope_is_multi %}
+      <option value="" selected disabled>Multiple statuses</option>
+      {% endif %}
+      {% for tab, label, count_id, count, tip in tab_defs %}
+      <option value="{{ tab }}" {% if not scope_is_multi and scope_tabs[0] == tab %}selected{% endif %}>{{ label }} · {{ count }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="tb-utility">
+    <details>
+      <summary class="tb-trigger{% if scope_is_multi %} active{% endif %}">Combine <span class="tb-chev">▾</span></summary>
+      <div class="tb-panel">
+        <span class="tb-panel-label">Add statuses to this view</span>
+        {% for tab, label, count_id, count, tip in tab_defs %}
+        {% set toggle = scope_filter.with_status_toggled(tab).query_params() | urlencode %}
+        <label class="tb-check-row">
+          <input type="checkbox" {% if tab in scope_tabs %}checked{% endif %}
+                 hx-get="/jobs?{{ toggle }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">
+          {{ label }} <span class="tb-count-plain">{{ count }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+
+    <details>
+      <summary class="tb-trigger{% if active_filter_count %} active{% endif %}">Filters {% if active_filter_count %}<span class="tb-badge">{{ active_filter_count }}</span>{% endif %} <span class="tb-chev">▾</span></summary>
+      <div class="tb-panel">
+        <label class="tb-panel-label" for="tb-scenario">Scenario</label>
+        <select id="tb-scenario" name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+                hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+                hx-include="[name='source_id'],[name='org'],[name='order'],[name='q']">
+          <option value="">(All)</option>
+          <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
+          {% for s in scenarios %}
+          <option value="{{ s.id }}" {% if filter.scenario_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+        <label class="tb-panel-label" for="tb-source">Source</label>
+        <select id="tb-source" name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+                hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+                hx-include="[name='scenario'],[name='org'],[name='order'],[name='q']">
+          <option value="">(All)</option>
+          {% for s in sources %}
+          <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
+          {% endfor %}
+        </select>
+        <label class="tb-panel-label" for="tb-org">Organization</label>
+        <select id="tb-org" name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+                hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+                hx-include="[name='scenario'],[name='source_id'],[name='order'],[name='q']">
+          <option value="">(All)</option>
+          <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
+          {% for c in companies %}
+          <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
+          {% endfor %}
+        </select>
+        {% if not filter.searching %}
+        <label class="tb-panel-label" for="tb-order">Sort</label>
+        <select id="tb-order" name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+                hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+                hx-include="[name='scenario'],[name='source_id'],[name='org']">
+          <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
+          <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
+          <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
+        </select>
+        {% endif %}
+        {% if filter.is_narrowed %}
+        {# Plain full-page navigation on purpose: the search <input> lives in
+           list.html outside #jobs-content, so an hx swap would leave its typed
+           text in place. A full load re-renders it empty. #}
+        <a class="tb-clear-link" href="/jobs?{{ filter.cleared().query_params() | urlencode }}">Clear all filters</a>
+        {% endif %}
+      </div>
+    </details>
+
     {% if jobs %}
-    <label class="select-all">
+    <label class="tb-select-all">
       <input type="checkbox" class="select-all-checkbox" aria-label="Select all">
       Select all
     </label>
     {% endif %}
-  </div>
-</div>
-<div class="filter-bar">
-  {% set scope_filter = filter.with_statuses(scope_tabs) if filter.searching else filter %}
-  <div class="filter-links{% if filter.is_multi or filter.searching %} is-multi{% endif %}">
-    {% for tab, label, count_id, count, tip in tab_defs %}
-    {% set active = tab in scope_tabs %}
-    {% set toggle = scope_filter.with_status_toggled(tab).query_params() | urlencode %}
-    {% set solo = filter.for_status(tab).query_params() | urlencode %}
-    <span class="tab-item{% if active %} active{% endif %}">
-      <a class="tab-check" href="/jobs?{{ toggle }}"
-         hx-get="/jobs?{{ toggle }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
-         title="{{ 'Remove from view' if active else 'Add to view' }}"
-         aria-label="{{ 'Remove' if active else 'Add' }} {{ label }}">{{ '✓' if active else '+' }}</a>
-      <a class="tab-label" href="/jobs?{{ solo }}"
-         hx-get="/jobs?{{ solo }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
-         title="{{ tip | safe }}">{{ label }}<span class="tab-count" id="{{ count_id }}">{{ count }}</span></a>
-    </span>
-    {% endfor %}
   </div>
 </div>
 <div class="bulk-bar decision-panel">

@@ -18,6 +18,14 @@ class JobFilter:
     org_none: bool = False
     order: str = "change"
     q: str = ""
+    # Set by an explicit single-status pick (a tab/More-panel link, the mobile
+    # status <select>, or a Combine checkbox toggle) -- distinguishes "the
+    # user chose exactly this one status" from "statuses defaulted to a
+    # single tab because nothing else was specified". Search seeding
+    # (app/routes/jobs.py's _effective_tabs) widens an untouched single
+    # status to the multi-tab search scope, but must never override an
+    # explicit pick back to that combo.
+    solo: bool = False
 
     @classmethod
     def from_params(cls, params: Mapping[str, str]) -> "JobFilter":
@@ -51,7 +59,9 @@ class JobFilter:
 
         query = (get("q") or "").strip()
 
-        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order, query)
+        solo = (get("solo") or "").strip() == "1"
+
+        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order, query, solo)
 
     @property
     def is_narrowed(self) -> bool:
@@ -84,6 +94,8 @@ class JobFilter:
             out["order"] = self.order
         if self.q:
             out["q"] = self.q
+        if self.solo:
+            out["solo"] = "1"
         return out
 
     def query_suffix(self, *, detail: bool = False) -> str:
@@ -104,7 +116,7 @@ class JobFilter:
         return len(self.statuses) > 1
 
     def for_status(self, tab: str) -> "JobFilter":
-        return replace(self, statuses=(tab,))
+        return replace(self, statuses=(tab,), solo=True)
 
     def with_statuses(self, statuses) -> "JobFilter":
         picked = tuple(s for s in VALID_TABS if s in set(statuses)) or ("new",)
@@ -113,8 +125,10 @@ class JobFilter:
     def with_status_toggled(self, tab: str) -> "JobFilter":
         if tab in self.statuses:
             remaining = tuple(s for s in self.statuses if s != tab)
-            return replace(self, statuses=remaining or self.statuses)
-        return replace(self, statuses=tuple(s for s in VALID_TABS if s in self.statuses or s == tab))
+            return replace(self, statuses=remaining or self.statuses, solo=True)
+        return replace(
+            self, statuses=tuple(s for s in VALID_TABS if s in self.statuses or s == tab), solo=True
+        )
 
     def with_scenario_id(self, sid) -> "JobFilter":
         return replace(self, scenario_id=int(sid), scenario_none=False)

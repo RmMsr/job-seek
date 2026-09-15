@@ -28,7 +28,9 @@
          placeholder="Search jobs — title, organization, description…" aria-label="Search jobs"
          hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
          hx-trigger="keyup changed delay:300ms, search"
-         hx-include="#jobs-status-marker, [name='scenario'], [name='source_id'], [name='org']">
+         hx-include="#jobs-status-marker, #jobs-solo-marker, [name='scenario'], [name='source_id'], [name='org']">
+  <button type="button" class="jobs-search-clear" aria-label="Clear search"
+          onclick="var i=this.previousElementSibling; i.value=''; i.dispatchEvent(new Event('search')); i.focus();">×</button>
 </form>
 <div id="jobs-content">
   {% include "jobs/_content.html" %}

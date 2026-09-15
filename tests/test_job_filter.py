@@ -178,6 +178,26 @@ def test_is_narrowed_true_when_only_query_set():
     assert not JobFilter.from_params({"status": "new,accepted"}).is_narrowed
 
 
+def test_solo_defaults_false_and_round_trips_through_params():
+    assert JobFilter.from_params({}).solo is False
+    assert "solo" not in JobFilter.from_params({}).query_params()
+    assert JobFilter.from_params({"solo": "1"}).solo is True
+    assert JobFilter.from_params({"solo": "1"}).query_params()["solo"] == "1"
+
+
+def test_for_status_sets_solo():
+    f = JobFilter.from_params({"status": "new", "q": "rust"}).for_status("pending")
+    assert f.solo is True
+    assert f.query_params()["solo"] == "1"
+
+
+def test_with_status_toggled_sets_solo():
+    added = JobFilter.from_params({"status": "new"}).with_status_toggled("accepted")
+    assert added.solo is True
+    removed = JobFilter.from_params({"status": "new,accepted"}).with_status_toggled("accepted")
+    assert removed.solo is True
+
+
 def test_cleared_drops_query_and_filters_keeps_statuses_and_order():
     f = JobFilter.from_params(
         {"status": "new,accepted", "q": "rust", "scenario": "3", "source_id": "5",

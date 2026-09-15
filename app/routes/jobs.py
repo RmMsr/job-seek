@@ -50,7 +50,7 @@ _SEARCH_SEED_TABS = ("new", "lead", "accepted", "pending", "rejected")
 
 
 def _effective_tabs(f: JobFilter) -> list[str]:
-    if f.searching and not f.is_multi:
+    if f.searching and not f.is_multi and not f.solo:
         seed = set(f.statuses) | set(_SEARCH_SEED_TABS)
         return [t for t in VALID_TABS if t in seed]
     return list(f.statuses)
@@ -98,6 +98,7 @@ def _counts_for_filter(conn: sqlite3.Connection, f: JobFilter) -> dict[str, int]
         source_id=f.source_id,
         org=f.org,
         org_none=f.org_none,
+        q=f.q,
     )
 
 
@@ -210,6 +211,7 @@ def _filter_from_bulk_form(
     org_filter: str | None,
     order_filter: str | None = None,
     q_filter: str | None = None,
+    solo_filter: str | None = None,
 ) -> JobFilter:
     return JobFilter.from_params({
         "status": status_filter or "new",
@@ -218,6 +220,7 @@ def _filter_from_bulk_form(
         "org": org_filter or "",
         "order": order_filter or "",
         "q": q_filter or "",
+        "solo": solo_filter or "",
     })
 
 
@@ -670,6 +673,7 @@ def job_bulk_feedback(
     org_filter: str | None = Form(None),
     order_filter: str | None = Form(None),
     q_filter: str | None = Form(None),
+    solo_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -684,7 +688,7 @@ def job_bulk_feedback(
             q.enqueue_task(conn, kind="jobs_revisit",
                            params={"job_ids": revisitable, "trigger": "status_change"})
 
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter)
     jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     matched_ids = {j["id"] for j in jobs}
 
@@ -730,10 +734,11 @@ def job_bulk_delete(
     org_filter: str | None = Form(None),
     order_filter: str | None = Form(None),
     q_filter: str | None = Form(None),
+    solo_filter: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter)
+    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter)
     return templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
 
 

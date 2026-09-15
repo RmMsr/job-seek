@@ -1016,38 +1016,49 @@ def get_job_counts(
     source_id: int | None = None,
     org: str | None = None,
     org_none: bool = False,
+    q: str = "",
 ) -> dict[str, int]:
     extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org, org_none)
     counts = {"new": 0, "accepted": 0, "pending": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
 
+    # Same FTS join/predicate search_jobs() uses, so tab counts reflect the
+    # active search instead of the unfiltered total. An empty `q` leaves both
+    # empty, reproducing the pre-search behavior exactly.
+    match = _fts_match_query(q) if q else None
+    if q and match is None:
+        return counts  # no usable search tokens -> zero matches everywhere, same as search_jobs()
+    search_join = " JOIN jobs_fts ON jobs_fts.rowid = jobs.id" if match else ""
+    search_where = " AND jobs_fts MATCH ?" if match else ""
+    search_params = [match] if match else []
+
     for key in ("accepted", "pending", "rejected", "trash"):
         counts[key] = conn.execute(
-            f"SELECT COUNT(*) {_GATE_JOIN} WHERE jobs.status = ?{extra}",
-            [key, *eparams],
+            f"SELECT COUNT(*) {_GATE_JOIN}{search_join} WHERE jobs.status = ?{search_where}{extra}",
+            [key, *search_params, *eparams],
         ).fetchone()[0]
 
     counts["lead"] = conn.execute(
-        f"SELECT COUNT(*) {_GATE_JOIN} "
-        f"WHERE jobs.content_type = 'lead' AND jobs.status = 'new'{extra}",
-        eparams,
+        f"SELECT COUNT(*) {_GATE_JOIN}{search_join} "
+        f"WHERE jobs.content_type = 'lead' AND jobs.status = 'new'{search_where}{extra}",
+        [*search_params, *eparams],
     ).fetchone()[0]
 
     counts["not_relevant"] = conn.execute(
         f"""
-        SELECT COUNT(*) {_GATE_JOIN}
+        SELECT COUNT(*) {_GATE_JOIN}{search_join}
         WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
-          AND {_GATE_FAILED_CLAUSE}{extra}
+          AND {_GATE_FAILED_CLAUSE}{search_where}{extra}
         """,
-        eparams,
+        [*search_params, *eparams],
     ).fetchone()[0]
 
     counts["new"] = conn.execute(
         f"""
-        SELECT COUNT(*) {_GATE_JOIN}
+        SELECT COUNT(*) {_GATE_JOIN}{search_join}
         WHERE jobs.status = 'new' AND jobs.content_type = 'job_posting'
-          AND {_GATE_PASSED_CLAUSE}{extra}
+          AND {_GATE_PASSED_CLAUSE}{search_where}{extra}
         """,
-        eparams,
+        [*search_params, *eparams],
     ).fetchone()[0]
     return counts
 

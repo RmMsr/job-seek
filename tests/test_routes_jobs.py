@@ -85,18 +85,18 @@ def test_job_list_filter_bar_shows_counts(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert '<span class="tab-count" id="count-new">1</span>' in resp.text
-    assert '<span class="tab-count" id="count-accepted">0</span>' in resp.text
-    assert '<span class="tab-count" id="count-rejected">0</span>' in resp.text
-    assert '<span class="tab-count" id="count-trash">0</span>' in resp.text
-    assert '<span class="tab-count" id="count-lead">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-new">1</span>' in resp.text
+    assert '<span class="tb-count" id="count-accepted">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-rejected">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-trash">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-lead">0</span>' in resp.text
 
 
 def test_job_list_filter_bar_shows_pending_count(client, conn):
     _seed(conn)
     resp = client.get("/jobs")
     assert resp.status_code == 200
-    assert '<span class="tab-count" id="count-pending">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-pending">0</span>' in resp.text
 
 
 def test_job_list_nav_tabs_have_explanatory_tooltips(client, conn):
@@ -512,7 +512,7 @@ def test_job_delete_response_includes_updated_trash_count(client, conn):
     q.update_job_feedback(conn, jid, "trash", None)
     resp = client.delete(f"/jobs/{jid}")
     assert resp.status_code == 200
-    assert '<span class="tab-count" id="count-trash" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-trash" hx-swap-oob="true">0</span>' in resp.text
 
 
 def test_job_delete_rejects_non_trash_job(client, conn):
@@ -660,7 +660,7 @@ def test_job_reset_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_reprocess_job", side_effect=_fake_run_reprocess_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
@@ -673,7 +673,7 @@ def test_job_pass_as_new_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_pass_as_new", side_effect=_fake_run_pass_as_new):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_reset_task_execution_with_filter_forwards_it_into_rendered_row(conn):
@@ -859,7 +859,7 @@ def test_bulk_reset_task_execution_produces_chunk_per_job_plus_counts(conn):
     assert len(chunks) == 3  # 2 job rows + counts
     assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
     assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in chunks[2]
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
 def test_bulk_reset_task_execution_with_filter_shows_moved_marker_per_job(conn):
@@ -930,7 +930,7 @@ def test_bulk_reevaluate_task_execution_produces_chunk_per_job_plus_counts(conn)
     assert len(chunks) == 3  # 2 job rows + counts
     assert f'<article class="job-row job-row-expanded" id="job-{j1}" style="view-transition-name: job-row-{j1}">' in chunks[0]
     assert f'<article class="job-row job-row-expanded" id="job-{j2}" style="view-transition-name: job-row-{j2}">' in chunks[1]
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in chunks[2]
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">' in chunks[2]
 
 
 def test_bulk_reevaluate_task_execution_preserves_status(conn):
@@ -1036,7 +1036,7 @@ def test_job_reevaluate_task_execution_includes_counts_html_chunk(conn):
     with patch("app.routes.jobs.run_reevaluate_job", side_effect=_fake_run_reevaluate_job):
         execute_task(conn, MagicMock(), "model", MagicMock(), task)
     fetched = q.get_task(conn, task["id"])
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">' in fetched["result"]["html_chunks"][1]
 
 
 def test_job_bulk_feedback_updates_multiple_jobs(client, conn):
@@ -1457,7 +1457,7 @@ def test_job_list_leads_tab_excludes_accepted_and_rejected_leads(client, conn):
     resp = client.get("/jobs?status=lead")
     assert "Accepted Lead" not in resp.text
     assert "Rejected Lead" not in resp.text
-    assert '<span class="tab-count" id="count-lead">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-lead">0</span>' in resp.text
 
 
 def test_job_list_accepted_tab_includes_gate_failed_jobs(client, conn):
@@ -1523,8 +1523,10 @@ def test_job_list_shows_not_relevant_tab_and_drops_show_filtered(client, conn):
 
     resp = client.get("/jobs")
 
-    assert '<span class="tab-count" id="count-not_relevant">1</span>' in resp.text
-    assert 'href="/jobs?status=not_relevant"' in resp.text
+    assert '<span class="tb-count" id="count-not_relevant">1</span>' in resp.text
+    # for_status() sets solo=True (an explicit single-tab pick overrides the
+    # search-seeded combo), which now rides along in the querystring.
+    assert 'href="/jobs?status=not_relevant&amp;solo=1"' in resp.text
     assert "Show filtered" not in resp.text
     assert 'name="show_filtered_filter"' not in resp.text
 
@@ -1533,10 +1535,11 @@ def test_job_feedback_updates_counts_oob(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.post(f"/jobs/{jid}/feedback", data={"status": "accepted", "note": ""})
     assert resp.status_code == 200
-    assert '<span class="tab-count" id="count-new" hx-swap-oob="true">0</span>' in resp.text
-    assert '<span class="tab-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
-    assert '<span class="tab-count" id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
-    assert '<span class="tab-count" id="count-pending" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-new" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span class="tb-count" id="count-rejected" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tb-count" id="count-pending" hx-swap-oob="true">0</span>' in resp.text
+    assert '<span class="tb-badge" id="count-more-badge" hx-swap-oob="true">0</span>' in resp.text
 
 
 def test_job_detail_returns_200_with_job_content(client, conn):
@@ -1675,7 +1678,7 @@ def test_job_accept_from_new_tab_shows_stale_short_row(client, conn):
     assert "Moved to Accepted" in resp.text
     assert f'href="/jobs?status=accepted#job-{jid}"' in resp.text
     # Nav counts still update alongside the stale row.
-    assert '<span class="tab-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
+    assert '<span class="tb-count" id="count-accepted" hx-swap-oob="true">1</span>' in resp.text
 
 
 def test_job_reject_from_not_relevant_tab_shows_stale_short_row(client, conn):
@@ -1917,11 +1920,11 @@ def test_add_job_by_url_stream_ends_with_single_html_chunk(conn):
     # Only one HTML chunk should come back — the target-mode swap in base.html's
     # polling JS uses only the *last* html_chunks entry as the replacement innerHTML, so a
     # second trailing chunk (e.g. a separate counts_oob fragment) would silently clobber
-    # the real content instead of updating it. _content.html's filter-bar already carries
+    # the real content instead of updating it. _content.html's tb-toolbar already carries
     # fresh counts, so no second chunk is needed.
     chunks = fetched["result"]["html_chunks"]
     assert len(chunks) == 1
-    assert '<div class="filter-bar">' in chunks[0]
+    assert '<div class="tb-toolbar">' in chunks[0]
     assert 'id="count-new"' in chunks[0]
 
 
@@ -2154,7 +2157,7 @@ def test_add_listing_source_stream_ends_with_html_chunk(conn):
     with patch("app.routes.jobs.run_fetch", side_effect=_fake_run_fetch):
         fetched = _run_add_listing_source(conn, "https://careers.example.com/jobs", "careers.example.com", "generic_listing")
 
-    assert '<div class="filter-bar">' in fetched["result"]["html_chunks"][0]
+    assert '<div class="tb-toolbar">' in fetched["result"]["html_chunks"][0]
 
 
 def test_add_listing_source_shows_persistent_notice_with_link(conn):
@@ -2264,8 +2267,8 @@ def test_job_list_source_id_keeps_status_tabs_visible(client, conn):
     sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     resp = client.get(f"/jobs?source_id={sid}")
     assert resp.status_code == 200
-    assert 'New Jobs<span class="tab-count"' in resp.text
-    assert 'Accepted<span class="tab-count"' in resp.text
+    assert 'New Jobs<span class="tb-count"' in resp.text
+    assert 'Accepted<span class="tb-count"' in resp.text
     # the source select reflects the active narrowing
     assert f'<option value="{sid}" selected' in resp.text
 
@@ -2335,7 +2338,7 @@ def test_scenario_filter_composes_with_accepted_tab(client, conn):
     resp = client.get(f"/jobs?status=accepted&scenario={a}")
     assert "Matches Alpha" in resp.text
     assert "No Match" not in resp.text
-    assert '<span class="tab-count" id="count-accepted">1</span>' in resp.text
+    assert '<span class="tb-count" id="count-accepted">1</span>' in resp.text
 
 
 def test_scenario_none_filter(client, conn):
@@ -2361,7 +2364,7 @@ def test_source_filter_via_query_keeps_tabs(client, conn):
     resp = client.get(f"/jobs?source_id={sid}")
     assert "From S" in resp.text
     assert "From O" not in resp.text
-    assert 'New Jobs<span class="tab-count"' in resp.text and 'Accepted<span class="tab-count"' in resp.text
+    assert 'New Jobs<span class="tb-count"' in resp.text and 'Accepted<span class="tb-count"' in resp.text
 
 
 def test_org_filter_via_query(client, conn):
@@ -2416,8 +2419,8 @@ def test_filter_row_selects_render_with_selected_state(client, conn):
     _seed_posting(conn, sid=sid, title="Acme Role", company="Acme")
     resp = client.get("/jobs?org=Acme")
     assert '<option value="Acme" selected' in resp.text
-    assert '<select name="scenario"' in resp.text
-    assert '<select name="source_id"' in resp.text
+    assert '<select id="tb-scenario" name="scenario"' in resp.text
+    assert '<select id="tb-source" name="source_id"' in resp.text
     assert ">(All)</option>" in resp.text
 
 
@@ -2506,14 +2509,14 @@ def test_search_returns_matches_across_statuses(client, conn):
     html = client.get("/jobs?q=rust").text
     assert "Rust Engineer" in html
     assert "Rust Developer" in html
-    assert 'class="filter-links' in html                # status tabs stay visible during search
+    assert 'class="tb-tabs"' in html                     # status tabs stay visible during search
     assert 'name="order"' not in html                   # sort control hidden
 
 
 def test_search_blank_query_is_normal_tabbed_view(client, conn):
     _seed(conn)
     html = client.get("/jobs?q=").text
-    assert 'class="filter-links"' in html
+    assert 'class="tb-tabs"' in html
     assert 'name="order"' in html
 
 
@@ -2619,6 +2622,61 @@ def test_search_seeds_the_real_buckets(client, conn):
     assert "Rust Engineer Two" in with_trash
 
 
+def test_search_counts_reflect_matches_not_totals(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer")
+    _seed_searchable(conn, sid, "http://s/2", "Python Developer")
+
+    unfiltered = client.get("/jobs").text
+    assert '<span class="tb-count" id="count-new">2</span>' in unfiltered
+
+    searched = client.get("/jobs?q=rust").text
+    assert '<span class="tb-count" id="count-new">1</span>' in searched
+
+
+def test_search_with_no_matches_shows_zero_counts(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Rust Engineer")
+
+    html = client.get("/jobs?q=zzznomatch").text
+    assert '<span class="tb-count" id="count-new">0</span>' in html
+
+
+def test_explicit_tab_click_during_search_overrides_seed(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer", status="new")
+    _seed_searchable(conn, sid, "http://s/2", "Kappa Analyst", status="pending")
+
+    # A plain search (no explicit tab pick) still seeds the wide combo.
+    seeded = client.get("/jobs?q=kappa").text
+    assert "Kappa Engineer" in seeded and "Kappa Analyst" in seeded
+    assert seeded.count('class="tb-tab active"') == 4
+
+    # Clicking the Pending tab sends solo=1 (via for_status()) -- this must
+    # narrow to just Pending's matches, not fall back to the seeded combo.
+    narrowed = client.get("/jobs?q=kappa&status=pending&solo=1").text
+    assert "Kappa Analyst" in narrowed
+    assert "Kappa Engineer" not in narrowed
+    assert narrowed.count('class="tb-tab active"') == 1
+
+    # The hidden marker carries solo=1 forward so a further keystroke in the
+    # search box (which only re-includes this marker, not a fresh URL from
+    # for_status()) doesn't silently widen back out to the seeded combo.
+    assert '<input type="hidden" id="jobs-solo-marker" name="solo" value="1">' in narrowed
+
+
+def test_search_combine_and_select_reflect_seeded_scope_not_raw_filter(client, conn):
+    # An ordinary unscoped search leaves filter.statuses at its default
+    # ("new",) -- filter.is_multi is False -- even though the seeded scope
+    # spans 5 tabs. Combine's active state and the mobile select must key
+    # off the seeded scope, not the raw (misleadingly single) filter.
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer")
+    html = client.get("/jobs?q=kappa").text
+    assert 'class="tb-trigger active">Combine' in html
+    assert '<option value="" selected disabled>Multiple statuses</option>' in html
+
+
 def test_every_row_shows_a_status_pill_in_normal_view(client, conn):
     sid = q.insert_source(conn, "s", "https://s", "generic_listing")
     j = q.insert_job(conn, source_id=sid, url="http://s/1", title="Alpha Role", company="A", raw_text="r")
@@ -2652,18 +2710,19 @@ def test_no_after_title_badge(client, conn):
 def test_tab_checkbox_link_toggles_one_status(client, conn):
     _seed(conn)
     html = client.get("/jobs?status=new").text
-    # every tab renders its marker, even in single-status mode (no hover reveal)
-    assert html.count('class="tab-check"') == 7
-    # an "add Accepted to the view" control pointing at status=new,accepted
+    # the Combine panel always renders a toggle checkbox for all 7 statuses,
+    # even in single-status mode (multi-select is secondary, not hidden)
+    assert html.count('class="tb-check-row"') == 7
+    # an "add Accepted to the view" checkbox pointing at status=new,accepted
     assert "status=new%2Caccepted" in html or "status=new,accepted" in html
 
 
 def test_search_view_keeps_tab_bar(client, conn):
     _seed_searchable(conn, q.insert_source(conn, "s", "https://s", "generic_listing"), "http://s/1", "Delta Engineer")
     html = client.get("/jobs?q=delta").text
-    # tabs stay visible during search, and render with checkboxes (is-multi)
-    # so the seeded scope is visible and toggleable
-    assert 'class="filter-links is-multi"' in html
+    # tabs stay visible during search; the Combine panel (always rendered,
+    # not search-specific) keeps the seeded scope toggleable
+    assert 'class="tb-tabs"' in html
     assert 'name="order"' not in html                # sort still hidden while searching
 
 
@@ -2672,9 +2731,10 @@ def test_search_tab_bar_shows_seeded_scope(client, conn):
     _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer")
     html = client.get("/jobs?q=kappa").text
     # the seeded buckets (new/lead/accepted/pending/rejected) render active --
-    # "pending" now has a tab_defs entry (this step) and was already in
-    # _SEARCH_SEED_TABS (Task 5), so it finally renders as an active tab-item.
-    assert html.count('class="tab-item active"') == 5
+    # the first four are primary tabs, "rejected" is archived (shown active
+    # inside the More panel).
+    assert html.count('class="tb-tab active"') == 4
+    assert 'class="tb-more-link active"' in html
     # a checkbox toggle to add Trash carries the whole seeded scope (pending included) + the query
     assert ("status=new%2Clead%2Caccepted%2Cpending%2Crejected%2Ctrash" in html
             or "status=new,lead,accepted,pending,rejected,trash" in html)
