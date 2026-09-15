@@ -8,9 +8,23 @@ CREATE TABLE IF NOT EXISTS profile (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS cv_versions (
+    id INTEGER PRIMARY KEY,
+    hash TEXT NOT NULL UNIQUE,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('base','tailored')),
+    entity_id INTEGER NOT NULL,
+    parent_version_id INTEGER REFERENCES cv_versions(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('update','manual_edit')),
+    accepted_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cv_versions_entity ON cv_versions(entity_type, entity_id, id);
+
 CREATE TABLE IF NOT EXISTS cv_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    base_cv TEXT NOT NULL DEFAULT '',
+    current_version_id INTEGER REFERENCES cv_versions(id),
     base_instruction TEXT NOT NULL DEFAULT '',
     base_guardrails TEXT NOT NULL DEFAULT '',
     css TEXT NOT NULL DEFAULT '',
@@ -30,11 +44,11 @@ CREATE TABLE IF NOT EXISTS cv_scope_options (
 
 CREATE TABLE IF NOT EXISTS job_cv (
     job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    current_version_id INTEGER REFERENCES cv_versions(id),
     scope TEXT NOT NULL DEFAULT '[]',
     tuning_directives TEXT NOT NULL DEFAULT '',
     plan TEXT NOT NULL DEFAULT '[]',
     handled_suggestions TEXT NOT NULL DEFAULT '[]',
-    tailored_cv TEXT NOT NULL DEFAULT '',
     guardrail_findings TEXT NOT NULL DEFAULT '[]',
     change_report TEXT NOT NULL DEFAULT '{}',
     base_hash TEXT NOT NULL DEFAULT '',
@@ -46,7 +60,6 @@ CREATE TABLE IF NOT EXISTS job_cv (
     edited_at TEXT,
     guardrails_checked_at TEXT,
     plan_context_hash TEXT,
-    finalized_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1010,6 +1023,86 @@ def _migrate_job_cv_add_guardrails_checked_at(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_cv_content_to_versions(conn: sqlite3.Connection) -> None:
+    """base_cv / tailored_cv text and the finalized_at flag move out of
+    cv_settings / job_cv into cv_versions, each entity's live content carried
+    forward as its first version — not fabricated history. See the
+    2026-09-14 CV version-history spec."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='cv_settings'"
+    ).fetchone()
+    if row is None or "current_version_id" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        INSERT INTO cv_versions (hash, entity_type, entity_id, parent_version_id, content, action, updated_at)
+        SELECT lower(hex(randomblob(4))), 'base', 1, NULL, base_cv, 'manual_edit', updated_at
+        FROM cv_settings WHERE id = 1 AND base_cv != '';
+
+        INSERT INTO cv_versions (hash, entity_type, entity_id, parent_version_id, content, action, accepted_at, updated_at)
+        SELECT lower(hex(randomblob(4))), 'tailored', job_id, NULL, tailored_cv, 'manual_edit', finalized_at, updated_at
+        FROM job_cv WHERE tailored_cv != '';
+
+        CREATE TABLE cv_settings_new (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            current_version_id INTEGER REFERENCES cv_versions(id),
+            base_instruction TEXT NOT NULL DEFAULT '',
+            base_guardrails TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+            directives_template TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO cv_settings_new (id, current_version_id, base_instruction, base_guardrails,
+                                      css, default_scope, directives_template, updated_at)
+        SELECT id,
+               (SELECT id FROM cv_versions WHERE entity_type = 'base' AND entity_id = 1
+                ORDER BY id DESC LIMIT 1),
+               base_instruction, base_guardrails, css, default_scope, directives_template, updated_at
+        FROM cv_settings WHERE id = 1;
+        DROP TABLE cv_settings;
+        ALTER TABLE cv_settings_new RENAME TO cv_settings;
+
+        CREATE TABLE job_cv_new (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+            current_version_id INTEGER REFERENCES cv_versions(id),
+            scope TEXT NOT NULL DEFAULT '[]',
+            tuning_directives TEXT NOT NULL DEFAULT '',
+            plan TEXT NOT NULL DEFAULT '[]',
+            handled_suggestions TEXT NOT NULL DEFAULT '[]',
+            guardrail_findings TEXT NOT NULL DEFAULT '[]',
+            change_report TEXT NOT NULL DEFAULT '{}',
+            base_hash TEXT NOT NULL DEFAULT '',
+            base_cv_snapshot TEXT NOT NULL DEFAULT '',
+            plan_generated_at TEXT,
+            directives_edited_at TEXT,
+            generated_at TEXT,
+            scope_edited_at TEXT,
+            edited_at TEXT,
+            guardrails_checked_at TEXT,
+            plan_context_hash TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO job_cv_new (job_id, current_version_id, scope, tuning_directives, plan,
+                                 handled_suggestions, guardrail_findings, change_report, base_hash,
+                                 base_cv_snapshot, plan_generated_at, directives_edited_at, generated_at,
+                                 scope_edited_at, edited_at, guardrails_checked_at, plan_context_hash, updated_at)
+        SELECT job_id,
+               (SELECT id FROM cv_versions WHERE entity_type = 'tailored' AND entity_id = job_cv.job_id
+                ORDER BY id DESC LIMIT 1),
+               scope, tuning_directives, plan, handled_suggestions, guardrail_findings, change_report,
+               base_hash, base_cv_snapshot, plan_generated_at, directives_edited_at, generated_at,
+               scope_edited_at, edited_at, guardrails_checked_at, plan_context_hash, updated_at
+        FROM job_cv;
+        DROP TABLE job_cv;
+        ALTER TABLE job_cv_new RENAME TO job_cv;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def _migrate_cv_scope_options_drop_is_baseline(conn: sqlite3.Connection) -> None:
     # The auto baseline draft is gone — the first manual Update uses the default
     # scope, so is_baseline has no reader. Direct DROP COLUMN.
@@ -1155,3 +1248,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_job_cv_add_guardrails_checked_at(conn)
     _migrate_cv_scope_options_drop_is_baseline(conn)
     _migrate_jobs_add_pending_status(conn)
+    _migrate_cv_content_to_versions(conn)

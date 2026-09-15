@@ -63,15 +63,13 @@ def test_first_visit_directives_textarea_prefilled_with_template(client, conn):
     assert "## Role relevance" in body and "## Skills match" in body
 
 
-def test_tailor_cv_shows_locked_notice_when_finalized(client, conn):
+def test_tailor_cv_still_shows_plan_pane_after_accept(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Final")
-    q.finalize_job_cv(conn, jid)
+    q.accept_job_cv(conn, jid)
     page = client.get(f"/jobs/{jid}/cv").text
-    assert "read-only" in page
-    assert 'id="cv-plan-pane"' not in page
-    assert "Analyze and find improvements" not in page
-    assert 'action="/jobs/{}/cv/reopen"'.format(jid) in page
+    assert 'id="cv-plan-pane"' in page
+    assert "Analyze and find improvements" in page
 
 
 def test_tailor_cv_shows_header_with_active_subnav_link(client, conn):

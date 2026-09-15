@@ -1,13 +1,16 @@
 {# Explains the leading ---/---/ block (see app/cv/sanitize.py, styled inert
    in the editor by FRONTMATTER_OVERLAY in base.html) wherever CV markdown is
-   edited. #}
-<details class="cv-hint">
-  <summary>What's the <code>---</code> block for?</summary>
-  <p>Optional page header/footer text for the rendered CV — set via
-    <code>header:</code>/<code>footer:</code>, rendered on every page, not part
-    of the CV body. Must stay the very first lines of the document.</p>
-  <pre>---
+   shown — editable or read-only. #}
+<div class="cv-help">
+  <h3 class="cv-section-heading">Help</h3>
+  <details class="cv-hint">
+    <summary>What's the <code>---</code> block for?</summary>
+    <p>Optional page header/footer text for the rendered CV — set via
+      <code>header:</code>/<code>footer:</code>, rendered on every page, not part
+      of the CV body. Must stay the very first lines of the document.</p>
+    <pre>---
 header: Jane Doe — Résumé
 footer: jane@example.com &middot; linkedin.com/in/janedoe
 ---</pre>
-</details>
+  </details>
+</div>

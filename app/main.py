@@ -3,7 +3,7 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.routes import home, jobs, fetch, profile, scenarios, sources, setup, tasks, inbox, cv
+from app.routes import home, jobs, fetch, profile, scenarios, sources, setup, tasks, inbox, cv, cv_versions
 from app.task_engine import run_worker_forever
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -47,3 +47,4 @@ app.include_router(setup.router)
 app.include_router(tasks.router)
 app.include_router(inbox.router)
 app.include_router(cv.router)
+app.include_router(cv_versions.router)

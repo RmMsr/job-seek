@@ -116,7 +116,7 @@
         <a class="btn btn-primary btn-tailor-cv" href="/jobs/{{ job.id }}/cv"
            title="Generate a CV tailored to this job.">
           <span aria-hidden="true">&#128196;</span>
-          {% if job_cv and job_cv.finalized_at %}Tailored CV &#10003;{% elif job_cv and job_cv.tailored_cv %}Continue tailoring CV{% else %}Tailor CV{% endif %}
+          {% if job_cv and job_cv.accepted_at %}Tailored CV &#10003;{% elif job_cv and job_cv.tailored_cv %}Continue tailoring CV{% else %}Tailor CV{% endif %}
         </a>
       </div>
     </div>

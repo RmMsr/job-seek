@@ -124,6 +124,26 @@ def test_delete_source_leaves_other_sources_and_jobs_intact(conn):
     assert q.get_job(conn, j2) is not None
 
 
+def test_delete_source_cleans_up_cv_versions_so_a_recycled_job_id_starts_empty(conn):
+    # jobs.id has no AUTOINCREMENT, so deleting the only job on a source and
+    # inserting a new one commonly reuses the same rowid — a leftover
+    # cv_versions row for that id would leak into the new job's history.
+    s1 = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=s1, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_job_cv(conn, jid, tailored_cv="SECRET OLD CV")
+
+    q.delete_source(conn, s1)
+
+    orphans = conn.execute(
+        "SELECT COUNT(*) FROM cv_versions WHERE entity_type = 'tailored' AND entity_id = ?", (jid,)
+    ).fetchone()[0]
+    assert orphans == 0
+
+    s2 = q.insert_source(conn, "s2", "http://y", "generic_listing")
+    new_jid = q.insert_job(conn, source_id=s2, url="http://job/2", title="T2", company="C", raw_text="r")
+    assert q.get_job_cv(conn, new_jid) is None
+
+
 def test_delete_job_removes_job(conn):
     sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
@@ -159,6 +179,38 @@ def test_delete_jobs_removes_only_trash_status_jobs(conn):
 
     assert q.get_job(conn, trash_id) is None
     assert q.get_job(conn, new_id) is not None
+
+
+def test_delete_job_removes_its_cv_version_history(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 2")
+    assert len(q.get_versions(conn, "tailored", jid)) == 2
+
+    q.delete_job(conn, jid)
+
+    assert q.get_job(conn, jid) is None
+    assert q.get_versions(conn, "tailored", jid) == []
+    assert conn.execute("SELECT 1 FROM job_cv WHERE job_id = ?", (jid,)).fetchone() is None
+
+
+def test_delete_jobs_removes_cv_history_only_for_the_jobs_it_deletes(conn):
+    sid = q.insert_source(conn, "s1", "http://x", "generic_listing")
+    trash_id = q.insert_job(conn, source_id=sid, url="http://job/1", title="T1", company="C", raw_text="r")
+    keep_id = q.insert_job(conn, source_id=sid, url="http://job/2", title="T2", company="C", raw_text="r")
+    for jid in (trash_id, keep_id):
+        q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
+        q.upsert_job_cv(conn, jid, tailored_cv="draft 2")
+    q.update_job_feedback(conn, trash_id, "trash", None)
+
+    q.delete_jobs(conn, [trash_id, keep_id])   # keep_id isn't trash, so it stays
+
+    assert q.get_job(conn, trash_id) is None
+    assert q.get_versions(conn, "tailored", trash_id) == []
+    assert q.get_job(conn, keep_id) is not None
+    assert len(q.get_versions(conn, "tailored", keep_id)) == 2
+    assert q.get_job_cv(conn, keep_id)["tailored_cv"] == "draft 2"
 
 
 def test_delete_jobs_empty_list_is_noop(conn):
@@ -2165,13 +2217,11 @@ def test_set_job_cv_tailored_persists_and_stamps_edited_at(conn):
     assert row["edited_at"] is not None
 
 
-def test_finalize_and_unfinalize(conn):
+def test_accept_job_cv(conn):
     jid = _seed_job_for_cv(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="x")
-    q.finalize_job_cv(conn, jid)
-    assert q.get_job_cv(conn, jid)["finalized_at"] is not None
-    q.unfinalize_job_cv(conn, jid)
-    assert q.get_job_cv(conn, jid)["finalized_at"] is None
+    q.accept_job_cv(conn, jid)
+    assert q.get_job_cv(conn, jid)["accepted_at"] is not None
 
 
 def test_set_job_cv_scope_persists_and_stamps(conn):

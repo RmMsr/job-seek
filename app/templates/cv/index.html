@@ -1,30 +1,81 @@
 {% extends "base.html" %}
 {% block title %}CV — Job Seek{% endblock %}
 {% block content %}
-{% from "_markdown_editor.html" import markdown_editor %}
-<div id="cv-page">
 <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
   <h1 style="margin:0;">CV</h1>
   <a href="/cv/advanced">Advanced CV settings &rarr;</a>
 </div>
 <p style="color:var(--text-muted);">Your base CV — what every tailored, per-job version starts from.</p>
 
-{% if saved %}<div class="save-confirmation" aria-live="polite">Saved.</div>{% endif %}
+{% if viewing_version %}
+<p class="muted" style="margin:.25rem 0 .75rem;">
+  Viewing a previous version.
+  <a href="/cv">Go back to current version</a>
+</p>
 
-<form method="post" action="/cv"
-      hx-post="/cv" hx-target="#cv-page" hx-select="#cv-page" hx-swap="outerHTML">
-  <label>Base CV (markdown)<br>
-    {{ markdown_editor("base_cv", settings.base_cv, min_height="420px") }}
-  </label>
-  {% include "cv/_frontmatter_hint.html" %}
-  <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap;">
-    <button type="submit" class="btn btn-primary">Save &amp; preview</button>
-    {% if has_doc_write %}<a class="btn" href="/cv.pdf">Download PDF</a>{% endif %}
-  </div>
-</form>
+{% if has_doc_write %}
+{% with active = 'preview', editable = false, version_id = viewing_version.id,
+        has_accepted_base = has_accepted_base, title_prefix = 'Version ' ~ viewing_version.hash[:6] ~ ' ' %}
+  {% include "cv/_base_preview_tabs.html" %}
+{% endwith %}
+{% else %}
+<p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
+<div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ viewing_version.content | markdown }}</div>
+{% endif %}
 
-<div id="cv-base-preview" style="margin-top:1rem;">
-  {% if saved %}{% include "cv/_preview_result.html" %}{% endif %}
+{% include "cv/_frontmatter_hint.html" %}
+
+{% with viewing_id = viewing_version.id, reopen_url = "/cv/versions/" ~ viewing_version.id ~ "/revert" %}
+  {% include "cv/_version_list.html" %}
+{% endwith %}
+
+<div class="cv-preview-actions" style="margin-top:.75rem;">
+  {% if not viewing_version.accepted_at %}
+  <form method="post" action="/cv/versions/{{ viewing_version.id }}/accept" style="display:inline;">
+    <button type="submit" class="btn btn-accept">&#9733; Accept this version</button>
+  </form>
+  {% endif %}
+  {% with pdf_url = "/cv.pdf?version=" ~ viewing_version.id, markdown_source = viewing_version.content %}
+    {% include "cv/_cv_export.html" %}
+  {% endwith %}
 </div>
+
+{% else %}
+<span id="cv-editor-status" class="cv-editor-status" aria-live="polite"></span>
+
+{% if has_doc_write %}
+{% with active = 'preview', editable = true, has_accepted_base = has_accepted_base %}
+  {% include "cv/_base_preview_tabs.html" %}
+{% endwith %}
+{% else %}
+<p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
+{% from "_markdown_editor.html" import markdown_editor %}
+{{ markdown_editor("markdown", settings.base_cv, min_height="420px", autosave_url="/cv/save-base") }}
+{% endif %}
+
+{% include "cv/_frontmatter_hint.html" %}
+
+{% include "cv/_version_list.html" %}
+
+<div class="cv-preview-actions" style="margin-top:.75rem;">
+  {% if accepted_version and accepted_version.id == current_version_id %}
+  <p class="muted" style="margin:0;">&#9733; Accepted {{ accepted_version.accepted_at | age }} — this is what tailoring uses.</p>
+  {% else %}
+  {% if accepted_version %}
+  {# The accepted version isn't the one shown here — say so, since
+     settings.accepted_at (joined through current_version_id) would
+     otherwise silently read as "nothing accepted" and the button below
+     would replace that accepted version without warning. #}
+  <p class="muted" style="margin:0;">&#9733; Version <code>{{ accepted_version.hash[:6] }}</code> is accepted and used for tailoring —
+    <a href="/cv?version={{ accepted_version.id }}">view it</a>.</p>
+  {% endif %}
+  <form method="post" action="/cv/accept" style="display:inline;">
+    <button type="submit" class="btn btn-accept">&#9733; Accept {{ 'this version instead' if accepted_version else 'this version for tailoring' }}</button>
+  </form>
+  {% endif %}
+  {% with pdf_url = "/cv.pdf", markdown_source = settings.base_cv %}
+    {% include "cv/_cv_export.html" %}
+  {% endwith %}
 </div>
+{% endif %}
 {% endblock %}

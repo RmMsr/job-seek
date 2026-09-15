@@ -1,0 +1,4 @@
+{# Out-of-band fragments returned by POST /cv/save-base, applied by
+   htmx.ajax() after a debounced autosave. Rendered with _cv_page_ctx. #}
+{% with oob = true %}{% include "cv/_version_list.html" %}{% endwith %}
+<span id="cv-editor-status" class="cv-editor-status" hx-swap-oob="true" aria-live="polite">Saved</span>

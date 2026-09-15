@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
-        "profile", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_versions", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -28,7 +28,7 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)
     init_db(conn)  # should not raise
     assert _tables(conn) == {
-        "profile", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_versions", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -1350,15 +1350,136 @@ def test_status_changed_at_column_present_and_idempotent():
     c.close()
 
 
-def test_cv_settings_table_is_singleton():
+def test_cv_settings_and_job_cv_columns_after_version_migration():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     init_db(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_settings)")}
     assert cols == {
-        "id", "base_cv", "base_instruction", "base_guardrails",
+        "id", "current_version_id", "base_instruction", "base_guardrails",
         "css", "default_scope", "directives_template", "updated_at",
     }
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert cols == {
+        "job_id", "current_version_id", "scope", "tuning_directives", "plan",
+        "handled_suggestions", "guardrail_findings", "change_report", "base_hash",
+        "base_cv_snapshot", "plan_generated_at", "directives_edited_at", "generated_at",
+        "scope_edited_at", "edited_at", "guardrails_checked_at", "plan_context_hash",
+        "updated_at",
+    }
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_versions)")}
+    assert cols == {
+        "id", "hash", "entity_type", "entity_id", "parent_version_id",
+        "content", "action", "accepted_at", "updated_at",
+    }
+    conn.close()
+
+
+def test_init_db_migrates_existing_base_cv_and_tailored_cv_into_versions(conn):
+    # Simulate a pre-migration DB: old-shape cv_settings/job_cv with content
+    # columns, populated as a real install would have them.
+    # First set up the old-style tables before calling init_db
+    conn.executescript(
+        """
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetcher_type TEXT NOT NULL CHECK(fetcher_type IN ('slack', 'finn_listing', 'manual', 'generic_listing', 'eawork_listing')),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            d_cookie TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            url TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL DEFAULT '',
+            company TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            simplified_content TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            headline TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'accepted', 'rejected', 'trash', 'pending')),
+            feedback_note TEXT,
+            feedback_handled_at TEXT,
+            interest_score REAL,
+            interest_reasoning TEXT,
+            attainability_score REAL,
+            attainability_reasoning TEXT,
+            fit_score REAL,
+            profile_version_hash TEXT,
+            gate_override INTEGER NOT NULL DEFAULT 0,
+            evaluation_completed_at TEXT,
+            status_changed_at TEXT
+        );
+        CREATE TABLE cv_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            base_cv TEXT NOT NULL DEFAULT '',
+            base_instruction TEXT NOT NULL DEFAULT '',
+            base_guardrails TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+            directives_template TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+            scope TEXT NOT NULL DEFAULT '[]',
+            tuning_directives TEXT NOT NULL DEFAULT '',
+            plan TEXT NOT NULL DEFAULT '[]',
+            handled_suggestions TEXT NOT NULL DEFAULT '[]',
+            tailored_cv TEXT NOT NULL DEFAULT '',
+            guardrail_findings TEXT NOT NULL DEFAULT '[]',
+            change_report TEXT NOT NULL DEFAULT '{}',
+            base_hash TEXT NOT NULL DEFAULT '',
+            base_cv_snapshot TEXT NOT NULL DEFAULT '',
+            plan_generated_at TEXT, directives_edited_at TEXT, generated_at TEXT,
+            scope_edited_at TEXT, edited_at TEXT, guardrails_checked_at TEXT,
+            plan_context_hash TEXT, finalized_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO cv_settings (id, base_cv, base_instruction, base_guardrails, css, default_scope, directives_template)
+        VALUES (1, '# My CV', 'instr', 'guard', 'p{}', '[1,2]', 'tmpl');
+        INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'manual');
+        INSERT INTO jobs (source_id, url) VALUES (1, 'http://x/1');
+        INSERT INTO job_cv (job_id, tailored_cv, finalized_at) VALUES (1, '# Tailored', datetime('now'));
+        """
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    settings = conn.execute(
+        "SELECT cv_settings.*, cv_versions.content AS base_cv FROM cv_settings "
+        "LEFT JOIN cv_versions ON cv_versions.id = cv_settings.current_version_id WHERE cv_settings.id = 1"
+    ).fetchone()
+    assert settings["base_cv"] == "# My CV"
+    assert settings["base_instruction"] == "instr"
+
+    jc = conn.execute(
+        "SELECT job_cv.*, cv_versions.content AS tailored_cv, cv_versions.accepted_at AS accepted_at "
+        "FROM job_cv LEFT JOIN cv_versions ON cv_versions.id = job_cv.current_version_id WHERE job_cv.job_id = 1"
+    ).fetchone()
+    assert jc["tailored_cv"] == "# Tailored"
+    assert jc["accepted_at"] is not None
+
+    # Idempotent: running again must not raise or duplicate versions.
+    init_db(conn)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM cv_versions WHERE entity_type = 'tailored' AND entity_id = 1"
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_cv_settings_table_is_singleton():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    # Just check singleton constraint and FK behavior - rely on the new comprehensive test
     conn.execute("INSERT INTO cv_settings (id) VALUES (1)")
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO cv_settings (id) VALUES (2)")
@@ -1369,14 +1490,7 @@ def test_job_cv_table_columns_and_cascade():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     init_db(conn)
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
-    assert cols == {
-        "job_id", "scope", "tuning_directives", "plan", "handled_suggestions", "tailored_cv",
-        "guardrail_findings", "change_report", "base_hash", "base_cv_snapshot",
-        "plan_generated_at", "directives_edited_at", "generated_at",
-        "scope_edited_at", "plan_context_hash", "edited_at", "guardrails_checked_at",
-        "finalized_at", "updated_at",
-    }
+    # Just check cascade-delete behavior - rely on the comprehensive test for column set
     conn.execute(
         "INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'manual')"
     )
@@ -1489,11 +1603,13 @@ def test_init_db_adds_job_cv_base_cv_snapshot_defaulting_empty(conn):
 
 
 def test_init_db_migrates_cv_settings_merges_floor_into_guardrails(conn):
+    # New-shape cv_settings row (this schema owns current_version_id, no base_cv)
+    # exercising only the guardrails-floor-merge migration, unrelated to cv_versions.
     conn.executescript(
         """
         CREATE TABLE cv_settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
-            base_cv TEXT NOT NULL DEFAULT '',
+            current_version_id INTEGER,
             base_instruction TEXT NOT NULL DEFAULT '',
             base_guardrails TEXT NOT NULL DEFAULT '',
             css TEXT NOT NULL DEFAULT '',
@@ -1536,10 +1652,26 @@ def test_cv_settings_has_directives_template_column(conn):
 
 
 def test_init_db_seeds_directives_template_default(conn):
+    # New-shape cv_settings row (this schema owns current_version_id, no base_cv)
+    # with an empty directives_template, simulating the moment right after the
+    # ADD COLUMN step, before the backfill migration runs.
+    conn.executescript(
+        """
+        CREATE TABLE cv_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            current_version_id INTEGER,
+            base_instruction TEXT NOT NULL DEFAULT '',
+            base_guardrails TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            default_scope TEXT NOT NULL DEFAULT '["select","reorder"]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO cv_settings (id) VALUES (1);
+        """
+    )
+    conn.commit()
     init_db(conn)
     from app.cv.instruction import DEFAULT_DIRECTIVES_TEMPLATE
-    from app.db import queries as q
-    q.get_cv_settings(conn)  # ensure singleton row
     row = conn.execute("SELECT directives_template FROM cv_settings WHERE id = 1").fetchone()
     assert row[0] == DEFAULT_DIRECTIVES_TEMPLATE
 

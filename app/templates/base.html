@@ -19,6 +19,7 @@
       --text-muted: #8b8680;
       --accent: #4a7c8c;
       --accent-light: #6b96a8;
+      --accent-strong: #345e6a;
       --accent-tint: #e1e9ed;
       --success: #6b9e7f;
       --success-strong: #3f6b4f;
@@ -268,7 +269,7 @@
     .job-header dl.job-tags { margin-top: 0.6rem; }
     .job-subnav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
       gap: 0.5rem 1.25rem; margin-top: 0.9rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
-    .job-subnav-tabs { display: flex; gap: 1.25rem; }
+    .job-subnav-tabs { display: flex; align-items: center; gap: 1.25rem; }
     .job-subnav a { text-decoration: none; color: var(--text-secondary); font-weight: 500; }
     .job-subnav a:hover { color: var(--accent); }
     .job-subnav a.active { font-weight: 600; color: var(--text-primary); }
@@ -713,7 +714,7 @@
 
     .cv-preview-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
     .cv-preview-bar-end { justify-content: flex-end; }
-    .cv-preview-tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--border); }
+    .cv-preview-tabs { display: flex; align-items: center; gap: 1rem; border-bottom: 1px solid var(--border); }
     .cv-preview-tab { background: none; border: none; cursor: pointer; padding: 0.4rem 0; margin-bottom: -1px;
       color: var(--text-secondary); font-weight: 500; font-size: 0.9rem; border-bottom: 2px solid transparent; }
     .cv-preview-tab:hover:not(:disabled) { color: var(--accent); }
@@ -779,6 +780,83 @@
       background: var(--alert-tint); border: 1px solid var(--alert); border-radius: 6px; }
     .cv-diff-added ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
     .cv-diff-added li { margin: 0.15rem 0; }
+
+    /* Shared section heading for the CV pages' Help and History blocks — same
+       position, same look, wherever they appear (cv/_frontmatter_hint.html,
+       cv/_version_list.html). */
+    .cv-section-heading { margin: 0 0 0.35rem; font-size: 0.9rem; color: var(--text-secondary); }
+
+    /* Version history, always after the CV content and the Help section
+       (cv/_version_list.html) — a compact button+menu widget, not a native
+       <select>: a select can't badge individual rows or keep the viewed row
+       visibly marked once open, both of which this needs. Sized to its
+       content (inline-flex throughout) rather than stretching full width —
+       there's nothing here that benefits from spreading out. */
+    .cv-version-list { margin: 1rem 0 0; }
+    .cv-version-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .cv-version-picker { position: relative; display: inline-block; }
+    /* .btn (base.html's shared button rule) supplies padding/border/radius/
+       background/font, so this trigger is exactly as tall as the Reopen/
+       Download buttons beside it — only the flex layout and hover/expanded
+       states are added on top. */
+    .cv-version-trigger { display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: border-color 0.15s, box-shadow 0.15s; }
+    .cv-version-trigger:hover { border-color: var(--accent-light); }
+    .cv-version-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .cv-version-trigger-hash { font-size: 0.95em; }
+    .cv-version-trigger-age { color: var(--text-muted); font-size: 0.9em; }
+    .cv-version-trigger-caret { color: var(--text-muted); font-size: 0.7em; transition: transform 0.15s; }
+    .cv-version-trigger[aria-expanded="true"] .cv-version-trigger-caret { transform: rotate(180deg); }
+
+    .cv-version-menu { position: absolute; z-index: 10; top: calc(100% + 0.35rem); left: 0;
+      min-width: max-content; width: max-content; max-width: min(24rem, 90vw);
+      max-height: 17rem; overflow-y: auto;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.12); padding: 0.3rem; }
+    /* Flipped by base.html's script when there isn't room below the trigger,
+       so the menu stays fully in view instead of getting clipped or making
+       the page taller to fit it. */
+    .cv-version-menu.cv-version-menu-up { top: auto; bottom: calc(100% + 0.35rem); }
+    .cv-version-option { display: flex; flex-direction: column; gap: 0.15rem;
+      padding: 0.4rem 0.55rem; border-radius: 6px; text-decoration: none;
+      color: var(--text-primary); font-size: 0.85rem; }
+    .cv-version-option:hover { background: var(--ground); }
+    .cv-version-option.is-selected { background: var(--accent-tint); }
+    .cv-version-option-top { display: flex; align-items: center; gap: 0.4rem; }
+    .cv-version-option-top code { font-size: 0.95em; }
+    .cv-version-check { margin-left: auto; color: var(--accent-strong); font-weight: 700; }
+    .cv-version-option-meta { color: var(--text-muted); font-size: 0.78rem; }
+
+    /* Small pills for the accepted/current markers — visible both on the
+       closed trigger (whatever version it's showing) and on every row once
+       the menu opens, so neither status ever depends on remembering which
+       row you started from. */
+    .cv-version-badge { display: inline-block; padding: 1px 6px; border-radius: 999px;
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.01em; white-space: nowrap; }
+    .cv-version-badge-accepted { background: var(--success-tint); color: var(--success-strong); }
+    .cv-version-badge-current { background: var(--accent-tint); color: var(--accent-strong); }
+
+    /* Diff-target picker (cv/_base_preview_tabs.html, cv/_preview_tabs.html)
+       — a sized-down instance of the same trigger+menu widget, living inside
+       the tablist right after the Differences tab and styled to match
+       .cv-preview-tab so it reads as part of that tab rather than a
+       separate control floating beside the tabs. */
+    .cv-version-trigger-sm { background: none; border: none; padding: 0.4rem 0; margin-bottom: -1px;
+      color: var(--text-secondary); font-weight: 500; font-size: 0.9rem; border-bottom: 2px solid transparent;
+      box-shadow: none; }
+    .cv-version-trigger-sm:hover { border-color: transparent; color: var(--accent); }
+    .cv-version-trigger-sm[aria-expanded="true"] { border-color: var(--accent); box-shadow: none;
+      color: var(--text-primary); font-weight: 600; }
+    /* Inline "Base CV"/"Job CV" label ahead of the hash — the tailored CV's
+       diff-target picker mixes versions from both entities in one flat,
+       ordered list, so each row names which one it's from instead of
+       grouping them under separate headings. */
+    .cv-version-option-prefix { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); }
+    /* Same treatment, used inline in prose (the read-only version banners
+       and the line above the Accept button) rather than as a compact pill. */
+    .cv-version-accepted { display: inline-block; padding: 2px 7px; border-radius: 4px;
+      font-size: 0.8em; white-space: nowrap;
+      background: var(--success-tint); color: var(--success-strong); }
 
     /* Suggested-change diff: the "old" text and the editable "new" text must
        share line-height, padding and border width so the two columns' lines
@@ -1693,6 +1771,52 @@ document.body.addEventListener('input', function (e) {
 })();
 
 (function () {
+  // CV version picker (cv/_version_list.html): a button that opens a small
+  // menu of <a href> links. Plain navigation either way — this only handles
+  // showing/hiding the menu (and which side it opens on), so it degrades to
+  // nothing (menu just stays open, links still work) if this script never
+  // runs.
+  function closeMenu(menu) {
+    menu.hidden = true;
+    menu.classList.remove('cv-version-menu-up');
+    var trigger = menu.previousElementSibling;
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+  function openMenu(trigger, menu) {
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    // Decide up/down only once actually visible, so offsetHeight is real —
+    // flip above the trigger when there isn't room below, rather than
+    // letting the menu get clipped or push the page taller.
+    var triggerRect = trigger.getBoundingClientRect();
+    var spaceBelow = window.innerHeight - triggerRect.bottom;
+    var opensUp = spaceBelow < menu.offsetHeight && triggerRect.top > spaceBelow;
+    menu.classList.toggle('cv-version-menu-up', opensUp);
+  }
+  document.body.addEventListener('click', function (e) {
+    var trigger = e.target.closest('.cv-version-trigger');
+    if (trigger) {
+      var menu = trigger.nextElementSibling;
+      var willOpen = menu.hidden;
+      document.querySelectorAll('.cv-version-menu').forEach(closeMenu);
+      if (willOpen) openMenu(trigger, menu);
+      return;
+    }
+    if (!e.target.closest('.cv-version-menu')) {
+      document.querySelectorAll('.cv-version-menu').forEach(closeMenu);
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var open = document.querySelector('.cv-version-menu:not([hidden])');
+    if (!open) return;
+    var trigger = open.previousElementSibling;
+    closeMenu(open);
+    if (trigger) trigger.focus();
+  });
+})();
+
+(function () {
   // Edit-latitude chips: POST on change, then patch in just the freshness
   // badges the scope change can affect (draft + guardrail status) by id.
   // Scope never touches the tailored markdown itself, so the rest of the
@@ -1976,7 +2100,14 @@ document.body.addEventListener('click', function (e) {
       }
 
       function invalidateStyledPreviews() {
-        document.querySelectorAll('.cv-preview-doc[data-variant="tailored"], .cv-preview-doc[data-variant="diff"]')
+        // Scoped to this editor's own stage (there's exactly one per page) and
+        // keyed off "not this editor / not the base tab" rather than a
+        // hardcoded variant list, so it works for both the tailored-CV editor
+        // (tailored/diff need refreshing, base doesn't) and the base-CV editor
+        // (preview/diff need refreshing, there's no separate base tab).
+        var stage = wrap.closest('.cv-preview-stage');
+        if (!stage) return;
+        stage.querySelectorAll(".cv-preview-doc:not([data-variant='edit']):not([data-variant='base'])")
           .forEach(function (f) {
             var src = f.getAttribute('src');
             if (src) { f.setAttribute('data-src', src); f.removeAttribute('src'); }

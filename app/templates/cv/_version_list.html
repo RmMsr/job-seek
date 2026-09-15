@@ -1,0 +1,89 @@
+{# Version history. A native <select> can't badge individual rows
+   (accepted/current) or keep the viewed row visibly marked once open, so
+   this is a custom button+menu widget instead (wired up in base.html's "CV
+   version picker" script) — the options are still plain <a href> links, so
+   it degrades to ordinary navigation with JS off. The menu lists versions
+   in the same static newest-first order regardless of which one is on
+   screen — only the trigger and the check mark move.
+
+   version_picker(...) is the reusable widget itself — {% import %} this
+   file to embed it elsewhere (e.g. jobs/_job_header.html's nav, for the
+   tailored CV). The bottom of this file also renders it standalone, under
+   a "History" heading, for direct {% include %} (used by the base CV,
+   which has no nav to embed it in).
+
+   version_picker params: `versions` (every version for the entity, dict
+   with id, hash, action, updated_at, accepted_at, parent_hash,
+   parent_entity_type — newest first), `current_version_id` (the entity's
+   live pointer), `viewing_id` (the version presently on screen — pass
+   current_version_id when not viewing history), `version_base_url`
+   ("/jobs/{id}/cv" or "/cv"), `reopen_url` (optional — when set, a "Reopen
+   this version" button renders to the right of the picker; used by the
+   read-only version views), `compact` (bool — a smaller trigger with no
+   age shown, for embedding in tight spaces like the job nav). A tailored
+   version's parent may be a base-CV version (its very first draft,
+   generated from the base CV rather than from a prior tailored version) —
+   parent_entity_type says whether the "from ..." phrasing should read
+   "version" (same entity) or "cv" (a base version). #}
+{% macro version_url(v, current_version_id, version_base_url) -%}
+{%- if v.id == current_version_id -%}
+{{ version_base_url if version_base_url == '/cv' else version_base_url ~ '/preview' }}
+{%- else -%}
+{{ ('/cv?version=' ~ v.id) if version_base_url == '/cv' else (version_base_url ~ '/preview?version=' ~ v.id) }}
+{%- endif -%}
+{%- endmacro %}
+{# version_badges/version_meta take current_version_id explicitly (rather
+   than closing over a template-level variable) so other templates can
+   {% import %} and reuse them for their own, differently-scoped version
+   lists (the diff-target pickers in _base_preview_tabs.html/
+   _preview_tabs.html, and version_picker below). #}
+{% macro version_badges(v, current_version_id) -%}
+{%- if v.accepted_at %}<span class="cv-version-badge cv-version-badge-accepted">&#9733; Accepted</span>{% endif -%}
+{%- if v.id == current_version_id %}<span class="cv-version-badge cv-version-badge-current">Current</span>{% endif -%}
+{%- endmacro %}
+{% macro version_meta(v) -%}
+{{ v.updated_at | age }}{% if v.parent_hash %} &middot; from {{ 'cv' if v.parent_entity_type != v.entity_type else 'version' }} {{ v.parent_hash[:6] }}{% endif %}
+{%- endmacro %}
+{% macro version_picker(versions, current_version_id, viewing_id, version_base_url, reopen_url=None, compact=False) %}
+{% set viewing_id = viewing_id if viewing_id else current_version_id %}
+{% set selected = (versions | selectattr('id', 'equalto', viewing_id) | list | first) %}
+{% if versions and selected %}
+<div class="cv-version-row">
+  <div class="cv-version-picker">
+    <button type="button" class="{{ 'cv-version-trigger cv-version-trigger-sm' if compact else 'btn cv-version-trigger' }}"
+            aria-haspopup="menu" aria-expanded="false">
+      <code{% if not compact %} class="cv-version-trigger-hash"{% endif %}>{{ selected.hash[:6] }}</code>
+      {{ version_badges(selected, current_version_id) }}
+      {% if not compact %}<span class="cv-version-trigger-age">{{ selected.updated_at | age }}</span>{% endif %}
+      <span class="cv-version-trigger-caret" aria-hidden="true">&#9662;</span>
+    </button>
+    <div class="cv-version-menu" role="menu" hidden>
+      {% for v in versions %}
+      <a class="cv-version-option{{ ' is-selected' if v.id == viewing_id else '' }}"
+         role="menuitem" href="{{ version_url(v, current_version_id, version_base_url) }}">
+        <span class="cv-version-option-top">
+          <code>{{ v.hash[:6] }}</code>
+          {{ version_badges(v, current_version_id) }}
+          {% if v.id == viewing_id %}<span class="cv-version-check" aria-hidden="true">&#10003;</span>{% endif %}
+        </span>
+        <span class="cv-version-option-meta">{{ version_meta(v) }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% if reopen_url %}
+  <form method="post" action="{{ reopen_url }}">
+    <button type="submit" class="btn btn-accept">Reopen this version</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+{% set oob = oob if oob is defined else false %}
+{% if versions %}
+<div class="cv-version-list" id="cv-version-list"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <h3 class="cv-section-heading">History</h3>
+  {{ version_picker(versions, current_version_id, viewing_id if viewing_id is defined else None, version_base_url,
+                     reopen_url if reopen_url is defined else None) }}
+</div>
+{% endif %}

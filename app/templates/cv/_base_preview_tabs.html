@@ -1,0 +1,86 @@
+{# Shared preview tab bar + iframe stage for the base CV (current and
+   read-only version views) — the base-CV analogue of _preview_tabs.html.
+   Params (via {% with %}):
+     active            - "preview" | "diff"
+     editable          - bool; true renders an Edit tab + inline markdown editor
+     version_id        - int|None; appended as ?version= on the iframe URLs
+     has_accepted_base - bool; the Diff tab (and its iframe) only exist once
+                          something has been accepted to diff against
+     current_version_id, diff_against_id - the entity's live pointer and the
+                          version the Diff tab currently compares against
+                          (see cv/_version_list.html for the version dict
+                          shape; both come from _cv_page_ctx)
+     title_prefix      - iframe title prefix, e.g. "Version a1b2c3 " #}
+{% set title_prefix = title_prefix or '' %}
+{% set _v = ('?version=' ~ version_id) if version_id else '' %}
+{% import "cv/_version_list.html" as vl %}
+{% macro diff_qs(against_id) -%}
+?{% if version_id %}version={{ version_id }}&{% endif %}against={{ against_id }}
+{%- endmacro %}
+{% if has_accepted_base %}
+{% set diff_target = (versions | selectattr('id', 'equalto', diff_against_id) | list | first) %}
+{% set diff_word = 'accepted' if diff_target.accepted_at else ('current' if diff_target.id == current_version_id else diff_target.hash[:6]) %}
+{% endif %}
+<div class="cv-preview-bar">
+  <div class="cv-preview-tabs" role="tablist" aria-label="Base CV preview">
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="preview"
+            aria-selected="{{ 'true' if active == 'preview' else 'false' }}">Preview</button>
+    {% if editable %}
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="edit"
+            aria-selected="false">Edit</button>
+    {% endif %}
+    <button type="button" class="cv-preview-tab" role="tab" data-variant="diff"
+            aria-selected="{{ 'true' if active == 'diff' else 'false' }}"
+            {% if not has_accepted_base %}disabled title="Accept a version to enable diffing"{% endif %}>Differences{{ ' to' if has_accepted_base }}</button>
+    {% if has_accepted_base %}
+    <div class="cv-version-picker">
+      <button type="button" class="cv-version-trigger cv-version-trigger-sm" aria-haspopup="menu" aria-expanded="false">
+        <code>{{ diff_target.hash[:6] }}</code>
+        {{ vl.version_badges(diff_target, current_version_id) }}
+        <span class="cv-version-trigger-caret" aria-hidden="true">&#9662;</span>
+      </button>
+      <div class="cv-version-menu" role="menu" hidden>
+        {# Exclude the version actually being viewed (the diff's own left
+           side) — only when a specific historic one is: on the plain
+           editable page, version_id is None, so nothing is excluded there
+           even though the default target sometimes equals current (that
+           default is set outside this template, and hiding it would leave
+           the picker's own default choice missing from its menu). #}
+        {% for v in versions if v.id != version_id %}
+        <a class="cv-version-option{{ ' is-selected' if v.id == diff_against_id else '' }}" role="menuitem"
+           href="/cv{{ diff_qs(v.id) }}">
+          <span class="cv-version-option-top">
+            <code>{{ v.hash[:6] }}</code>
+            {{ vl.version_badges(v, current_version_id) }}
+            {% if v.id == diff_against_id %}<span class="cv-version-check" aria-hidden="true">&#10003;</span>{% endif %}
+          </span>
+          <span class="cv-version-option-meta">{{ vl.version_meta(v) }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  <button type="button" class="btn btn-subtle cv-preview-fs">&#9974; Fullscreen</button>
+</div>
+<div class="cv-preview-stage">
+  <iframe class="cv-preview-doc{{ ' is-active' if active == 'preview' }}" data-variant="preview"
+          title="{{ title_prefix }}Base CV"
+          {{ 'src' if active == 'preview' else 'data-src' }}="/cv/preview.html{{ _v }}"
+          sandbox="allow-scripts allow-same-origin"></iframe>
+  {% if editable %}
+  <div class="cv-preview-doc cv-preview-editor" data-variant="edit" title="Edit markdown">
+    {% from "_markdown_editor.html" import markdown_editor %}
+    {{ markdown_editor("markdown", settings.base_cv, autosave_url="/cv/save-base") }}
+  </div>
+  {% endif %}
+  {% if has_accepted_base %}
+  <iframe class="cv-preview-doc{{ ' is-active' if active == 'diff' }}" data-variant="diff"
+          title="{{ title_prefix }}Differences to {{ diff_word }}"
+          {{ 'src' if active == 'diff' else 'data-src' }}="/cv/diff.html{{ diff_qs(diff_against_id) }}"
+          sandbox="allow-scripts allow-same-origin"></iframe>
+  {% endif %}
+  <div class="cv-preview-notice" aria-live="polite">
+    <p class="n-loading">&#8635; Loading preview&hellip;</p>
+  </div>
+</div>

@@ -3,8 +3,8 @@
 {% block content %}
 {% include "jobs/_job_header.html" %}
 
-{% if job_cv and job_cv.finalized_at %}
-{% include "cv/_accepted.html" %}
+{% if viewing_version %}
+{% include "cv/_cv_version_view.html" %}
 {% else %}
 <div id="cv-preview-pane">{% include "cv/_preview_pane.html" %}</div>
 {% endif %}

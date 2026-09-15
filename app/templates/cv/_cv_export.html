@@ -1,5 +1,6 @@
-{# Export controls for a tailored CV — available in any state. The markdown is
-   embedded so "Copy markdown" works from the click gesture without a round trip. #}
-<a class="btn" href="/jobs/{{ job.id }}/cv.pdf">Download PDF</a>
+{# Export controls — available in any state, shared by the base and tailored
+   CV. The markdown is embedded so "Copy markdown" works from the click
+   gesture without a round trip. Params: `pdf_url`, `markdown_source`. #}
+<a class="btn" href="{{ pdf_url }}">Download PDF</a>
 <button type="button" class="btn cv-copy-md">Copy markdown</button>
-<textarea class="cv-md-source" hidden aria-hidden="true" tabindex="-1">{{ job_cv.tailored_cv }}</textarea>
+<textarea class="cv-md-source" hidden aria-hidden="true" tabindex="-1">{{ markdown_source }}</textarea>

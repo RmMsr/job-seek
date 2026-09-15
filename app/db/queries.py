@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import re
+import secrets
 import sqlite3
 from app.cv.instruction import DEFAULT_BASE_CV, DEFAULT_GUARDRAILS, DEFAULT_DIRECTIVES_TEMPLATE
 from app.url_canon import canonicalize_url
@@ -39,18 +40,243 @@ def upsert_profile(conn: sqlite3.Connection, content: str) -> None:
 
 _JOB_CV_JSON_COLS = ("scope", "plan", "handled_suggestions", "guardrail_findings", "change_report")
 
+_VERSION_RETENTION = 10
+
+
+def _new_version_hash(conn: sqlite3.Connection) -> str:
+    while True:
+        h = secrets.token_hex(4)
+        if not conn.execute("SELECT 1 FROM cv_versions WHERE hash = ?", (h,)).fetchone():
+            return h
+
+
+def _record_version(
+    conn: sqlite3.Connection, entity_type: str, entity_id: int, *,
+    action: str, content: str, current_version_id: int | None,
+    initial_parent_id: int | None = None,
+) -> int:
+    """Returns the version id that should become current. A manual edit
+    stacks onto the current row in place when that row is itself an
+    unaccepted manual edit less than an hour old AND is still the entity's
+    newest version (so a revert followed by a quick edit always opens a
+    fresh version instead of overwriting what was just reverted to);
+    anything else (an update, an accepted current version, or a lapsed
+    window) opens a new version. A no-op save (content unchanged) returns
+    the current version untouched without creating or mutating anything —
+    this keeps settings-only saves that round-trip an unedited base_cv from
+    spuriously versioning it (or clearing its accepted marker).
+
+    `initial_parent_id` only takes effect when this entity has no version at
+    all yet (current_version_id is None) — it lets a job's very first
+    tailored version record the base-CV version it was generated from as its
+    parent, rather than leaving parent_version_id NULL."""
+    current = None
+    if current_version_id is not None:
+        current = conn.execute(
+            "SELECT action, accepted_at, content, "
+            "(julianday('now') - julianday(updated_at)) * 24 AS age_hours "
+            "FROM cv_versions WHERE id = ?",
+            (current_version_id,),
+        ).fetchone()
+    if current is not None and current["content"] == content:
+        return current_version_id
+    if (
+        action == "manual_edit" and current is not None
+        and current["action"] == "manual_edit" and current["accepted_at"] is None
+        and current["age_hours"] < 1
+        and current_version_id == conn.execute(
+            "SELECT MAX(id) FROM cv_versions WHERE entity_type = ? AND entity_id = ?",
+            (entity_type, entity_id),
+        ).fetchone()[0]
+    ):
+        conn.execute(
+            "UPDATE cv_versions SET content = ?, updated_at = datetime('now') WHERE id = ?",
+            (content, current_version_id),
+        )
+        return current_version_id
+    parent_id = current_version_id if current_version_id is not None else initial_parent_id
+    new_id = conn.execute(
+        "INSERT INTO cv_versions (hash, entity_type, entity_id, parent_version_id, content, action, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+        (_new_version_hash(conn), entity_type, entity_id, parent_id, content, action),
+    ).lastrowid
+    _prune_versions(conn, entity_type, entity_id)
+    return new_id
+
+
+def _prune_versions(conn: sqlite3.Connection, entity_type: str, entity_id: int) -> None:
+    keep = {
+        r[0] for r in conn.execute(
+            "SELECT id FROM cv_versions WHERE entity_type = ? AND entity_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (entity_type, entity_id, _VERSION_RETENTION),
+        )
+    }
+    accepted = conn.execute(
+        "SELECT id FROM cv_versions WHERE entity_type = ? AND entity_id = ? AND accepted_at IS NOT NULL",
+        (entity_type, entity_id),
+    ).fetchone()
+    if accepted:
+        keep.add(accepted[0])
+    # Whatever current_version_id points at right now must survive: a caller
+    # repoints it *after* recording, so during pruning it may still reference
+    # an old row (e.g. after a revert) that would otherwise fall outside the
+    # retention window — deleting it violates the foreign key.
+    if entity_type == "base":
+        current = conn.execute(
+            "SELECT current_version_id FROM cv_settings WHERE id = ?", (entity_id,)
+        ).fetchone()
+    else:
+        current = conn.execute(
+            "SELECT current_version_id FROM job_cv WHERE job_id = ?", (entity_id,)
+        ).fetchone()
+    if current is not None and current[0] is not None:
+        keep.add(current[0])
+    placeholders = ",".join("?" for _ in keep)
+    conn.execute(
+        f"DELETE FROM cv_versions WHERE entity_type = ? AND entity_id = ? AND id NOT IN ({placeholders})",
+        (entity_type, entity_id, *keep),
+    )
+
+
+def resolve_base_version_id(conn: sqlite3.Connection) -> int | None:
+    """The id of whichever base-CV version resolve_base_cv() would return the
+    content of — the accepted one, or the current one if nothing's accepted
+    yet. Used to link a job's first tailored version back to the base
+    version it was generated from."""
+    row = conn.execute(
+        "SELECT id FROM cv_versions WHERE entity_type = 'base' AND entity_id = 1 "
+        "AND accepted_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is not None:
+        return row[0]
+    current = conn.execute("SELECT current_version_id FROM cv_settings WHERE id = 1").fetchone()
+    return current[0] if current else None
+
+
+def get_accepted_base_version(conn: sqlite3.Connection) -> dict | None:
+    """The accepted base-CV version row (whichever one it is, whether or not
+    it's also current), or None if nothing has been accepted yet. Unlike
+    cv_settings.accepted_at (joined through current_version_id — see
+    _CV_SETTINGS_SELECT below), this reflects acceptance independent of
+    what's current, so the UI can tell "nothing accepted" apart from "a
+    different, non-current version is accepted"."""
+    row = conn.execute(
+        _VERSION_SELECT_WITH_PARENT
+        + "WHERE v.entity_type = 'base' AND v.entity_id = 1 AND v.accepted_at IS NOT NULL "
+        "ORDER BY v.id DESC LIMIT 1"
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def get_accepted_base_cv(conn: sqlite3.Connection) -> str | None:
+    """The content of the accepted base-CV version, or None if nothing has
+    been accepted yet."""
+    version = get_accepted_base_version(conn)
+    return version["content"] if version is not None else None
+
+
+def resolve_base_cv(conn: sqlite3.Connection) -> str:
+    """The base CV as tailoring/diffing see it: the accepted version, or the
+    current one if nothing has been accepted yet."""
+    accepted = get_accepted_base_cv(conn)
+    if accepted is not None:
+        return accepted
+    return get_cv_settings(conn)["base_cv"]
+
+
+_VERSION_SELECT_WITH_PARENT = """
+    SELECT v.*, p.hash AS parent_hash, p.entity_type AS parent_entity_type
+    FROM cv_versions v LEFT JOIN cv_versions p ON p.id = v.parent_version_id
+"""
+
+
+def get_versions(conn: sqlite3.Connection, entity_type: str, entity_id: int,
+                 exclude_id: int | None = None) -> list[dict]:
+    rows = conn.execute(
+        _VERSION_SELECT_WITH_PARENT
+        + "WHERE v.entity_type = ? AND v.entity_id = ? ORDER BY v.id DESC",
+        (entity_type, entity_id),
+    ).fetchall()
+    return [dict(r) for r in rows if r["id"] != exclude_id]
+
+
+def get_version(conn: sqlite3.Connection, entity_type: str, entity_id: int,
+                version_id: int) -> dict | None:
+    row = conn.execute(
+        _VERSION_SELECT_WITH_PARENT
+        + "WHERE v.id = ? AND v.entity_type = ? AND v.entity_id = ?",
+        (version_id, entity_type, entity_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def revert_job_cv_version(conn: sqlite3.Connection, job_id: int, version_id: int) -> bool:
+    if get_version(conn, "tailored", job_id, version_id) is None:
+        return False
+    conn.execute(
+        "UPDATE job_cv SET current_version_id = ?, updated_at = datetime('now') WHERE job_id = ?",
+        (version_id, job_id),
+    )
+    conn.commit()
+    return True
+
+
+def revert_base_cv_version(conn: sqlite3.Connection, version_id: int) -> bool:
+    if get_version(conn, "base", 1, version_id) is None:
+        return False
+    conn.execute(
+        "UPDATE cv_settings SET current_version_id = ?, updated_at = datetime('now') WHERE id = 1",
+        (version_id,),
+    )
+    conn.commit()
+    return True
+
+
+def accept_base_cv(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "UPDATE cv_versions SET accepted_at = NULL WHERE entity_type = 'base' AND entity_id = 1 "
+        "AND accepted_at IS NOT NULL"
+    )
+    conn.execute(
+        "UPDATE cv_versions SET accepted_at = datetime('now') WHERE id = "
+        "(SELECT current_version_id FROM cv_settings WHERE id = 1)"
+    )
+    conn.commit()
+
+
+def accept_base_cv_version(conn: sqlite3.Connection, version_id: int) -> None:
+    """Accept a specific base-CV version directly, independent of whatever
+    current_version_id happens to point at — lets the read-only version view
+    accept a historic version without reopening it first."""
+    conn.execute(
+        "UPDATE cv_versions SET accepted_at = NULL WHERE entity_type = 'base' AND entity_id = 1 "
+        "AND accepted_at IS NOT NULL"
+    )
+    conn.execute("UPDATE cv_versions SET accepted_at = datetime('now') WHERE id = ?", (version_id,))
+    conn.commit()
+
+
+_CV_SETTINGS_SELECT = """
+    SELECT cv_settings.*, cv_versions.content AS base_cv,
+           cv_versions.accepted_at AS accepted_at,
+           cv_versions.hash AS current_version_hash
+    FROM cv_settings LEFT JOIN cv_versions ON cv_versions.id = cv_settings.current_version_id
+    WHERE cv_settings.id = 1
+"""
+
 
 def get_cv_settings(conn: sqlite3.Connection) -> dict:
-    row = conn.execute("SELECT * FROM cv_settings WHERE id = 1").fetchone()
+    row = conn.execute(_CV_SETTINGS_SELECT).fetchone()
     if row is None:
-        conn.execute(
-            "INSERT INTO cv_settings (id, base_cv, base_guardrails, directives_template) "
-            "VALUES (1, ?, ?, ?)",
-            (DEFAULT_BASE_CV, DEFAULT_GUARDRAILS, DEFAULT_DIRECTIVES_TEMPLATE),
+        save_cv_settings(
+            conn, base_cv=DEFAULT_BASE_CV, base_instruction="",
+            base_guardrails=DEFAULT_GUARDRAILS, css="", default_scope=["select", "reorder"],
+            directives_template=DEFAULT_DIRECTIVES_TEMPLATE,
         )
-        conn.commit()
-        row = conn.execute("SELECT * FROM cv_settings WHERE id = 1").fetchone()
+        row = conn.execute(_CV_SETTINGS_SELECT).fetchone()
     d = dict(row)
+    d["base_cv"] = d["base_cv"] or ""
     d["default_scope"] = json.loads(d["default_scope"])
     return d
 
@@ -60,13 +286,19 @@ def save_cv_settings(
     base_guardrails: str, css: str, default_scope: list[str],
     directives_template: str = "",
 ) -> None:
+    current_row = conn.execute("SELECT current_version_id FROM cv_settings WHERE id = 1").fetchone()
+    current_version_id = current_row[0] if current_row else None
+    new_version_id = _record_version(
+        conn, "base", 1, action="manual_edit", content=base_cv,
+        current_version_id=current_version_id,
+    )
     conn.execute(
         """
         INSERT INTO cv_settings
-            (id, base_cv, base_instruction, base_guardrails, css, default_scope, directives_template)
+            (id, current_version_id, base_instruction, base_guardrails, css, default_scope, directives_template)
         VALUES (1, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            base_cv = excluded.base_cv,
+            current_version_id = excluded.current_version_id,
             base_instruction = excluded.base_instruction,
             base_guardrails = excluded.base_guardrails,
             css = excluded.css,
@@ -74,8 +306,26 @@ def save_cv_settings(
             directives_template = excluded.directives_template,
             updated_at = datetime('now')
         """,
-        (base_cv, base_instruction, base_guardrails, css, json.dumps(default_scope),
+        (new_version_id, base_instruction, base_guardrails, css, json.dumps(default_scope),
          directives_template),
+    )
+    conn.commit()
+
+
+def set_base_cv(conn: sqlite3.Connection, markdown: str) -> None:
+    """Autosave entry point for the base-CV Edit tab — touches only base_cv,
+    leaving the other cv_settings fields (style, guardrails, ...) untouched.
+    Mirrors set_job_cv_tailored."""
+    conn.execute("INSERT OR IGNORE INTO cv_settings (id) VALUES (1)")
+    current_row = conn.execute("SELECT current_version_id FROM cv_settings WHERE id = 1").fetchone()
+    current_version_id = current_row[0] if current_row else None
+    new_version_id = _record_version(
+        conn, "base", 1, action="manual_edit", content=markdown,
+        current_version_id=current_version_id,
+    )
+    conn.execute(
+        "UPDATE cv_settings SET current_version_id = ?, updated_at = datetime('now') WHERE id = 1",
+        (new_version_id,),
     )
     conn.commit()
 
@@ -136,24 +386,61 @@ def reset_scope_options(conn: sqlite3.Connection) -> None:
     _seed_default_scope_options(conn)
 
 
+def get_accepted_job_cv_version(conn: sqlite3.Connection, job_id: int) -> dict | None:
+    """The accepted tailored-CV version row for this job (whether or not
+    it's also current), or None if nothing has been accepted yet. Unlike
+    job_cv.accepted_at (joined through current_version_id — see get_job_cv
+    below), this reflects acceptance independent of what's current, so the
+    UI can tell "nothing accepted" apart from "a different, non-current
+    version is accepted"."""
+    row = conn.execute(
+        _VERSION_SELECT_WITH_PARENT
+        + "WHERE v.entity_type = 'tailored' AND v.entity_id = ? AND v.accepted_at IS NOT NULL "
+        "ORDER BY v.id DESC LIMIT 1",
+        (job_id,),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
 def get_job_cv(conn: sqlite3.Connection, job_id: int) -> dict | None:
-    row = conn.execute("SELECT * FROM job_cv WHERE job_id = ?", (job_id,)).fetchone()
+    row = conn.execute(
+        """
+        SELECT job_cv.*, cv_versions.content AS tailored_cv,
+               cv_versions.accepted_at AS accepted_at,
+               cv_versions.action AS current_version_action,
+               cv_versions.hash AS current_version_hash
+        FROM job_cv LEFT JOIN cv_versions ON cv_versions.id = job_cv.current_version_id
+        WHERE job_cv.job_id = ?
+        """,
+        (job_id,),
+    ).fetchone()
     if row is None:
         return None
     d = dict(row)
+    d["tailored_cv"] = d["tailored_cv"] or ""
     for col in _JOB_CV_JSON_COLS:
         d[col] = json.loads(d[col])
     return d
 
 
 def upsert_job_cv(conn: sqlite3.Connection, job_id: int, **fields) -> None:
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    tailored_cv = fields.pop("tailored_cv", None)
     encoded = {}
     for k, v in fields.items():
         if k in _JOB_CV_JSON_COLS and not isinstance(v, str):
             encoded[k] = json.dumps(v)
         else:
             encoded[k] = v
-    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    if tailored_cv is not None:
+        current_version_id = conn.execute(
+            "SELECT current_version_id FROM job_cv WHERE job_id = ?", (job_id,)
+        ).fetchone()[0]
+        encoded["current_version_id"] = _record_version(
+            conn, "tailored", job_id, action="update", content=tailored_cv,
+            current_version_id=current_version_id,
+            initial_parent_id=resolve_base_version_id(conn),
+        )
     if encoded:
         sets = ", ".join(f"{k} = ?" for k in encoded)
         conn.execute(
@@ -177,10 +464,18 @@ def set_job_cv_directives(conn: sqlite3.Connection, job_id: int, text: str) -> N
 
 def set_job_cv_tailored(conn: sqlite3.Connection, job_id: int, markdown: str) -> None:
     conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    current_version_id = conn.execute(
+        "SELECT current_version_id FROM job_cv WHERE job_id = ?", (job_id,)
+    ).fetchone()[0]
+    new_version_id = _record_version(
+        conn, "tailored", job_id, action="manual_edit", content=markdown,
+        current_version_id=current_version_id,
+        initial_parent_id=resolve_base_version_id(conn),
+    )
     conn.execute(
-        "UPDATE job_cv SET tailored_cv = ?, edited_at = datetime('now'), "
+        "UPDATE job_cv SET current_version_id = ?, edited_at = datetime('now'), "
         "updated_at = datetime('now') WHERE job_id = ?",
-        (markdown, job_id),
+        (new_version_id, job_id),
     )
     conn.commit()
 
@@ -252,19 +547,32 @@ def clear_handled_suggestions(conn: sqlite3.Connection, job_id: int) -> None:
     conn.commit()
 
 
-def finalize_job_cv(conn: sqlite3.Connection, job_id: int) -> None:
+def accept_job_cv(conn: sqlite3.Connection, job_id: int) -> None:
     conn.execute(
-        "UPDATE job_cv SET finalized_at = datetime('now'), updated_at = datetime('now') WHERE job_id = ?",
+        "UPDATE cv_versions SET accepted_at = NULL WHERE entity_type = 'tailored' AND entity_id = ? "
+        "AND accepted_at IS NOT NULL",
         (job_id,),
     )
+    conn.execute(
+        "UPDATE cv_versions SET accepted_at = datetime('now') WHERE id = "
+        "(SELECT current_version_id FROM job_cv WHERE job_id = ?)",
+        (job_id,),
+    )
+    conn.execute("UPDATE job_cv SET updated_at = datetime('now') WHERE job_id = ?", (job_id,))
     conn.commit()
 
 
-def unfinalize_job_cv(conn: sqlite3.Connection, job_id: int) -> None:
+def accept_job_cv_version(conn: sqlite3.Connection, job_id: int, version_id: int) -> None:
+    """Accept a specific tailored-CV version directly, independent of
+    current_version_id — lets the read-only version view accept a historic
+    version without reopening it first."""
     conn.execute(
-        "UPDATE job_cv SET finalized_at = NULL, updated_at = datetime('now') WHERE job_id = ?",
+        "UPDATE cv_versions SET accepted_at = NULL WHERE entity_type = 'tailored' AND entity_id = ? "
+        "AND accepted_at IS NOT NULL",
         (job_id,),
     )
+    conn.execute("UPDATE cv_versions SET accepted_at = datetime('now') WHERE id = ?", (version_id,))
+    conn.execute("UPDATE job_cv SET updated_at = datetime('now') WHERE job_id = ?", (job_id,))
     conn.commit()
 
 
@@ -327,8 +635,18 @@ def count_jobs_by_source(conn: sqlite3.Connection, source_id: int) -> int:
 
 
 def delete_source(conn: sqlite3.Connection, source_id: int) -> None:
+    # jobs.id has no AUTOINCREMENT, so a deleted job's rowid can be reused by a
+    # later fetch — clean up its cv_versions now (resolved before the jobs
+    # delete) or a recycled id would inherit the old job's CV history.
+    job_ids = [r[0] for r in conn.execute("SELECT id FROM jobs WHERE source_id = ?", (source_id,))]
     conn.execute("DELETE FROM fetch_runs WHERE source_id = ?", (source_id,))
     conn.execute("DELETE FROM jobs WHERE source_id = ?", (source_id,))
+    if job_ids:
+        placeholders = ",".join("?" for _ in job_ids)
+        conn.execute(
+            f"DELETE FROM cv_versions WHERE entity_type = 'tailored' AND entity_id IN ({placeholders})",
+            job_ids,
+        )
     conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
     conn.commit()
 
@@ -337,7 +655,24 @@ def delete_jobs(conn: sqlite3.Connection, job_ids: list[int]) -> None:
     if not job_ids:
         return
     placeholders = ",".join("?" for _ in job_ids)
-    conn.execute(f"DELETE FROM jobs WHERE status = 'trash' AND id IN ({placeholders})", job_ids)
+    # Resolve which ids are actually trash (and so actually deleted) up front:
+    # the jobs have to go first to release job_cv.current_version_id's foreign
+    # key, but after that the "status = 'trash'" filter can no longer be
+    # evaluated — and applying the cv_versions delete to every id passed in
+    # would wipe history for jobs that were never deleted.
+    trash_ids = [
+        r[0] for r in conn.execute(
+            f"SELECT id FROM jobs WHERE status = 'trash' AND id IN ({placeholders})", job_ids
+        )
+    ]
+    if trash_ids:
+        id_placeholders = ",".join("?" for _ in trash_ids)
+        conn.execute(f"DELETE FROM jobs WHERE id IN ({id_placeholders})", trash_ids)
+        conn.execute(
+            f"DELETE FROM cv_versions WHERE entity_type = 'tailored' "
+            f"AND entity_id IN ({id_placeholders})",
+            trash_ids,
+        )
     conn.commit()
 
 
@@ -467,7 +802,11 @@ def job_exists(conn: sqlite3.Connection, job_id: int) -> bool:
 
 
 def delete_job(conn: sqlite3.Connection, job_id: int) -> None:
+    # Jobs first: job_cv cascades away with the job, releasing the
+    # job_cv.current_version_id reference into cv_versions. Deleting the
+    # versions first would violate that foreign key.
     conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    conn.execute("DELETE FROM cv_versions WHERE entity_type = 'tailored' AND entity_id = ?", (job_id,))
     conn.commit()
 
 

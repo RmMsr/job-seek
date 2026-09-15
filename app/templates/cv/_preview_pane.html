@@ -60,12 +60,28 @@
 
 {% include "cv/_frontmatter_hint.html" %}
 
+{% include "cv/_version_list.html" %}
+
 {% if has_draft %}
+  {% if accepted_version and accepted_version.id == job_cv.current_version_id %}
+  <p class="muted" style="margin:.25rem 0 .5rem;">&#9733; Accepted {{ accepted_version.accepted_at | age }}.</p>
+  {% elif accepted_version %}
+  {# The accepted version isn't the one shown here — say so, since
+     job_cv.accepted_at (joined through current_version_id) would
+     otherwise silently read as "nothing accepted" and the button below
+     would replace that accepted version without warning. #}
+  <p class="muted" style="margin:.25rem 0 .5rem;">&#9733; Version <code>{{ accepted_version.hash[:6] }}</code> is accepted —
+    <a href="/jobs/{{ job.id }}/cv/preview?version={{ accepted_version.id }}">view it</a>.</p>
+  {% endif %}
   <div class="cv-preview-decision">
+    {% if not (accepted_version and accepted_version.id == job_cv.current_version_id) %}
     <form method="post" action="/jobs/{{ job.id }}/cv/accept" style="display:inline;">
-      <button type="submit" class="btn btn-accept">Accept this CV</button>
+      <button type="submit" class="btn btn-accept">&#9733; Accept {{ 'this version instead' if accepted_version else 'this CV' }}</button>
     </form>
-    {% include "cv/_cv_export.html" %}
+    {% endif %}
+    {% with pdf_url = "/jobs/" ~ job.id ~ "/cv.pdf", markdown_source = job_cv.tailored_cv %}
+      {% include "cv/_cv_export.html" %}
+    {% endwith %}
   </div>
 {% endif %}
 <div id="cv-findings">{% include "cv/_findings.html" %}</div>

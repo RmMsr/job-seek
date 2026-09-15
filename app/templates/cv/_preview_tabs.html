@@ -4,11 +4,27 @@
      has_draft    - bool; when false the Tailored/Differences tabs are disabled
      mid_label    - "Tailored" (workbench) or "Accepted" (accepted view)
      title_prefix - iframe title prefix, e.g. "Accepted "
-     active       - "" | "base" | "tailored" | "diff"  #}
+     active       - "" | "base" | "tailored" | "diff"
+     current_version_id, diff_against_type, diff_against_id - this job's live
+       tailored pointer and what the Differences tab currently compares
+       against (from _workbench_ctx; diff_against_type is "base" or
+       "tailored" — its own prior versions) #}
 {% set mid_label = mid_label or 'Tailored' %}
 {% set title_prefix = title_prefix or '' %}
 {% set active = active or ('tailored' if has_draft else 'base') %}
 {% set editable = editable or false %}
+{% set version_id = version_id or None %}
+{% set _v = ('&version=' ~ version_id) if version_id else '' %}
+{% import "cv/_version_list.html" as vl %}
+{% macro diff_qs(t, i) -%}
+?{% if version_id %}version={{ version_id }}&{% endif %}against_type={{ t }}&against_id={{ i }}
+{%- endmacro %}
+{% if has_draft %}
+{% set diff_target = (base_versions if diff_against_type == 'base' else versions)
+                      | selectattr('id', 'equalto', diff_against_id) | list | first %}
+{% set diff_target_current_id = settings.current_version_id if diff_against_type == 'base' else current_version_id %}
+{% set diff_word = 'accepted' if diff_target.accepted_at else ('current' if diff_target.id == diff_target_current_id else diff_target.hash[:6]) %}
+{% endif %}
 <div class="cv-preview-bar">
   <div class="cv-preview-tabs" role="tablist" aria-label="CV preview">
     <button type="button" class="cv-preview-tab" role="tab" data-variant="base"
@@ -23,7 +39,43 @@
     {% endif %}
     <button type="button" class="cv-preview-tab" role="tab" data-variant="diff"
             aria-selected="{{ 'true' if active == 'diff' else 'false' }}"
-            {% if not has_draft %}disabled title="Update to see the differences"{% endif %}>Differences</button>
+            {% if not has_draft %}disabled title="Update to see the differences"{% endif %}>Differences{{ ' to' if has_draft }}</button>
+    {% if has_draft %}
+    <div class="cv-version-picker">
+      <button type="button" class="cv-version-trigger cv-version-trigger-sm" aria-haspopup="menu" aria-expanded="false">
+        <span class="cv-version-option-prefix">{{ 'Base CV' if diff_against_type == 'base' else 'Job CV' }}</span>
+        <code>{{ diff_target.hash[:6] }}</code>
+        {{ vl.version_badges(diff_target, diff_target_current_id) }}
+        <span class="cv-version-trigger-caret" aria-hidden="true">&#9662;</span>
+      </button>
+      <div class="cv-version-menu" role="menu" hidden>
+        {% for v in base_versions %}
+        <a class="cv-version-option{{ ' is-selected' if (diff_against_type == 'base' and v.id == diff_against_id) else '' }}"
+           role="menuitem" href="/jobs/{{ job.id }}/cv/preview{{ diff_qs('base', v.id) }}">
+          <span class="cv-version-option-top">
+            <span class="cv-version-option-prefix">Base CV</span>
+            <code>{{ v.hash[:6] }}</code>
+            {{ vl.version_badges(v, settings.current_version_id) }}
+            {% if diff_against_type == 'base' and v.id == diff_against_id %}<span class="cv-version-check" aria-hidden="true">&#10003;</span>{% endif %}
+          </span>
+          <span class="cv-version-option-meta">{{ vl.version_meta(v) }}</span>
+        </a>
+        {% endfor %}
+        {% for v in versions if v.id != (version_id or current_version_id) %}
+        <a class="cv-version-option{{ ' is-selected' if (diff_against_type == 'tailored' and v.id == diff_against_id) else '' }}"
+           role="menuitem" href="/jobs/{{ job.id }}/cv/preview{{ diff_qs('tailored', v.id) }}">
+          <span class="cv-version-option-top">
+            <span class="cv-version-option-prefix">Job CV</span>
+            <code>{{ v.hash[:6] }}</code>
+            {{ vl.version_badges(v, current_version_id) }}
+            {% if diff_against_type == 'tailored' and v.id == diff_against_id %}<span class="cv-version-check" aria-hidden="true">&#10003;</span>{% endif %}
+          </span>
+          <span class="cv-version-option-meta">{{ vl.version_meta(v) }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </div>
   <button type="button" class="btn btn-subtle cv-preview-fs">&#9974; Fullscreen</button>
 </div>
@@ -35,7 +87,7 @@
   {% if has_draft %}
   <iframe class="cv-preview-doc{{ ' is-active' if active == 'tailored' }}" data-variant="tailored"
           title="{{ title_prefix }}{{ mid_label }} CV"
-          {{ 'src' if active == 'tailored' else 'data-src' }}="/jobs/{{ job.id }}/cv/preview.html?variant=tailored"
+          {{ 'src' if active == 'tailored' else 'data-src' }}="/jobs/{{ job.id }}/cv/preview.html?variant=tailored{{ _v }}"
           sandbox="allow-scripts allow-same-origin"></iframe>
   {% if editable %}
   <div class="cv-preview-doc cv-preview-editor" data-variant="edit" title="Edit markdown">
@@ -45,8 +97,8 @@
   </div>
   {% endif %}
   <iframe class="cv-preview-doc{{ ' is-active' if active == 'diff' }}" data-variant="diff"
-          title="{{ title_prefix }}Differences"
-          {{ 'src' if active == 'diff' else 'data-src' }}="/jobs/{{ job.id }}/cv/diff.html"
+          title="{{ title_prefix }}Differences to {{ diff_word }}"
+          {{ 'src' if active == 'diff' else 'data-src' }}="/jobs/{{ job.id }}/cv/diff.html{{ diff_qs(diff_against_type, diff_against_id) }}"
           sandbox="allow-scripts allow-same-origin"></iframe>
   {% endif %}
   <div class="cv-preview-notice" aria-live="polite">

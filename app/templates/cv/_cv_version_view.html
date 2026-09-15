@@ -1,0 +1,37 @@
+{# Read-only view of one specific tailored-CV version (current or historic),
+   shown at /jobs/{id}/cv/preview?version=<id>. `viewing_version` comes from
+   cv_preview_page. #}
+<p class="muted" style="margin:.25rem 0 .75rem;">
+  Viewing a previous version.
+  <a href="/jobs/{{ job.id }}/cv/preview">Go back to current version</a>
+</p>
+
+{# No diff summary here: its counts come from the *current* version, while the
+   Differences tab below correctly diffs the version being viewed — showing both
+   makes them contradict each other whenever those differ. The tab is enough. #}
+{% if has_doc_write %}
+{% with has_draft = true, mid_label = 'Version', title_prefix = 'Version ' ~ viewing_version.hash[:6] ~ ' ', active = 'tailored', editable = false, version_id = viewing_version.id %}
+  {% include "cv/_preview_tabs.html" %}
+{% endwith %}
+{% else %}
+<p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
+<div class="cv-markdown" style="border:1px solid var(--border);padding:1rem;">{{ viewing_version.content | markdown }}</div>
+{% endif %}
+
+{% include "cv/_frontmatter_hint.html" %}
+
+{% with viewing_id = viewing_version.id,
+        reopen_url = "/jobs/" ~ job.id ~ "/cv/versions/" ~ viewing_version.id ~ "/revert" %}
+  {% include "cv/_version_list.html" %}
+{% endwith %}
+
+<div class="cv-preview-actions" style="margin-top:.75rem;">
+  {% if not viewing_version.accepted_at %}
+  <form method="post" action="/jobs/{{ job.id }}/cv/versions/{{ viewing_version.id }}/accept" style="display:inline;">
+    <button type="submit" class="btn btn-accept">&#9733; Accept this version</button>
+  </form>
+  {% endif %}
+  {% with pdf_url = "/jobs/" ~ job.id ~ "/cv.pdf?version=" ~ viewing_version.id, markdown_source = viewing_version.content %}
+    {% include "cv/_cv_export.html" %}
+  {% endwith %}
+</div>

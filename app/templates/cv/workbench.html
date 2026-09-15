@@ -3,15 +3,6 @@
 {% block content %}
 {% include "jobs/_job_header.html" %}
 
-{% if job_cv and job_cv.finalized_at %}
-<p class="muted" style="margin:.25rem 0 .75rem;">
-  &#10003; Accepted {{ job_cv.finalized_at | time_ago }} — this CV is read-only. See
-  <a href="/jobs/{{ job.id }}/cv/preview">Preview CV</a>.
-</p>
-<form method="post" action="/jobs/{{ job.id }}/cv/reopen" style="display:inline;">
-  <button type="submit" class="btn btn-subtle">Start over</button>
-</form>
-{% else %}
 <div id="cv-plan-pane">{% include "cv/_plan_pane.html" %}</div>
 
 {% if job_cv is none %}
@@ -19,13 +10,10 @@
         data-progress-url="/jobs/{{ job.id }}/cv/plan" data-progress-oob
         data-progress-label="Analysing the job"></button>
 <script>
-  // The base.html body click-listener is registered after this content block is
-  // parsed, so defer the synthetic click until the DOM is ready.
   document.addEventListener("DOMContentLoaded", function () {
     var b = document.getElementById("cv-autostart");
     if (b) b.click();
   });
 </script>
-{% endif %}
 {% endif %}
 {% endblock %}

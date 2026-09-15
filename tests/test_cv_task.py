@@ -120,17 +120,17 @@ def test_generate_mode_stores_draft(conn, cfg):
     assert "Hard limits" in instr and "foreground Kafka" in instr
 
 
-def test_generate_is_a_no_op_for_a_finalized_cv(conn, cfg):
+def test_generate_still_regenerates_after_accept(conn, cfg):
     jid = _seed(conn)
     q.upsert_job_cv(conn, jid, scope=[1], tailored_cv="# frozen draft")
-    q.finalize_job_cv(conn, jid)
+    q.accept_job_cv(conn, jid)
     with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}) as tc, \
          patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
         _run(conn, cfg, jid, "generate")
     row = q.get_job_cv(conn, jid)
-    assert row["tailored_cv"] == "# frozen draft"   # untouched
-    assert row["finalized_at"] is not None          # still accepted
-    tc.assert_not_called()
+    assert row["tailored_cv"] == "# regenerated"    # accept no longer blocks regeneration
+    assert row["accepted_at"] is None               # the new draft is its own, unaccepted version
+    tc.assert_called_once()
 
 
 def test_job_context_is_plain_prose_and_capped(conn, cfg):

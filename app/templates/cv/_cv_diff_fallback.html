@@ -41,7 +41,9 @@
   :is(li,p) > .cvd-block { box-shadow: none; background-image: none; }
   .muted { color: #666; }
 </style></head><body>
-{% if predates %}
+{% if message %}
+  <p class="muted">{{ message }}</p>
+{% elif predates %}
   <p class="muted">This draft predates change tracking &mdash; regenerate to see the differences.</p>
 {% else %}
   {{ body_html | safe }}

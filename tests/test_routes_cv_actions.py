@@ -73,31 +73,23 @@ def test_save_scope_only_returns_status_fragments_not_the_whole_pane(client, con
     assert 'cv-latitude-form' not in r.text      # the checkboxes themselves aren't re-rendered
 
 
-def test_save_scope_is_read_only_for_finalized_cv(client, conn):
+def test_accept_does_not_block_further_edits(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
-    q.finalize_job_cv(conn, jid)
-    assert client.post(f"/jobs/{jid}/cv/save-scope", data={"scope": ["1"]}).status_code == 409
+    client.post(f"/jobs/{jid}/cv/accept")
+    r = client.post(f"/jobs/{jid}/cv/save-scope", data={"scope": ["1"]})
+    assert r.status_code == 200
+    assert q.get_job_cv(conn, jid)["scope"] == [1]
 
 
-def test_accept_finalizes_and_shows_read_only_view(client, conn):
+def test_accept_marks_current_version_and_redirects_to_preview(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
     r = client.post(f"/jobs/{jid}/cv/accept", follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == f"/jobs/{jid}/cv/preview"
-    assert q.get_job_cv(conn, jid)["finalized_at"] is not None
+    assert q.get_job_cv(conn, jid)["accepted_at"] is not None
     assert "cv" in [e["kind"] for e in q.get_job_events(conn, jid)]
-    # Preview CV: the accepted, read-only view — downloads + start over, no tailoring UI
-    preview = client.get(f"/jobs/{jid}/cv/preview").text
-    assert "read-only" in preview
-    assert "Start over" in preview and "Download PDF" in preview
-    assert "Accept this CV" not in preview
-    assert ">Update</button>" not in preview
-    # Tailor CV: a locked notice, no directives form
-    tailor = client.get(f"/jobs/{jid}/cv").text
-    assert "read-only" in tailor
-    assert 'id="cv-plan-pane"' not in tailor
 
 
 def test_copy_markdown_available_in_both_states(client, conn):
@@ -106,36 +98,26 @@ def test_copy_markdown_available_in_both_states(client, conn):
     page = client.get(f"/jobs/{jid}/cv/preview").text
     assert "Copy markdown" in page and 'class="cv-md-source"' in page
     assert "a bullet with" in page
-    q.finalize_job_cv(conn, jid)
+    q.accept_job_cv(conn, jid)
     page = client.get(f"/jobs/{jid}/cv/preview").text
     assert "Copy markdown" in page and "a bullet with" in page
 
 
-def test_reopen_clears_finalized_and_restores_workbench(client, conn):
+def test_editing_routes_still_work_after_accept(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
-    q.finalize_job_cv(conn, jid)
-    r = client.post(f"/jobs/{jid}/cv/reopen", follow_redirects=False)
-    assert r.status_code == 303
-    assert r.headers["location"] == f"/jobs/{jid}/cv"
-    assert q.get_job_cv(conn, jid)["finalized_at"] is None
-    assert 'id="cv-plan-pane"' in client.get(f"/jobs/{jid}/cv").text
-    assert 'id="cv-preview-pane"' in client.get(f"/jobs/{jid}/cv/preview").text
-
-
-def test_editing_routes_are_read_only_for_a_finalized_cv(client, conn):
-    jid = _job(conn)
-    q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
-    q.finalize_job_cv(conn, jid)
+    q.accept_job_cv(conn, jid)
     for path, data in [
         (f"/jobs/{jid}/cv/generate", None),
         (f"/jobs/{jid}/cv/plan", None),
-        (f"/jobs/{jid}/cv/save-directives", {"tuning_directives": "- sneaky edit"}),
+        (f"/jobs/{jid}/cv/save-directives", {"tuning_directives": "- allowed edit"}),
         (f"/jobs/{jid}/cv/reset-directives", None),
         (f"/jobs/{jid}/cv/plan/accept", {}),
     ]:
         r = client.post(path, data=data or {})
-        assert r.status_code == 409, path
+        assert r.status_code == 200, path
+    # reset-directives ran after the save above, restoring the configured
+    # (empty, in this fixture) template — confirms the routes really executed.
     assert q.get_job_cv(conn, jid)["tuning_directives"] == ""
 
 
@@ -397,11 +379,13 @@ def test_save_tailored_404_missing_job(client, conn):
     assert client.post("/jobs/999/cv/save-tailored", data={"markdown": "x"}).status_code == 404
 
 
-def test_save_tailored_409_when_finalized(client, conn):
+def test_save_tailored_succeeds_after_accept(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Done")
-    q.finalize_job_cv(conn, jid)
-    assert client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "x"}).status_code == 409
+    q.accept_job_cv(conn, jid)
+    r = client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "# Changed\n"})
+    assert r.status_code == 200
+    assert q.get_job_cv(conn, jid)["tailored_cv"] == "# Changed\n"
 
 
 def test_recheck_guardrails_endpoint_enqueues_task(client, conn):
@@ -415,8 +399,12 @@ def test_recheck_guardrails_endpoint_enqueues_task(client, conn):
     assert task["params"]["render"] == "findings"
 
 
-def test_recheck_guardrails_409_when_finalized(client, conn):
+def test_recheck_guardrails_succeeds_after_accept(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Done")
-    q.finalize_job_cv(conn, jid)
-    assert client.post(f"/jobs/{jid}/cv/recheck-guardrails").status_code == 409
+    q.accept_job_cv(conn, jid)
+    r = client.post(f"/jobs/{jid}/cv/recheck-guardrails")
+    assert r.status_code == 200
+    task = q.get_task(conn, r.json()["task_id"])
+    assert task["kind"] == "cv_tailor"
+    assert task["params"]["mode"] == "recheck"
