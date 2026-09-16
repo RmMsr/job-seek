@@ -99,7 +99,7 @@ def _title(conn: sqlite3.Connection, task: dict) -> str:
     if kind == "profile_reassess_fit":
         return "Recompute profile fit"
     if kind == "cv_tailor":
-        verb = "Evaluate CV directives" if params.get("mode") == "plan" else "Update CV"
+        verb = "Evaluate CV directives" if params.get("mode") == "plan" else "Apply tailoring plan"
         title = _job_title(conn, params.get("job_id"))
         return f"{verb}: {title}" if title else verb
     return kind.replace("_", " ")

@@ -70,13 +70,13 @@ def test_system_prompt_has_mandate_and_floor():
 
 
 def test_stable_blocks_precede_the_instruction():
-    # The base CV and job posting are stable across the two tailor_cv calls in a
-    # run; the instruction is not. Ordering the stable blocks first lets the LLM
-    # server reuse the KV-cache prefix on the second call.
+    # The source CV and job posting are stable across successive tailor_cv
+    # calls for the same job; the instruction is not. Ordering the stable
+    # blocks first lets the LLM server reuse the KV-cache prefix.
     client = _mock_client("# CV\n- x")
-    tailor_cv(client, "m", "# base cv", "the instruction", "the job posting")
+    tailor_cv(client, "m", "# source cv", "the instruction", "the job posting")
     user = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
-    assert user.index("# Base CV") < user.index("# Instruction")
+    assert user.index("# CV to tailor") < user.index("# Instruction")
     assert user.index("# Job posting") < user.index("# Instruction")
 
 

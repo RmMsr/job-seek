@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS cv_versions (
     entity_id INTEGER NOT NULL,
     parent_version_id INTEGER REFERENCES cv_versions(id) ON DELETE SET NULL,
     content TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN ('update','manual_edit')),
+    action TEXT NOT NULL CHECK (action IN ('update','manual_edit','reset')),
+    note TEXT NOT NULL DEFAULT '',
     accepted_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS job_cv (
     change_report TEXT NOT NULL DEFAULT '{}',
     base_hash TEXT NOT NULL DEFAULT '',
     base_cv_snapshot TEXT NOT NULL DEFAULT '',
+    guardrails_hash TEXT NOT NULL DEFAULT '',
     plan_generated_at TEXT,
     directives_edited_at TEXT,
     generated_at TEXT,
@@ -1023,6 +1025,13 @@ def _migrate_job_cv_add_guardrails_checked_at(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_job_cv_add_guardrails_hash(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "guardrails_hash" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN guardrails_hash TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+
 def _migrate_cv_content_to_versions(conn: sqlite3.Connection) -> None:
     """base_cv / tailored_cv text and the finalized_at flag move out of
     cv_settings / job_cv into cv_versions, each entity's live content carried
@@ -1097,6 +1106,44 @@ def _migrate_cv_content_to_versions(conn: sqlite3.Connection) -> None:
         FROM job_cv;
         DROP TABLE job_cv;
         ALTER TABLE job_cv_new RENAME TO job_cv;
+        """
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_cv_versions_add_reset_and_note(conn: sqlite3.Connection) -> None:
+    """Widens cv_versions.action to allow 'reset' (SQLite can't alter a CHECK
+    constraint in place) and adds the note column, in one rebuild. See the
+    2026-09-15 CV tailoring iteration spec."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='cv_versions'"
+    ).fetchone()
+    if row is None or "'reset'" in row[0]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE cv_versions_new (
+            id INTEGER PRIMARY KEY,
+            hash TEXT NOT NULL UNIQUE,
+            entity_type TEXT NOT NULL CHECK (entity_type IN ('base','tailored')),
+            entity_id INTEGER NOT NULL,
+            parent_version_id INTEGER REFERENCES cv_versions_new(id) ON DELETE SET NULL,
+            content TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('update','manual_edit','reset')),
+            note TEXT NOT NULL DEFAULT '',
+            accepted_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO cv_versions_new (id, hash, entity_type, entity_id, parent_version_id,
+                                      content, action, note, accepted_at, updated_at)
+        SELECT id, hash, entity_type, entity_id, parent_version_id,
+               content, action, '', accepted_at, updated_at
+        FROM cv_versions;
+        DROP TABLE cv_versions;
+        ALTER TABLE cv_versions_new RENAME TO cv_versions;
+        CREATE INDEX IF NOT EXISTS idx_cv_versions_entity ON cv_versions(entity_type, entity_id, id);
         """
     )
     conn.commit()
@@ -1246,6 +1293,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_job_cv_add_plan_context_hash(conn)
     _migrate_job_cv_add_edited_at(conn)
     _migrate_job_cv_add_guardrails_checked_at(conn)
+    _migrate_job_cv_add_guardrails_hash(conn)
     _migrate_cv_scope_options_drop_is_baseline(conn)
     _migrate_jobs_add_pending_status(conn)
     _migrate_cv_content_to_versions(conn)
+    _migrate_cv_versions_add_reset_and_note(conn)

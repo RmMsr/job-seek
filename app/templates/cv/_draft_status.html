@@ -1,8 +1,12 @@
 {# The tailored-draft freshness badge in the Preview heading. Its own partial
    so a scope (edit-latitude) change can refresh just this badge — see
    cv_save_scope in app/routes/cv.py — without re-rendering the whole preview
-   pane (which would blow away the active tab and the Edit-tab editor). #}
-<span id="cv-draft-status" class="cv-stage-status" data-state="{{ draft_status }}">{{ {
-  "none": "No draft yet", "fresh": "Up to date",
-  "stale": "Outdated", "running": "Working…",
-}.get(draft_status, "") }}</span>
+   pane (which would blow away the active tab and the Edit-tab editor).
+
+   data-state stays "stale" for both staleness reasons (one CSS rule); the
+   TEXT differs by draft_stale_reason: "base" means Apply won't fix it on
+   its own (Reset to base CV will), "plan" means the next Apply run picks
+   the change up automatically. #}
+<span id="cv-draft-status" class="cv-stage-status" data-state="{{ draft_status }}">{% if draft_status == "stale" %}{{ "Base changed" if draft_stale_reason == "base" else "Outdated" }}{% else %}{{ {
+  "none": "No draft yet", "fresh": "Up to date", "running": "Working…",
+}.get(draft_status, "") }}{% endif %}</span>

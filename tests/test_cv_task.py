@@ -89,6 +89,29 @@ def test_generate_keeps_prior_findings_when_guardrail_check_returns_empty(conn, 
     assert row["guardrail_findings"][0]["rule"] == "Do not invent dates."  # findings NOT blanked
 
 
+def test_guardrail_status_goes_stale_when_guardrails_text_changes(conn, cfg):
+    """Regression: narrowing _base_hash to base_cv-only must not silently
+    stop detecting a changed guardrail rule set."""
+    from app.routes.cv import _guardrail_status
+    jid = _seed(conn)
+    q.save_cv_settings(conn, base_cv="# Me\n\n- Kafka work\n", base_instruction="",
+                       base_guardrails="Do not invent dates.", css="", default_scope=[1])
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}), \
+         patch("app.routes.cv.check_guardrails",
+               return_value={"findings": [{"rule": "Do not invent dates.", "verdict": "ok", "explanation": ""}]}):
+        _run(conn, cfg, jid, "generate")
+    job_cv = q.get_job_cv(conn, jid)
+    settings = q.get_cv_settings(conn)
+    settings["base_cv"] = q.resolve_base_cv(conn)
+    assert _guardrail_status(job_cv, settings, running=False) == "fresh"
+
+    q.save_cv_settings(conn, base_cv="# Me\n\n- Kafka work\n", base_instruction="",
+                       base_guardrails="Do not invent employers.", css="", default_scope=[1])
+    settings = q.get_cv_settings(conn)
+    settings["base_cv"] = q.resolve_base_cv(conn)
+    assert _guardrail_status(job_cv, settings, running=False) == "stale"
+
+
 def test_plan_mode_does_not_overwrite_edited_directives(conn, cfg):
     jid = _seed(conn)
     q.upsert_job_cv(conn, jid, scope=[1, 2])
@@ -346,3 +369,71 @@ def test_plan_mode_logs_timed_steps(conn, cfg, caplog):
             _run(conn, cfg, jid, "plan")
     messages = [r.getMessage() for r in caplog.records]
     assert any("plan_tailoring" in m and str(jid) in m for m in messages)
+
+
+def test_generate_sources_from_existing_tailored_cv_not_base(conn, cfg):
+    jid = _seed(conn)
+    q.upsert_job_cv(conn, jid, scope=[1], tailored_cv="# Existing tailored draft\n- prior edit\n")
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}) as tc, \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        _run(conn, cfg, jid, "generate")
+    source_cv = tc.call_args.args[2]
+    assert source_cv == "# Existing tailored draft\n- prior edit\n"
+
+
+def test_generate_sources_from_base_when_no_tailored_cv_yet(conn, cfg):
+    jid = _seed(conn)
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# first draft"}) as tc, \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        _run(conn, cfg, jid, "generate")
+    source_cv = tc.call_args.args[2]
+    assert source_cv == "# Me\n\n- Kafka work\n"
+
+
+def test_generate_check_guardrails_still_uses_true_base_cv_not_source(conn, cfg):
+    jid = _seed(conn)
+    q.upsert_job_cv(conn, jid, scope=[1], tailored_cv="# Existing tailored draft\n")
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}), \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}) as cg:
+        _run(conn, cfg, jid, "generate")
+    # check_guardrails(client, model, base_guardrails, base_cv, tailored_cv)
+    assert cg.call_args.args[3] == "# Me\n\n- Kafka work\n"
+
+
+def test_generate_does_not_clear_base_staleness_when_iterating_from_existing_draft(conn, cfg):
+    """Apply tailoring plan iterating from an existing draft never reads the
+    live base CV, so it must not silently clear a base-changed staleness
+    flag it didn't actually address."""
+    jid = _seed(conn)
+    q.upsert_job_cv(conn, jid, scope=[1], tailored_cv="# Existing tailored draft\n", base_hash="stale-hash")
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}), \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        _run(conn, cfg, jid, "generate")
+    row = q.get_job_cv(conn, jid)
+    assert row["base_hash"] == "stale-hash"   # untouched -- this run didn't consume the live base
+
+
+def test_generate_after_reset_stamps_base_hash_fresh(conn, cfg):
+    """A reset's content equals the live base CV, so the next generate's
+    source document IS the live base -- base_hash should be stamped fresh."""
+    from app.routes.cv import _resolved_settings, _base_hash
+    jid = _seed(conn)
+    q.upsert_job_cv(conn, jid, scope=[1], tailored_cv="# Existing tailored draft\n", base_hash="stale-hash")
+    q.reset_job_cv_to_base(conn, jid)
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}) as tc, \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        _run(conn, cfg, jid, "generate")
+    row = q.get_job_cv(conn, jid)
+    assert row["base_hash"] == _base_hash(_resolved_settings(conn))
+    assert tc.call_args.args[2] == "# Me\n\n- Kafka work\n"   # source was the live base, via the reset draft
+
+
+def test_generate_records_applied_scope_note(conn, cfg):
+    jid = _seed(conn)
+    q.upsert_job_cv(conn, jid, scope=[1, 2])
+    with patch("app.routes.cv.tailor_cv", return_value={"markdown": "# regenerated"}), \
+         patch("app.routes.cv.check_guardrails", return_value={"findings": []}):
+        _run(conn, cfg, jid, "generate")
+    row = q.get_job_cv(conn, jid)
+    version = q.get_version(conn, "tailored", jid, row["current_version_id"])
+    assert version["note"] == "correct, choose"

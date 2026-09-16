@@ -64,11 +64,16 @@ def _resolved_settings(conn: sqlite3.Connection) -> dict:
 
 
 def _base_hash(settings: dict) -> str:
-    raw = "\x00".join([
-        settings.get("base_cv", ""),
-        settings.get("base_instruction", ""),
-        settings.get("base_guardrails", ""),
-    ])
+    return hashlib.sha256(settings.get("base_cv", "").encode()).hexdigest()
+
+
+def _guardrails_hash(settings: dict) -> str:
+    """Unlike _base_hash (which now covers only base_cv, for the draft-content
+    staleness badge), this covers both base_cv and base_guardrails: they're
+    check_guardrails()'s two ground-truth inputs (base_instruction plays no
+    role there), so a change to either makes existing guardrail findings
+    stale regardless of what tailor_cv() iterated from."""
+    raw = "\x00".join([settings.get("base_cv", ""), settings.get("base_guardrails", "")])
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -78,19 +83,29 @@ def _plan_context_hash(job_context: str, job_notes: str) -> str:
     return hashlib.sha256(f"{job_context}\x00{job_notes}".encode()).hexdigest()
 
 
-def _persist_draft(conn, job_id: int, *, draft: str, findings: list, settings: dict) -> None:
+def _persist_draft(conn, job_id: int, *, draft: str, findings: list, settings: dict,
+                   note: str = "", consumed_base: bool = True) -> None:
     """Store a freshly generated draft and stamp generated_at. If the guardrail
     check came back empty while guardrails ARE configured, keep the previous
     findings — an empty result there is almost always a transient LLM/JSON
     failure, and silently blanking the guardrails panel is worse than showing a
-    slightly stale check."""
+    slightly stale check.
+
+    base_hash/base_cv_snapshot are only re-stamped when this run's source
+    document was actually the live base CV (consumed_base=True) — a run
+    that iterated from an existing tailored draft instead didn't read the
+    current base CV at all, so re-stamping would falsely mark a possibly
+    already-stale base_hash as fresh."""
     fields: dict = {
         "tailored_cv": draft,
-        "base_hash": _base_hash(settings),
-        "base_cv_snapshot": settings.get("base_cv", ""),
+        "note": note,
     }
+    if consumed_base:
+        fields["base_hash"] = _base_hash(settings)
+        fields["base_cv_snapshot"] = settings.get("base_cv", "")
     if findings or not settings.get("base_guardrails", "").strip():
         fields["guardrail_findings"] = findings
+        fields["guardrails_hash"] = _guardrails_hash(settings)
     else:
         logger.warning("cv_tailor: guardrail check returned nothing for job %s — keeping prior findings", job_id)
     q.upsert_job_cv(conn, job_id, **fields)
@@ -102,20 +117,33 @@ def _persist_draft(conn, job_id: int, *, draft: str, findings: list, settings: d
     conn.commit()
 
 
-def _draft_stale(job_cv: dict | None, settings: dict) -> bool:
-    """The shown tailored CV no longer reflects its inputs — base CV / style /
-    guardrails changed, or the directives or edit latitude were changed since it
-    was generated."""
+def _draft_staleness_reason(job_cv: dict | None, settings: dict) -> str | None:
+    """Which of the draft's inputs changed since it was generated, if any:
+    'base' — the base CV content itself changed. Since "Apply tailoring
+    plan" iterates from the current draft rather than always re-deriving
+    from base, this can't be fixed by running it again — only "Reset to
+    base CV" (or a manual edit) picks up the new base content.
+    'plan' — tuning directives or edit scope changed since the draft was
+    generated. These are read fresh into the instruction on every
+    generate regardless of which document is being rewritten, so the next
+    "Apply tailoring plan" run picks them up automatically. Base
+    instruction and guardrails are the same way — always applied live —
+    so they aren't tracked here at all.
+    None if the draft is fresh."""
     if not job_cv or not job_cv.get("tailored_cv"):
-        return False
+        return None
     if job_cv.get("base_hash", "") != _base_hash(settings):
-        return True
+        return "base"
     ge = job_cv.get("generated_at")
     if not ge:
-        return False
+        return None
     de = job_cv.get("directives_edited_at")
     se = job_cv.get("scope_edited_at")
-    return bool((de and de > ge) or (se and se > ge))
+    return "plan" if ((de and de > ge) or (se and se > ge)) else None
+
+
+def _draft_stale(job_cv: dict | None, settings: dict) -> bool:
+    return bool(_draft_staleness_reason(job_cv, settings))
 
 
 def _edited_since_guardrail_check(job_cv: dict | None) -> bool:
@@ -129,6 +157,14 @@ def _edited_since_guardrail_check(job_cv: dict | None) -> bool:
         return False
     ca = job_cv.get("guardrails_checked_at")
     return not ca or ca < ea
+
+
+def _guardrails_stale(job_cv: dict | None, settings: dict) -> bool:
+    """The guardrail set (or the base CV they're checked against) changed
+    since the shown findings were computed."""
+    if not job_cv:
+        return False
+    return job_cv.get("guardrails_hash", "") != _guardrails_hash(settings)
 
 
 def _plan_status(conn: sqlite3.Connection, job: dict, job_cv: dict | None, running: bool) -> str:
@@ -158,7 +194,7 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
         return "none"
     if _edited_since_guardrail_check(job_cv):
         return "stale"
-    return "stale" if _draft_stale(job_cv, settings) else "fresh"
+    return "stale" if _guardrails_stale(job_cv, settings) else "fresh"
 
 
 def _cv_page_ctx(
@@ -198,6 +234,7 @@ def _rendered_chunk(conn: sqlite3.Connection, job_id: int, which: str, **ctx_ove
     if "updating_task_id" in ctx_overrides:
         run = bool(ctx["updating_task_id"])
         ctx["draft_status"] = _draft_status(ctx["job_cv"], ctx["settings"], run)
+        ctx["draft_stale_reason"] = _draft_staleness_reason(ctx["job_cv"], ctx["settings"])
         ctx["guardrail_status"] = _guardrail_status(ctx["job_cv"], ctx["settings"], run)
     if "plan_task_id" in ctx_overrides and ctx["job"]:
         ctx["plan_status"] = _plan_status(
@@ -280,6 +317,7 @@ def _workbench_ctx(
         "plan_task_id": planning,
         "plan_status": _plan_status(conn, job, job_cv, bool(planning)) if job else "none",
         "draft_status": _draft_status(job_cv, settings, bool(updating)),
+        "draft_stale_reason": _draft_staleness_reason(job_cv, settings),
         "guardrail_status": _guardrail_status(job_cv, settings, bool(updating)),
         "has_doc_write": doc_write_available(),
         "cv_diff_view": _cv_diff_view(job_cv),
@@ -713,7 +751,7 @@ def _task_cv_tailor(conn, client, model, config, params):
         elapsed = time.monotonic() - t0
         logger.info("cv_tailor: recheck check_guardrails for job %s took %.1fs", job_id, elapsed)
         if findings:
-            q.upsert_job_cv(conn, job_id, guardrail_findings=findings)
+            q.upsert_job_cv(conn, job_id, guardrail_findings=findings, guardrails_hash=_guardrails_hash(settings))
         else:
             logger.warning("cv_tailor: recheck guardrail check returned nothing for job %s — keeping prior findings", job_id)
         conn.execute(
@@ -734,9 +772,14 @@ def _task_cv_tailor(conn, client, model, config, params):
         scope_options=scope_options, guardrails=settings["base_guardrails"],
         tuning_directives=row["tuning_directives"],
     )
+    scope_ids = set(row["scope"])
+    scope_note = ", ".join(
+        (o["name"] or o["description"]) for o in scope_options if o["id"] in scope_ids
+    )
+    source_cv = row["tailored_cv"] or settings["base_cv"]
     yield "Generating the tailored CV… (LLM call: tailor_cv)"
     t0 = time.monotonic()
-    result = tailor_cv(client, model, settings["base_cv"], instr, jc,
+    result = tailor_cv(client, model, source_cv, instr, jc,
                        guardrails=settings["base_guardrails"])
     elapsed = time.monotonic() - t0
     logger.info("cv_tailor: tailor_cv for job %s took %.1fs", job_id, elapsed)
@@ -751,8 +794,9 @@ def _task_cv_tailor(conn, client, model, config, params):
     elapsed = time.monotonic() - t0
     logger.info("cv_tailor: check_guardrails for job %s took %.1fs", job_id, elapsed)
     yield f"Checked guardrails — took {elapsed:.1f}s ({len(findings)} finding(s))"
-    _persist_draft(conn, job_id, draft=draft, findings=findings, settings=settings)
-    q.add_job_event(conn, job_id, "cv", "CV regenerated")
+    _persist_draft(conn, job_id, draft=draft, findings=findings, settings=settings, note=scope_note,
+                   consumed_base=(source_cv == settings["base_cv"]))
+    q.add_job_event(conn, job_id, "cv", "Applied tailoring plan")
     return _tailor_result(conn, job_id, params)
 
 
@@ -829,6 +873,14 @@ async def cv_save_tailored(job_id: int, request: Request,
     return templates.TemplateResponse(
         request, "cv/_save_tailored_oob.html", _workbench_ctx(conn, job_id),
     )
+
+
+@router.post("/jobs/{job_id}/cv/reset-to-base")
+def cv_reset_to_base(job_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    _require_job(conn, job_id)
+    q.reset_job_cv_to_base(conn, job_id)
+    q.add_job_event(conn, job_id, "cv", "Reset to base CV")
+    return RedirectResponse(f"/jobs/{job_id}/cv/preview", status_code=303)
 
 
 @router.post("/jobs/{job_id}/cv/reset-directives", response_class=HTMLResponse)

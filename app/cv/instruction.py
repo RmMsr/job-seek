@@ -87,7 +87,7 @@ def compose_instruction(
         parts.append(base_instruction.strip())
         parts.append("")
     parts.append(
-        "Permitted edits — the ONLY kinds of change you may make to the base CV. This is "
+        "Permitted edits — the ONLY kinds of change you may make to the CV. This is "
         "a hard boundary: any other kind of change is off-limits, even when a tuning "
         "directive below calls for it."
     )
@@ -109,7 +109,7 @@ def compose_instruction(
         "Tuning directives — your priorities for this job. Pursue each one only as far as "
         "the permitted edits above allow; where a directive would need an edit that is not "
         "permitted, apply what you can within the permitted edits and otherwise leave that "
-        "content as it stands in the base CV."
+        "content as it stands in the CV."
     )
     parts.append(directives)
     return "\n".join(parts)

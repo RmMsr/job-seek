@@ -31,15 +31,15 @@
             aria-selected="{{ 'true' if active == 'base' else 'false' }}">Base</button>
     <button type="button" class="cv-preview-tab" role="tab" data-variant="tailored"
             aria-selected="{{ 'true' if active == 'tailored' else 'false' }}"
-            {% if not has_draft %}disabled title="Update to see the tailored version"{% endif %}>{{ mid_label }}</button>
+            {% if not has_draft %}disabled title="Apply tailoring plan to see the tailored version"{% endif %}>{{ mid_label }}</button>
     {% if editable %}
     <button type="button" class="cv-preview-tab" role="tab" data-variant="edit"
             aria-selected="false"
-            {% if not has_draft %}disabled title="Update to get a draft to edit"{% endif %}>Edit</button>
+            {% if not has_draft %}disabled title="Apply tailoring plan to get a draft to edit"{% endif %}>Edit</button>
     {% endif %}
     <button type="button" class="cv-preview-tab" role="tab" data-variant="diff"
             aria-selected="{{ 'true' if active == 'diff' else 'false' }}"
-            {% if not has_draft %}disabled title="Update to see the differences"{% endif %}>Differences{{ ' to' if has_draft }}</button>
+            {% if not has_draft %}disabled title="Apply tailoring plan to see the differences"{% endif %}>Differences{{ ' to' if has_draft }}</button>
     {% if has_draft %}
     <div class="cv-version-picker">
       <button type="button" class="cv-version-trigger cv-version-trigger-sm" aria-haspopup="menu" aria-expanded="false">

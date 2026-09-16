@@ -408,3 +408,22 @@ def test_recheck_guardrails_succeeds_after_accept(client, conn):
     task = q.get_task(conn, r.json()["task_id"])
     assert task["kind"] == "cv_tailor"
     assert task["params"]["mode"] == "recheck"
+
+
+def test_reset_to_base_replaces_tailored_content_and_logs_event(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="tailored draft")
+
+    r = client.post(f"/jobs/{jid}/cv/reset-to-base", follow_redirects=False)
+
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/jobs/{jid}/cv/preview"
+    row = q.get_job_cv(conn, jid)
+    assert row["tailored_cv"] == "# Me"
+    version = q.get_version(conn, "tailored", jid, row["current_version_id"])
+    assert version["action"] == "reset"
+    assert "cv" in [e["kind"] for e in q.get_job_events(conn, jid)]
+
+
+def test_reset_to_base_404_for_missing_job(client, conn):
+    assert client.post("/jobs/999/cv/reset-to-base").status_code == 404

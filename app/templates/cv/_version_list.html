@@ -41,8 +41,9 @@
 {%- if v.accepted_at %}<span class="cv-version-badge cv-version-badge-accepted">&#9733; Accepted</span>{% endif -%}
 {%- if v.id == current_version_id %}<span class="cv-version-badge cv-version-badge-current">Current</span>{% endif -%}
 {%- endmacro %}
+{% set _ACTION_LABELS = {'update': 'Applied plan', 'manual_edit': 'Manual edit', 'reset': 'Reset'} %}
 {% macro version_meta(v) -%}
-{{ v.updated_at | age }}{% if v.parent_hash %} &middot; from {{ 'cv' if v.parent_entity_type != v.entity_type else 'version' }} {{ v.parent_hash[:6] }}{% endif %}
+{{ v.updated_at | age }}{% if v.action in _ACTION_LABELS %} &middot; {{ _ACTION_LABELS[v.action] }}{% endif %}{% if v.parent_hash %} &middot; from {{ 'cv' if v.parent_entity_type != v.entity_type else 'version' }} {{ v.parent_hash[:6] }}{% endif %}{% if v.note %} &middot; {{ v.note }}{% endif %}
 {%- endmacro %}
 {% macro version_picker(versions, current_version_id, viewing_id, version_base_url, reopen_url=None, compact=False) %}
 {% set viewing_id = viewing_id if viewing_id else current_version_id %}

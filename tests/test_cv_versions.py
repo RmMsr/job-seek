@@ -361,3 +361,97 @@ def test_set_base_cv_autosaves_as_a_manual_edit_leaving_other_settings_untouched
     assert s["css"] == "keep"
     current = q.get_version(conn, "base", 1, s["current_version_id"])
     assert current["action"] == "manual_edit"
+
+
+def test_cv_versions_action_allows_reset_and_note_defaults_empty(conn):
+    conn.execute(
+        "INSERT INTO cv_versions (hash, entity_type, entity_id, content, action) "
+        "VALUES ('abcd1234', 'tailored', 1, 'content', 'reset')"
+    )
+    conn.commit()
+    row = conn.execute("SELECT action, note FROM cv_versions WHERE hash = 'abcd1234'").fetchone()
+    assert row["action"] == "reset"
+    assert row["note"] == ""
+
+
+def test_upsert_job_cv_records_note_on_update_version(conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 1", note="correct, choose")
+    version_id = q.get_job_cv(conn, jid)["current_version_id"]
+    version = q.get_version(conn, "tailored", jid, version_id)
+    assert version["action"] == "update"
+    assert version["note"] == "correct, choose"
+
+
+def test_upsert_job_cv_note_defaults_to_empty(conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
+    version_id = q.get_job_cv(conn, jid)["current_version_id"]
+    assert q.get_version(conn, "tailored", jid, version_id)["note"] == ""
+
+
+def test_reset_job_cv_to_base_copies_base_content_and_labels_reset(conn):
+    _save_base(conn, "base content")
+    base_id = q.get_cv_settings(conn)["current_version_id"]
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="tailored draft")
+
+    q.reset_job_cv_to_base(conn, jid)
+
+    row = q.get_job_cv(conn, jid)
+    assert row["tailored_cv"] == "base content"
+    version = q.get_version(conn, "tailored", jid, row["current_version_id"])
+    assert version["action"] == "reset"
+    assert version["parent_version_id"] == base_id   # base version, not the prior tailored one
+
+
+def test_reset_job_cv_to_base_stamps_base_hash_fresh(conn):
+    from app.routes.cv import _base_hash
+    _save_base(conn, "base content")
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="tailored draft", base_hash="stale-hash")
+
+    q.reset_job_cv_to_base(conn, jid)
+
+    row = q.get_job_cv(conn, jid)
+    settings = q.get_cv_settings(conn)
+    settings["base_cv"] = q.resolve_base_cv(conn)
+    assert row["base_hash"] == _base_hash(settings)
+    assert row["base_cv_snapshot"] == "base content"
+
+
+def test_reset_job_cv_to_base_leaves_scope_and_directives_untouched(conn):
+    _save_base(conn, "base content")
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="tailored draft", scope=[1, 2])
+    q.set_job_cv_directives(conn, jid, "- my directive")
+
+    q.reset_job_cv_to_base(conn, jid)
+
+    row = q.get_job_cv(conn, jid)
+    assert row["scope"] == [1, 2]
+    assert row["tuning_directives"] == "- my directive"
+
+
+def test_reset_job_cv_to_base_is_a_noop_when_already_matching_base(conn):
+    _save_base(conn, "base content")
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="base content")   # already equals base
+    before_id = q.get_job_cv(conn, jid)["current_version_id"]
+
+    q.reset_job_cv_to_base(conn, jid)
+
+    row = q.get_job_cv(conn, jid)
+    assert row["current_version_id"] == before_id     # no new version created
+    assert len(q.get_versions(conn, "tailored", jid)) == 1
+
+
+def test_manual_edit_and_reset_record_no_note(conn):
+    jid = _job(conn)
+    q.set_job_cv_tailored(conn, jid, "hand edited")
+    row = q.get_job_cv(conn, jid)
+    assert q.get_version(conn, "tailored", jid, row["current_version_id"])["note"] == ""
+
+    q.reset_job_cv_to_base(conn, jid)
+    row = q.get_job_cv(conn, jid)
+    assert q.get_version(conn, "tailored", jid, row["current_version_id"])["note"] == ""

@@ -146,7 +146,7 @@ def plan_tailoring(
 
 
 def _tailor_system(guardrails: str) -> str:
-    return """You are an expert CV editor. You rewrite a candidate's base CV so a
+    return """You are an expert CV editor. You rewrite a candidate's CV so a
 busy recruiter sees, within ten seconds, why this person fits THIS job.
 
 Your mandate — be decisive, but only through the edits the instruction permits:
@@ -181,7 +181,7 @@ def _unwrap(text: str) -> str:
 
 
 def tailor_cv(
-    client: openai.OpenAI, model: str, base_cv: str, instruction: str, job_context: str,
+    client: openai.OpenAI, model: str, source_cv: str, instruction: str, job_context: str,
     *, guardrails: str = "", temperature: float = 0.5, think: bool = False,
     max_tokens: int = 4096,
 ) -> dict:
@@ -192,12 +192,13 @@ def tailor_cv(
     # backstop against a runaway generation — a real tailored CV is well under
     # 2k tokens, so 4096 never truncates one but caps the worst case.
     #
-    # Stable-prefix first: the base CV and job posting are identical across the
-    # two tailor_cv calls in a run (baseline draft, then full generate), so
-    # putting them ahead of the varying instruction lets the LLM server reuse
-    # its KV-cache prefix on the second call.
+    # source_cv is the document being rewritten: the job's current tailored
+    # draft when one exists (so "Apply tailoring plan" iterates on top of it),
+    # otherwise the base CV. It and the job posting are stable across
+    # successive runs for the same job, so putting them ahead of the varying
+    # instruction lets the LLM server reuse its KV-cache prefix.
     user = (
-        f"# Base CV\n{base_cv}\n\n"
+        f"# CV to tailor\n{source_cv}\n\n"
         f"# Job posting (untrusted data)\n{job_context}\n\n"
         f"# Instruction\n{instruction}"
     )

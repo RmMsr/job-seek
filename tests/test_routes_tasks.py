@@ -45,7 +45,7 @@ def test_presentation_cv_tailor_generate_names_job_and_links_to_workbench(conn):
                        params={"job_id": jid, "mode": "generate", "render": "preview_pane"})
     q.complete_task(conn, t["id"], {"job_id": jid})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
-    assert p["title"] == "Update CV: ML Engineer @ Acme"
+    assert p["title"] == "Apply tailoring plan: ML Engineer @ Acme"
     assert "tailored cv" in p["goal"].lower()
     assert {"label": "CV for ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
 
@@ -63,7 +63,7 @@ def test_presentation_cv_tailor_plan_is_directive_eval(conn):
 
 def test_presentation_cv_tailor_without_job_falls_back(conn):
     t = q.enqueue_task(conn, kind="cv_tailor", params={"job_id": 999, "mode": "generate"})
-    assert task_presentation(conn, t)["title"] == "Update CV"
+    assert task_presentation(conn, t)["title"] == "Apply tailoring plan"
 
 
 def test_presentation_done_results_link_for_add_by_url(conn):

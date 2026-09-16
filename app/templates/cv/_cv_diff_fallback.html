@@ -44,7 +44,7 @@
 {% if message %}
   <p class="muted">{{ message }}</p>
 {% elif predates %}
-  <p class="muted">This draft predates change tracking &mdash; regenerate to see the differences.</p>
+  <p class="muted">This draft predates change tracking &mdash; apply the tailoring plan again to see the differences.</p>
 {% else %}
   {{ body_html | safe }}
 {% endif %}

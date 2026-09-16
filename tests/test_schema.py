@@ -1363,14 +1363,14 @@ def test_cv_settings_and_job_cv_columns_after_version_migration():
     assert cols == {
         "job_id", "current_version_id", "scope", "tuning_directives", "plan",
         "handled_suggestions", "guardrail_findings", "change_report", "base_hash",
-        "base_cv_snapshot", "plan_generated_at", "directives_edited_at", "generated_at",
-        "scope_edited_at", "edited_at", "guardrails_checked_at", "plan_context_hash",
-        "updated_at",
+        "base_cv_snapshot", "guardrails_hash", "plan_generated_at", "directives_edited_at",
+        "generated_at", "scope_edited_at", "edited_at", "guardrails_checked_at",
+        "plan_context_hash", "updated_at",
     }
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_versions)")}
     assert cols == {
         "id", "hash", "entity_type", "entity_id", "parent_version_id",
-        "content", "action", "accepted_at", "updated_at",
+        "content", "action", "note", "accepted_at", "updated_at",
     }
     conn.close()
 

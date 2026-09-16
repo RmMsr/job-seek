@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 import json
 import re
 import secrets
@@ -53,7 +54,8 @@ def _new_version_hash(conn: sqlite3.Connection) -> str:
 def _record_version(
     conn: sqlite3.Connection, entity_type: str, entity_id: int, *,
     action: str, content: str, current_version_id: int | None,
-    initial_parent_id: int | None = None,
+    initial_parent_id: int | None = None, parent_id_override: int | None = None,
+    note: str = "",
 ) -> int:
     """Returns the version id that should become current. A manual edit
     stacks onto the current row in place when that row is itself an
@@ -69,7 +71,13 @@ def _record_version(
     `initial_parent_id` only takes effect when this entity has no version at
     all yet (current_version_id is None) — it lets a job's very first
     tailored version record the base-CV version it was generated from as its
-    parent, rather than leaving parent_version_id NULL."""
+    parent, rather than leaving parent_version_id NULL.
+
+    `parent_id_override`, when given, is used as the new version's parent
+    instead of the usual current-version/initial-parent chain — used by a
+    reset, whose parent is the base CV version it reset to rather than the
+    tailored version it replaces, even when that isn't the entity's first
+    version."""
     current = None
     if current_version_id is not None:
         current = conn.execute(
@@ -94,11 +102,13 @@ def _record_version(
             (content, current_version_id),
         )
         return current_version_id
-    parent_id = current_version_id if current_version_id is not None else initial_parent_id
+    parent_id = parent_id_override
+    if parent_id is None:
+        parent_id = current_version_id if current_version_id is not None else initial_parent_id
     new_id = conn.execute(
-        "INSERT INTO cv_versions (hash, entity_type, entity_id, parent_version_id, content, action, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
-        (_new_version_hash(conn), entity_type, entity_id, parent_id, content, action),
+        "INSERT INTO cv_versions (hash, entity_type, entity_id, parent_version_id, content, action, note, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+        (_new_version_hash(conn), entity_type, entity_id, parent_id, content, action, note),
     ).lastrowid
     _prune_versions(conn, entity_type, entity_id)
     return new_id
@@ -448,6 +458,7 @@ def get_job_cv(conn: sqlite3.Connection, job_id: int) -> dict | None:
 def upsert_job_cv(conn: sqlite3.Connection, job_id: int, **fields) -> None:
     conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
     tailored_cv = fields.pop("tailored_cv", None)
+    note = fields.pop("note", "")
     encoded = {}
     for k, v in fields.items():
         if k in _JOB_CV_JSON_COLS and not isinstance(v, str):
@@ -462,6 +473,7 @@ def upsert_job_cv(conn: sqlite3.Connection, job_id: int, **fields) -> None:
             conn, "tailored", job_id, action="update", content=tailored_cv,
             current_version_id=current_version_id,
             initial_parent_id=resolve_base_version_id(conn),
+            note=note,
         )
     if encoded:
         sets = ", ".join(f"{k} = ?" for k in encoded)
@@ -498,6 +510,43 @@ def set_job_cv_tailored(conn: sqlite3.Connection, job_id: int, markdown: str) ->
         "UPDATE job_cv SET current_version_id = ?, edited_at = datetime('now'), "
         "updated_at = datetime('now') WHERE job_id = ?",
         (new_version_id, job_id),
+    )
+    conn.commit()
+
+
+def reset_job_cv_to_base(conn: sqlite3.Connection, job_id: int) -> None:
+    """Content-only reset: replaces the tailored CV with the resolved base CV
+    (the accepted base version, or the current one if nothing's accepted),
+    recording a 'reset' version whose parent is that base version rather than
+    the tailored version it replaces. Scope, tuning directives, plan and
+    handled suggestions are left untouched — mirrors set_job_cv_tailored's
+    write shape otherwise.
+
+    Also stamps base_hash/base_cv_snapshot: the content is now known-for-
+    certain to equal the live base CV, so the "Base changed" staleness badge
+    (app.routes.cv._draft_staleness_reason) should clear immediately rather
+    than staying stuck until the next Apply run. The hash formula here
+    mirrors app.routes.cv._base_hash (base_cv only) -- duplicated rather than
+    imported to avoid a routes->queries layering violation; keep the two in
+    sync if that formula ever changes."""
+    conn.execute("INSERT OR IGNORE INTO job_cv (job_id) VALUES (?)", (job_id,))
+    current_version_id = conn.execute(
+        "SELECT current_version_id FROM job_cv WHERE job_id = ?", (job_id,)
+    ).fetchone()[0]
+    base_content = resolve_base_cv(conn)
+    # resolve_base_cv and resolve_base_version_id independently resolve "the
+    # base version" -- they're expected to agree since both run against the
+    # same connection with no intervening write (this app is single-instance,
+    # non-concurrent).
+    new_version_id = _record_version(
+        conn, "tailored", job_id, action="reset", content=base_content,
+        current_version_id=current_version_id,
+        parent_id_override=resolve_base_version_id(conn),
+    )
+    conn.execute(
+        "UPDATE job_cv SET current_version_id = ?, edited_at = datetime('now'), "
+        "base_hash = ?, base_cv_snapshot = ?, updated_at = datetime('now') WHERE job_id = ?",
+        (new_version_id, hashlib.sha256(base_content.encode()).hexdigest(), base_content, job_id),
     )
     conn.commit()
 

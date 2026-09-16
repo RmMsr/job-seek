@@ -29,7 +29,12 @@
 
 <div class="cv-preview-actions">
   <button type="button" class="btn btn-primary" data-progress-url="/jobs/{{ job.id }}/cv/generate"
-          data-progress-label="Updating the tailored CV" data-progress-oob>Update</button>
+          data-progress-label="Applying the tailoring plan" data-progress-oob>Apply tailoring plan</button>
+  {% if has_draft %}
+  <form method="post" action="/jobs/{{ job.id }}/cv/reset-to-base" style="display:inline;">
+    <button type="submit" class="btn btn-subtle">Reset to base CV</button>
+  </form>
+  {% endif %}
   <span class="cv-preview-progress" aria-live="polite"{% if not updating_task_id %} hidden{% endif %}>&#9203; A tailored update is in progress&hellip;</span>
   <span id="cv-editor-status" class="cv-editor-status" aria-live="polite"></span>
   {% if not has_doc_write %}<span class="muted">(doc-write-cli not installed)</span>{% endif %}
@@ -38,7 +43,7 @@
 {% if not has_draft %}
 <p class="cv-preview-empty muted">No tailored CV yet — review the plan on the
   <a href="/jobs/{{ job.id }}/cv">Tailor CV</a> page, then hit
-  <strong>Update</strong>. Your base CV is shown below for reference.</p>
+  <strong>Apply tailoring plan</strong>. Your base CV is shown below for reference.</p>
 {% endif %}
 
 <div id="cv-diff-summary">{% include "cv/_cv_diff_summary.html" %}</div>

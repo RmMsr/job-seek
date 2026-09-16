@@ -23,14 +23,19 @@ def test_preview_pane_has_stage_status_indicators(client, conn):
 
 
 def test_preview_draft_and_guardrail_status_stale_after_scope_change(client, conn):
+    from app.routes.cv import _base_hash
     jid = _job(conn)
-    q.upsert_job_cv(conn, jid, tailored_cv="# Draft", guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
+    settings = q.get_cv_settings(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft", base_hash=_base_hash(settings),
+                    guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
     conn.execute("UPDATE job_cv SET generated_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
     conn.commit()
     q.set_job_cv_scope(conn, jid, [1])
     page = client.get(f"/jobs/{jid}/cv/preview").text
     # both the draft and the guardrail header track staleness
     assert page.count('data-state="stale"') >= 2
+    # base_hash still matches -- this is scope/plan staleness only, not base
+    assert "Outdated" in page and "Base changed" not in page
 
 
 def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, conn):
@@ -46,7 +51,7 @@ def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, conn):
                        default_scope=settings["default_scope"],
                        directives_template=settings["directives_template"])
     r = client.get(f"/jobs/{jid}/cv/preview")
-    assert '<span id="cv-draft-status" class="cv-stage-status" data-state="stale">Outdated</span>' in r.text
+    assert '<span id="cv-draft-status" class="cv-stage-status" data-state="stale">Base changed</span>' in r.text
 
 
 def test_preview_badge_shows_running_while_an_update_runs(client, conn):
@@ -192,7 +197,7 @@ def test_preview_pane_layout_guardrails_under_preview_controls_below_iframe(clie
     with patch("app.routes.cv.doc_write_available", return_value=True):
         text = client.get(f"/jobs/{jid}/cv/preview").text
     actions = text[text.index('class="cv-preview-actions"'):text.index('class="cv-preview-bar"')]
-    assert ">Update</button>" in actions
+    assert ">Apply tailoring plan</button>" in actions
     assert "Accept this CV" not in actions and "Download PDF" not in actions
     stage = text.index('class="cv-preview-stage')
     assert stage < text.index("Accept this CV") < text.index('id="cv-findings"')
@@ -398,9 +403,18 @@ def test_accept_does_not_change_the_preview_view(client, conn):
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get(f"/jobs/{jid}/cv/preview")
     # Accepting no longer freezes the view — the normal editable preview pane
-    # (with its Update button and edit affordances) still renders.
-    assert ">Update</button>" in r.text
+    # (with its Apply-tailoring-plan button and edit affordances) still renders.
+    assert ">Apply tailoring plan</button>" in r.text
     assert 'data-variant="diff"' in r.text
+
+
+def test_preview_pane_has_reset_to_base_button(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
+    r = client.get(f"/jobs/{jid}/cv/preview")
+    assert f'action="/jobs/{jid}/cv/reset-to-base"' in r.text
+    assert ">Reset to base CV</button>" in r.text
+    assert ">Apply tailoring plan</button>" in r.text
 
 
 def test_preview_page_shows_read_only_historic_version(client, conn):
@@ -596,3 +610,26 @@ def test_preview_pane_shows_accepted_badge_and_no_accept_button(client, conn):
     # Already accepted — no action needed (accepting a different version is
     # what replaces it, there's no separate "unaccept").
     assert f'action="/jobs/{jid}/cv/accept"' not in r.text
+
+
+def test_history_meta_shows_age_type_parent_note_in_order(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 1", note="scope-alpha")
+    first_hash = q.get_job_cv(conn, jid)["current_version_hash"]
+    q.upsert_job_cv(conn, jid, tailored_cv="draft 2", note="scope-beta")
+
+    r = client.get(f"/jobs/{jid}/cv/preview")
+    list_start = r.text.index('id="cv-version-list"')
+    list_end = r.text.index('id="cv-findings"', list_start)
+    history = r.text[list_start:list_end]
+
+    assert "Applied plan" in history
+    assert f"from version {first_hash[:6]}" in history
+    assert "scope-beta" in history
+
+    # The current (second) row's meta line: age, then "Applied plan", then
+    # "from version <first_hash>", then its own note — in that order.
+    parent_pos = history.index(f"from version {first_hash[:6]}")
+    label_pos = history.rindex("Applied plan", 0, parent_pos)
+    note_pos = history.index("scope-beta", parent_pos)
+    assert label_pos < parent_pos < note_pos
