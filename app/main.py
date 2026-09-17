@@ -22,12 +22,19 @@ logging.getLogger("uvicorn.access").addFilter(_ExcludeTasksActiveFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        from app.config import load_config
-        from app.tracing import init_tracing
-        init_tracing(load_config())
-    except Exception:
-        logging.getLogger("job_seek").warning("tracing init skipped", exc_info=True)
+    from app.config import check_config_status, load_config
+    if check_config_status().ok:
+        config = load_config()
+        try:
+            from app.tracing import init_tracing
+            init_tracing(config)
+        except Exception:
+            logging.getLogger("job_seek").warning("tracing init skipped", exc_info=True)
+        # Migrate once, synchronously, before the app (or the worker thread)
+        # opens any other connection — request handlers use the lighter
+        # app.deps._connect() and no longer run migrations themselves.
+        from app.deps import _open_db
+        _open_db(config).close()
     stop_event = threading.Event()
     worker_thread = threading.Thread(target=run_worker_forever, args=(stop_event,), daemon=True)
     worker_thread.start()

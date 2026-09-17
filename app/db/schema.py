@@ -680,15 +680,21 @@ def _migrate_jobs_canonicalize_urls(conn: sqlite3.Connection) -> None:
     if row is None:
         return
 
-    by_canon: dict[str, list[int]] = {}
+    by_canon: dict[str, list[tuple[int, str]]] = {}
     for job_id, url in conn.execute("SELECT id, url FROM jobs ORDER BY id"):
-        by_canon.setdefault(canonicalize_url(url), []).append(job_id)
+        by_canon.setdefault(canonicalize_url(url), []).append((job_id, url))
 
-    for canon, ids in by_canon.items():
-        for drop in ids[1:]:
-            conn.execute("DELETE FROM jobs WHERE id = ?", (drop,))
-        conn.execute("UPDATE jobs SET url = ? WHERE id = ?", (canon, ids[0]))
-    conn.commit()
+    dirty = False
+    for canon, rows in by_canon.items():
+        for drop_id, _ in rows[1:]:
+            conn.execute("DELETE FROM jobs WHERE id = ?", (drop_id,))
+            dirty = True
+        keep_id, keep_url = rows[0]
+        if keep_url != canon:
+            conn.execute("UPDATE jobs SET url = ? WHERE id = ?", (canon, keep_id))
+            dirty = True
+    if dirty:
+        conn.commit()
 
 
 def _migrate_tasks_group_and_status(conn: sqlite3.Connection) -> None:
