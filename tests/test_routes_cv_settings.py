@@ -149,7 +149,11 @@ def test_cv_page_diff_picker_lists_all_versions_and_switches_target(client, conn
     # the tab label itself.
     trigger = r.text[r.text.index('class="cv-version-trigger cv-version-trigger-sm"'):]
     assert 'cv-version-badge-current">Current' in trigger
-    assert f'data-src="/cv/diff.html?against={current_id}"' in r.text
+    # Picking a diff target activates the Differences tab straight away.
+    assert f'src="/cv/diff.html?against={current_id}"' in r.text
+    diff_tab_start = r.text.index('data-variant="diff"')
+    diff_tab = r.text[diff_tab_start:r.text.index("</button>", diff_tab_start)]
+    assert 'aria-selected="true"' in diff_tab
 
     assert client.get("/cv?against=99999").status_code == 404
 

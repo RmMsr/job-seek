@@ -16,6 +16,34 @@ def test_presentation_fetch_source(conn):
     assert p["next_step"].startswith("Queued")
 
 
+def test_presentation_fetch_source_done_reports_new_job_count(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 3, "new_job_ids": []})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "3 new jobs"
+
+
+def test_presentation_fetch_source_lists_new_jobs(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    j1 = q.insert_job(conn, source_id=sid, url="https://cord.co/1", title="A", company="", raw_text="")
+    j2 = q.insert_job(conn, source_id=sid, url="https://cord.co/2", title="B", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 2, "new_job_ids": [j1, j2]})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert {"label": "A", "href": f"/jobs/{j1}"} in p["results"]
+    assert {"label": "B", "href": f"/jobs/{j2}"} in p["results"]
+
+
+def test_presentation_fetch_source_no_new_jobs_lists_none(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 0, "new_job_ids": []})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert not any(r["href"] and r["href"].startswith("/jobs/") and "source_id" not in r["href"]
+                   for r in p["results"])
+
+
 def test_presentation_running_uses_progress(conn):
     t = q.enqueue_task(conn, kind="fetch_source", params={})
     q.claim_next_task(conn)
@@ -100,6 +128,18 @@ def test_presentation_failed_shows_error(conn):
     q.fail_task(conn, t["id"], "Slack auth expired\nstacktrace line\nmore")
     p = task_presentation(conn, q.get_task(conn, t["id"]))
     assert p["next_step"] == "Slack auth expired"
+
+
+def test_root_presentation_fetch_all_reports_total_new_jobs(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.complete_task(conn, a["id"], {"jobs_new": 2, "new_job_ids": []})
+    q.complete_task(conn, b["id"], {"jobs_new": 1, "new_job_ids": []})
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "done"
+    assert "3 new jobs" in p["next_step"]
 
 
 def test_root_presentation_fetch_all_aggregates(conn):

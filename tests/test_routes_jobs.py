@@ -2987,6 +2987,16 @@ def test_job_detail_has_no_tailor_cv_cta_button(client, conn):
     assert 'aria-label="Actions"' not in text
 
 
+def test_job_list_row_expand_links_accepted_cv_to_preview(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft")
+    q.accept_job_cv(conn, jid)
+    r = client.get(f"/jobs/{jid}/expand")
+    text = r.text
+    assert f'href="/jobs/{jid}/cv/preview"' in text
+    assert f'class="btn btn-primary btn-tailor-cv" href="/jobs/{jid}/cv"' not in text
+
+
 def test_job_list_row_expand_shows_actions_and_organize(client, conn):
     """The edit icon is a shortcut to the job view, but Actions (Tailor CV)
     and Organize (Accept/Reject/Trash) still render directly on the card

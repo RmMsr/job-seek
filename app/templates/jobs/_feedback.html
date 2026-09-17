@@ -113,7 +113,8 @@
     <div class="job-action-group">
       <span class="job-actions-group-label">Actions</span>
       <div class="cv-actions-group" role="group" aria-label="Actions">
-        <a class="btn btn-primary btn-tailor-cv" href="/jobs/{{ job.id }}/cv"
+        <a class="btn btn-primary btn-tailor-cv"
+           href="/jobs/{{ job.id }}/cv{{ '/preview' if job_cv and job_cv.accepted_at }}"
            title="Generate a CV tailored to this job.">
           <span aria-hidden="true">&#128196;</span>
           {% if job_cv and job_cv.accepted_at %}Tailored CV &#10003;{% elif job_cv and job_cv.tailored_cv %}Continue tailoring CV{% else %}Tailor CV{% endif %}

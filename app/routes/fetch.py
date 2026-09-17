@@ -48,6 +48,8 @@ def _task_fetch_source(conn, client, model, config, params):
         fetch_result = stop.value
     result = {"html_chunks": [], "notices": []}
     if fetch_result is not None:
+        result["jobs_new"] = fetch_result.jobs_new
+        result["new_job_ids"] = fetch_result.new_job_ids
         result.update(_auth_error_result(conn, source, fetch_result.run_id))
     return result
 

@@ -129,6 +129,7 @@ def test_run_fetch_new_job_stored(conn, source):
     assert len(jobs) == 1
     assert jobs[0]["url"] == "http://example.com/job/1"
     assert jobs[0]["content_type"] == "job_posting"
+    assert result.new_job_ids == [jobs[0]["id"]]
 
 
 def test_run_fetch_non_slack_lead_gets_ai_summary(conn, source):
@@ -371,6 +372,7 @@ def test_run_fetch_irrelevant_not_persisted(conn, source):
 
     assert q.get_jobs(conn) == []
     assert result.jobs_new == 0
+    assert result.new_job_ids == []
     assert client.chat.completions.create.call_count == 1
     assert any("Classified as irrelevant" in m for m in messages)
 

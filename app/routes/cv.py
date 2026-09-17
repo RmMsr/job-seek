@@ -356,6 +356,11 @@ def cv_preview_page(job_id: int, request: Request, version: int | None = None,
         against_type=resolved[0] if resolved else None,
         against_id=resolved[1] if resolved else None,
     )
+    # An explicit diff target in the URL means the diff-picker was just used
+    # to pick it — land on the Differences tab instead of resetting to
+    # Tailored underneath a picker that now shows a different target.
+    if resolved:
+        ctx["active"] = "diff"
     if version is not None:
         v = q.get_version(conn, "tailored", job_id, version)
         if v is None:
@@ -443,6 +448,10 @@ def cv_page(request: Request, version: int | None = None, against: int | None = 
     if against is not None and q.get_version(conn, "base", 1, against) is None:
         raise HTTPException(status_code=404, detail="Version not found")
     ctx = _cv_page_ctx(conn, against=against, viewing_version_id=version)
+    # An explicit diff target in the URL means the diff-picker was just used
+    # to pick it — land on the Differences tab instead of resetting to
+    # Preview underneath a picker that now shows a different target.
+    ctx["active"] = "diff" if against is not None else "preview"
     if version is not None:
         v = q.get_version(conn, "base", 1, version)
         if v is None:

@@ -49,7 +49,7 @@
 <div id="cv-diff-summary">{% include "cv/_cv_diff_summary.html" %}</div>
 
 {% if has_doc_write %}
-  {% with mid_label = 'Tailored', title_prefix = '', active = '', editable = true %}
+  {% with mid_label = 'Tailored', title_prefix = '', active = active or '', editable = true %}
     {% include "cv/_preview_tabs.html" %}
   {% endwith %}
 {% else %}

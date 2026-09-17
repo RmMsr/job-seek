@@ -205,6 +205,7 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
             src = q.get_source(conn, sid)
             label = f"Jobs from {src['name']}" if src else "Jobs from this source"
             out.append({"label": label, "href": f"/jobs?source_id={sid}"})
+        out.extend(_job_links(conn, r.get("new_job_ids") or []))
     elif kind == "job_add_by_url" and r.get("job_id"):
         title = _job_title(conn, r["job_id"])
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{r['job_id']}"})

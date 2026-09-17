@@ -21,6 +21,11 @@ def test_render_markdown_single_newline_breaks_line():
     assert "<br" in result
 
 
+def test_render_markdown_link_opens_in_new_tab():
+    result = str(render_markdown("[Acme](https://acme.example/jobs/1)"))
+    assert '<a target="_blank" rel="noopener noreferrer" href="https://acme.example/jobs/1">' in result
+
+
 def test_render_markdown_inline_unwraps_single_paragraph():
     assert str(render_markdown_inline("Must be remote")) == "Must be remote"
 

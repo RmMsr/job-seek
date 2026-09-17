@@ -3,7 +3,7 @@ import logging
 import sqlite3
 import time
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generator
 import openai
 from app.db import queries as q
@@ -35,6 +35,7 @@ class FetchResult:
     jobs_found: int
     jobs_new: int
     error: str | None
+    new_job_ids: list[int] = field(default_factory=list)
 
 
 def _make_fetcher(
@@ -272,7 +273,7 @@ def run_fetch(
         fetcher = _make_fetcher(source, profile_dir, conn, client, model)
         raw_jobs: list[RawJob] = fetcher.fetch()
         jobs_found = len(raw_jobs)
-        jobs_new = 0
+        new_job_ids: list[int] = []
 
         yield _progress(f"Fetched {jobs_found} raw posting(s) from '{source['name']}'")
 
@@ -293,19 +294,20 @@ def run_fetch(
                 raw_text=raw.raw_text,
                 published_at=raw.published_at,
             )
-            jobs_new += 1
             is_slack = source["fetcher_type"] == "slack"
             yield from _ingest_posting(
                 conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
                 url=raw_url, progress_prefix=f"[{i}/{jobs_found}] ",
                 preserve_existing_metadata=raw.published_at is not None,
             )
-            if not q.job_exists(conn, job_id):
-                jobs_new -= 1
+            if q.job_exists(conn, job_id):
+                new_job_ids.append(job_id)
 
+        jobs_new = len(new_job_ids)
         q.complete_fetch_run(conn, run_id, jobs_found=jobs_found, jobs_new=jobs_new)
         yield _progress(f"Fetch complete for '{source['name']}': {jobs_new} new / {jobs_found} found")
-        return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=jobs_found, jobs_new=jobs_new, error=None)
+        return FetchResult(source_id=source["id"], run_id=run_id, jobs_found=jobs_found, jobs_new=jobs_new,
+                           error=None, new_job_ids=new_job_ids)
     except Exception as exc:
         q.complete_fetch_run(
             conn, run_id, jobs_found=0, jobs_new=0, error=str(exc),

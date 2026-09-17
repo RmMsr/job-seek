@@ -349,7 +349,13 @@ def test_preview_pane_diff_picker_offers_own_versions_and_switches_target(client
 
     with patch("app.routes.cv.doc_write_available", return_value=True):
         r = client.get(f"/jobs/{jid}/cv/preview?against_type=tailored&against_id={old_tailored_id}")
-    assert f"data-src=\"/jobs/{jid}/cv/diff.html?against_type=tailored&against_id={old_tailored_id}\"" in r.text
+    # Picking a diff target activates the Differences tab straight away,
+    # rather than landing back on the Tailored tab with the target changed
+    # underneath it.
+    assert f"src=\"/jobs/{jid}/cv/diff.html?against_type=tailored&against_id={old_tailored_id}\"" in r.text
+    diff_tab_start = r.text.index('data-variant="diff"')
+    diff_tab = r.text[diff_tab_start:r.text.index("</button>", diff_tab_start)]
+    assert 'aria-selected="true"' in diff_tab
 
 
 def test_preview_pane_diff_picker_rejects_bad_targets(client, conn):

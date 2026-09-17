@@ -5,11 +5,18 @@ import markdown
 from markupsafe import Markup
 
 
+_LINK_HREF_RE = re.compile(r'<a href="')
+
+
 def render_markdown(text: str | None) -> Markup:
     if not text:
         return Markup("")
     escaped = html.escape(text)
-    return Markup(markdown.markdown(escaped, extensions=["nl2br"]))
+    rendered = markdown.markdown(escaped, extensions=["nl2br"])
+    # Links point off-app (job postings, sources) — keep the user's place here
+    # rather than navigating them away in the same tab.
+    rendered = _LINK_HREF_RE.sub('<a target="_blank" rel="noopener noreferrer" href="', rendered)
+    return Markup(rendered)
 
 
 def render_markdown_inline(text: str | None) -> Markup:

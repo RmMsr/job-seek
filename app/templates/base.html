@@ -1718,6 +1718,20 @@ document.body.addEventListener('input', function (e) {
       if (m && window.initMarkdownEditors) window.initMarkdownEditors(m);
     }
   }
+  // Exposed so the diff-target picker (below, a separate IIFE) can put the
+  // Differences tab itself into view when it's used — the picker sits right
+  // after that tab and reads as one control, so using it should act like
+  // clicking the tab, not just change what the tab would show once you
+  // click it separately.
+  window.__cvActivateDiffTab = function (bar) {
+    var tab = bar && bar.querySelector('.cv-preview-tab[data-variant="diff"]');
+    if (!tab || tab.disabled) return;
+    bar.querySelectorAll('.cv-preview-tab').forEach(function (o) {
+      o.setAttribute('aria-selected', o === tab ? 'true' : 'false');
+    });
+    var stage = bar.parentNode.querySelector('.cv-preview-stage');
+    if (stage) activate(stage, 'diff');
+  };
   function initStages() {
     document.querySelectorAll('.cv-preview-stage:not([data-wired])').forEach(function (stage) {
       stage.setAttribute('data-wired', '1');
@@ -1800,6 +1814,12 @@ document.body.addEventListener('input', function (e) {
       var willOpen = menu.hidden;
       document.querySelectorAll('.cv-version-menu').forEach(closeMenu);
       if (willOpen) openMenu(trigger, menu);
+      // The small in-tab-bar picker is the diff-target selector, styled to
+      // read as part of the Differences tab — using it should show that
+      // tab too, not just open its own menu.
+      if (trigger.classList.contains('cv-version-trigger-sm') && window.__cvActivateDiffTab) {
+        window.__cvActivateDiffTab(trigger.closest('.cv-preview-bar'));
+      }
       return;
     }
     if (!e.target.closest('.cv-version-menu')) {
