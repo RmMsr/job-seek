@@ -23,9 +23,15 @@ CREATE TABLE IF NOT EXISTS cv_versions (
 
 CREATE INDEX IF NOT EXISTS idx_cv_versions_entity ON cv_versions(entity_type, entity_id, id);
 
+CREATE TABLE IF NOT EXISTS base_cvs (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    current_version_id INTEGER REFERENCES cv_versions(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS cv_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    current_version_id INTEGER REFERENCES cv_versions(id),
     base_instruction TEXT NOT NULL DEFAULT '',
     base_guardrails TEXT NOT NULL DEFAULT '',
     css TEXT NOT NULL DEFAULT '',
@@ -46,6 +52,7 @@ CREATE TABLE IF NOT EXISTS cv_scope_options (
 CREATE TABLE IF NOT EXISTS job_cv (
     job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
     current_version_id INTEGER REFERENCES cv_versions(id),
+    base_cv_id INTEGER REFERENCES base_cvs(id) ON DELETE SET NULL,
     scope TEXT NOT NULL DEFAULT '[]',
     tuning_directives TEXT NOT NULL DEFAULT '',
     plan TEXT NOT NULL DEFAULT '[]',
@@ -1046,7 +1053,7 @@ def _migrate_cv_content_to_versions(conn: sqlite3.Connection) -> None:
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='cv_settings'"
     ).fetchone()
-    if row is None or "current_version_id" in row[0]:
+    if row is None or "current_version_id" in row[0] or "base_cv" not in row[0]:
         return
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(
@@ -1154,6 +1161,34 @@ def _migrate_cv_versions_add_reset_and_note(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_base_cvs_from_singleton(conn: sqlite3.Connection) -> None:
+    """The base CV moves from the cv_settings singleton (current_version_id)
+    into its own base_cvs row, named 'Default'. cv_versions rows for
+    entity_type='base' already use entity_id=1, so they need no rewrite —
+    they simply now belong to base_cvs.id=1. See the 2026-09-19 multiple
+    base CVs spec."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    if "current_version_id" not in cols:
+        return  # already migrated
+    row = conn.execute("SELECT id, current_version_id FROM cv_settings WHERE id = 1").fetchone()
+    if row is not None:
+        conn.execute(
+            "INSERT INTO base_cvs (id, name, current_version_id) VALUES (1, 'Default', ?)",
+            (row[1],),
+        )
+    conn.execute("ALTER TABLE cv_settings DROP COLUMN current_version_id")
+    conn.commit()
+
+
+def _migrate_job_cv_add_base_cv_id(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "base_cv_id" not in cols:
+        conn.execute(
+            "ALTER TABLE job_cv ADD COLUMN base_cv_id INTEGER REFERENCES base_cvs(id) ON DELETE SET NULL"
+        )
+        conn.commit()
 
 
 def _migrate_cv_scope_options_drop_is_baseline(conn: sqlite3.Connection) -> None:
@@ -1304,3 +1339,5 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_pending_status(conn)
     _migrate_cv_content_to_versions(conn)
     _migrate_cv_versions_add_reset_and_note(conn)
+    _migrate_base_cvs_from_singleton(conn)
+    _migrate_job_cv_add_base_cv_id(conn)

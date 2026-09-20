@@ -6,7 +6,9 @@ def _job(conn):
     conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://x/1','Role')")
     conn.commit()
-    q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "# Me")
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="p{color:#111}", default_scope=[1, 2])
     return 1
 
@@ -344,7 +346,7 @@ def test_accept_plan_proposal_inserts_under_its_section(client, conn):
 
 def test_reset_directives_replaces_with_configured_template(client, conn):
     jid = _job(conn)
-    q.save_cv_settings(conn, base_cv="", base_instruction="", base_guardrails="",
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="", default_scope=[1], directives_template="## A\n## B")
     q.upsert_job_cv(conn, jid, scope=[1])
     q.set_job_cv_directives(conn, jid, "## A\n- something the user wrote")

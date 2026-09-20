@@ -13,3 +13,4 @@ temp/
 dist/
 .pytest_cache/
 .idea
+.superpowers/

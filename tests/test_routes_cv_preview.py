@@ -6,7 +6,9 @@ def _job(conn):
     conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://x/1','Role')")
     conn.commit()
-    q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "# Me")
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="", default_scope=["select", "reorder"])
     return 1
 
@@ -23,9 +25,10 @@ def test_preview_pane_has_stage_status_indicators(client, conn):
 
 
 def test_preview_draft_and_guardrail_status_stale_after_scope_change(client, conn):
-    from app.routes.cv import _base_hash
+    from app.routes.cv import _base_hash, _resolved_settings
     jid = _job(conn)
-    settings = q.get_cv_settings(conn)
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    settings = _resolved_settings(conn, base_cv_id)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", base_hash=_base_hash(settings),
                     guardrail_findings=[{"rule": "r", "verdict": "ok", "explanation": ""}])
     conn.execute("UPDATE job_cv SET generated_at = datetime('now', '-1 hour') WHERE job_id = ?", (jid,))
@@ -39,17 +42,15 @@ def test_preview_draft_and_guardrail_status_stale_after_scope_change(client, con
 
 
 def test_preview_marks_draft_out_of_date_when_base_cv_changed(client, conn):
-    from app.routes.cv import _base_hash
+    from app.routes.cv import _base_hash, _resolved_settings
     jid = _job(conn)
-    settings = q.get_cv_settings(conn)
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    settings = _resolved_settings(conn, base_cv_id)
     q.upsert_job_cv(conn, jid, tailored_cv="# Draft", base_hash=_base_hash(settings))
     conn.execute("UPDATE job_cv SET generated_at = datetime('now') WHERE job_id = ?", (jid,))
     fresh = client.get(f"/jobs/{jid}/cv/preview").text
     assert 'data-state="fresh"' in fresh and "Outdated" not in fresh
-    q.save_cv_settings(conn, base_cv="# a whole new CV", base_instruction=settings["base_instruction"],
-                       base_guardrails=settings["base_guardrails"], css=settings["css"],
-                       default_scope=settings["default_scope"],
-                       directives_template=settings["directives_template"])
+    q.set_base_cv(conn, base_cv_id, "# a whole new CV")
     r = client.get(f"/jobs/{jid}/cv/preview")
     assert '<span id="cv-draft-status" class="cv-stage-status" data-state="stale">Base changed</span>' in r.text
 
@@ -301,9 +302,10 @@ def test_preview_pane_has_differences_tab(client, conn):
 def test_preview_pane_diff_picker_defaults_to_accepted_base(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
-    q.accept_base_cv(conn)
-    accepted_id = q.get_cv_settings(conn)["current_version_id"]
-    accepted_hash = q.get_version(conn, "base", 1, accepted_id)["hash"]
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.accept_base_cv(conn, base_cv_id)
+    accepted_id = q.get_base_cv(conn, base_cv_id)["current_version_id"]
+    accepted_hash = q.get_version(conn, "base", base_cv_id, accepted_id)["hash"]
     q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
 
     with patch("app.routes.cv.doc_write_available", return_value=True):
@@ -326,7 +328,8 @@ def test_preview_pane_diff_picker_defaults_to_accepted_base(client, conn):
 def test_preview_pane_diff_picker_offers_own_versions_and_switches_target(client, conn):
     from unittest.mock import patch
     jid = _job(conn)
-    q.accept_base_cv(conn)
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.accept_base_cv(conn, base_cv_id)
     q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
     old_tailored_id = q.get_job_cv(conn, jid)["current_version_id"]
     q.upsert_job_cv(conn, jid, tailored_cv="draft 2")
@@ -363,7 +366,8 @@ def test_preview_pane_diff_picker_rejects_bad_targets(client, conn):
     q.upsert_job_cv(conn, jid, tailored_cv="draft 1")
     assert client.get(f"/jobs/{jid}/cv/preview?against_type=tailored&against_id=99999").status_code == 404
     assert client.get(f"/jobs/{jid}/cv/preview?against_type=bogus&against_id=1").status_code == 404
-    base_id = q.get_cv_settings(conn)["current_version_id"]
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    base_id = q.get_base_cv(conn, base_cv_id)["current_version_id"]
     # a base version id used with against_type=tailored doesn't belong to this job
     assert client.get(f"/jobs/{jid}/cv/preview?against_type=tailored&against_id={base_id}").status_code == 404
 

@@ -1,0 +1,48 @@
+{# The info line for the active base CV, plus its Rename/Delete actions —
+   sits right below the tab strip, so it reads as belonging to whichever tab
+   is active rather than being a generic page intro. Two states:
+   - normal: info text + Rename/Delete buttons.
+   - confirm-delete (confirming_delete=True): "Delete "X"?" + either
+     "Tailored by N job(s)." (referencing_count > 0) or "This cannot be
+     undone." (referencing_count == 0) + Cancel/Confirm delete, replacing
+     the normal state's row. Every delete goes through this confirm step
+     first, regardless of whether the base CV is referenced by any job.
+   Params: base ({id, name}), base_cvs (full list — Delete/Confirm delete
+   only render when there's more than one, since the last remaining base CV
+   can never be deleted), confirming_delete (bool, default False),
+   referencing_count (only meaningful when confirming_delete is True). #}
+<div class="cv-base-info-bar" id="cv-base-info-bar">
+  {% if confirming_delete %}
+  <span>Delete "{{ base.name }}"?
+    {%- if referencing_count %} Tailored by {{ referencing_count }} job{{ 's' if referencing_count != 1 }}.
+    {%- else %} This cannot be undone.
+    {%- endif %}</span>
+  {% if base_cvs | length > 1 %}
+  <span class="cv-base-info-bar-actions">
+    <button type="button" class="btn btn-subtle"
+      hx-get="/cv/{{ base.id }}/info-bar" hx-target="#cv-base-info-bar" hx-swap="outerHTML">Cancel</button>
+    <button type="button" class="btn btn-delete"
+      hx-delete="/cv/{{ base.id }}?force=true" hx-target="#cv-base-info-bar" hx-swap="outerHTML">Confirm delete</button>
+  </span>
+  {% endif %}
+  {% else %}
+  <p class="muted" style="margin:0;">Your base CV — what every tailored, per-job version starts from.</p>
+  <span class="cv-base-info-bar-actions">
+    <button type="button" class="btn btn-subtle" data-base-cv-id="{{ base.id }}" id="cv-base-info-bar-rename">Rename</button>
+    {% if base_cvs | length > 1 %}
+    <button type="button" class="btn btn-delete"
+      hx-delete="/cv/{{ base.id }}" hx-target="#cv-base-info-bar" hx-swap="outerHTML">Delete</button>
+    {% endif %}
+  </span>
+  {% endif %}
+</div>
+<script>
+  (function () {
+    var btn = document.getElementById("cv-base-info-bar-rename");
+    if (btn && window.cvBaseTabStartRename) {
+      btn.addEventListener("click", function () {
+        window.cvBaseTabStartRename(btn.getAttribute("data-base-cv-id"));
+      });
+    }
+  })();
+</script>

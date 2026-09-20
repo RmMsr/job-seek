@@ -2157,26 +2157,29 @@ def test_get_cv_settings_autocreates_and_defaults(conn):
     from app.cv.instruction import DEFAULT_BASE_CV
 
     s = q.get_cv_settings(conn)
-    assert s["base_cv"] == DEFAULT_BASE_CV
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == DEFAULT_BASE_CV
     assert s["default_scope"] == ["select", "reorder"]
     # idempotent
-    assert q.get_cv_settings(conn)["base_cv"] == DEFAULT_BASE_CV
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == DEFAULT_BASE_CV
 
 
 def test_save_and_reload_cv_settings(conn):
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "# Me")
     q.save_cv_settings(
-        conn, base_cv="# Me", base_instruction="British English",
+        conn, base_instruction="British English",
         base_guardrails="No invented dates", css="p{color:red}",
         default_scope=["select", "reorder", "rephrase"],
     )
     s = q.get_cv_settings(conn)
-    assert s["base_cv"] == "# Me"
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == "# Me"
     assert s["default_scope"] == ["select", "reorder", "rephrase"]
     assert s["css"] == "p{color:red}"
 
 
 def test_save_cv_settings_round_trips_directives_template(conn):
-    q.save_cv_settings(conn, base_cv="", base_instruction="", base_guardrails="",
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="", default_scope=[1], directives_template="## Foo\n## Bar")
     assert q.get_cv_settings(conn)["directives_template"] == "## Foo\n## Bar"
 

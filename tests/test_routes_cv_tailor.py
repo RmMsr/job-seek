@@ -5,7 +5,9 @@ def _job(conn):
     conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s','http://x','manual')")
     conn.execute("INSERT INTO jobs (source_id, url, title) VALUES (1,'http://x/1','Role')")
     conn.commit()
-    q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "# Me")
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="", default_scope=["select", "reorder"])
     return 1
 
@@ -55,7 +57,7 @@ def test_directives_note_mentions_heading_and_bullet_structure(client, conn):
 
 def test_first_visit_directives_textarea_prefilled_with_template(client, conn):
     jid = _job(conn)
-    q.save_cv_settings(conn, base_cv="# Me", base_instruction="", base_guardrails="",
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
                        css="", default_scope=[1], directives_template="## Role relevance\n## Skills match")
     r = client.get(f"/jobs/{jid}/cv")
     ta = r.text[r.text.index('name="tuning_directives"'):]

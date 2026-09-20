@@ -85,7 +85,8 @@ def test_fresh_cv_settings_seed_the_default_base_cv(conn):
     from app.cv.instruction import DEFAULT_BASE_CV
     from app.db import queries as q
 
-    assert q.get_cv_settings(conn)["base_cv"] == DEFAULT_BASE_CV
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == DEFAULT_BASE_CV
 
 
 def test_compose_orders_sections_and_includes_guardrails():

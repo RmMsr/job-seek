@@ -721,6 +721,27 @@
     .cv-preview-tab[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
     .cv-preview-tab:disabled { cursor: default; opacity: 0.45; }
     .cv-preview-fs { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
+
+    .cv-base-tabs { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border); margin: 0.75rem 0 1rem; }
+    .cv-base-tab { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0;
+      margin-bottom: -1px; color: var(--text-secondary); font-weight: 500; font-size: 0.9rem;
+      border-bottom: 2px solid transparent; text-decoration: none; }
+    .cv-base-tab:hover { color: var(--accent); }
+    .cv-base-tab.is-active { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
+    .cv-base-tab-new { background: none; border: none; cursor: pointer; padding: 0.4rem 0.5rem;
+      margin-bottom: -1px; color: var(--text-muted); font-weight: 600; font-size: 1rem;
+      border-bottom: 2px solid transparent; }
+    .cv-base-tab-new:hover { color: var(--accent); border-bottom-color: var(--accent); }
+    .cv-base-tab-rename-input { font: inherit; font-weight: 600; font-size: 0.9rem;
+      padding: 0.15rem 0.3rem; border: 1px solid var(--accent); border-radius: 3px; }
+
+    /* Info line for the active base CV + its Rename/Delete actions, right
+       below the tab strip (see the CV info-bar partial). Same row shape as
+       .cv-preview-bar/.cv-version-row elsewhere on this page. */
+    .cv-base-info-bar { display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; flex-wrap: wrap; margin: 0 0 0.75rem; }
+    .cv-base-info-bar-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .cv-preview-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
       margin-bottom: 0.75rem; }
     .cv-preview-decision { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }

@@ -48,7 +48,7 @@
            since diffing it against itself is a no-op. #}
         {% for v in versions if v.id != (version_id or current_version_id) %}
         <a class="cv-version-option{{ ' is-selected' if v.id == diff_against_id else '' }}" role="menuitem"
-           href="/cv{{ diff_qs(v.id) }}">
+           href="/cv/{{ base.id }}{{ diff_qs(v.id) }}">
           <span class="cv-version-option-top">
             <code>{{ v.hash[:6] }}</code>
             {{ vl.version_badges(v, current_version_id) }}
@@ -66,18 +66,18 @@
 <div class="cv-preview-stage">
   <iframe class="cv-preview-doc{{ ' is-active' if active == 'preview' }}" data-variant="preview"
           title="{{ title_prefix }}Base CV"
-          {{ 'src' if active == 'preview' else 'data-src' }}="/cv/preview.html{{ _v }}"
+          {{ 'src' if active == 'preview' else 'data-src' }}="/cv/{{ base.id }}/preview.html{{ _v }}"
           sandbox="allow-scripts allow-same-origin"></iframe>
   {% if editable %}
   <div class="cv-preview-doc cv-preview-editor" data-variant="edit" title="Edit markdown">
     {% from "_markdown_editor.html" import markdown_editor %}
-    {{ markdown_editor("markdown", settings.base_cv, autosave_url="/cv/save-base") }}
+    {{ markdown_editor("markdown", base.base_cv, autosave_url=("/cv/" ~ base.id ~ "/save-base")) }}
   </div>
   {% endif %}
   {% if diff_against_id %}
   <iframe class="cv-preview-doc{{ ' is-active' if active == 'diff' }}" data-variant="diff"
           title="{{ title_prefix }}Differences to {{ diff_word }}"
-          {{ 'src' if active == 'diff' else 'data-src' }}="/cv/diff.html{{ diff_qs(diff_against_id) }}"
+          {{ 'src' if active == 'diff' else 'data-src' }}="/cv/{{ base.id }}/diff.html{{ diff_qs(diff_against_id) }}"
           sandbox="allow-scripts allow-same-origin"></iframe>
   {% endif %}
   <div class="cv-preview-notice" aria-live="polite">

@@ -17,19 +17,22 @@
    parent_entity_type — newest first), `current_version_id` (the entity's
    live pointer), `viewing_id` (the version presently on screen — pass
    current_version_id when not viewing history), `version_base_url`
-   ("/jobs/{id}/cv" or "/cv"), `reopen_url` (optional — when set, a "Reopen
-   this version" button renders to the right of the picker; used by the
-   read-only version views), `compact` (bool — a smaller trigger with no
-   age shown, for embedding in tight spaces like the job nav). A tailored
-   version's parent may be a base-CV version (its very first draft,
-   generated from the base CV rather than from a prior tailored version) —
-   parent_entity_type says whether the "from ..." phrasing should read
-   "version" (same entity) or "cv" (a base version). #}
-{% macro version_url(v, current_version_id, version_base_url) -%}
+   ("/jobs/{id}/cv" or "/cv/{base_cv_id}"), `reopen_url` (optional — when
+   set, a "Reopen this version" button renders to the right of the picker;
+   used by the read-only version views), `compact` (bool — a smaller
+   trigger with no age shown, for embedding in tight spaces like the job
+   nav), `is_base` (bool — the base CV's own page has no `/preview` route
+   at its version_base_url, unlike a tailored version, so its non-current
+   version links are just `?version=` off version_base_url itself). A
+   tailored version's parent may be a base-CV version (its very first
+   draft, generated from the base CV rather than from a prior tailored
+   version) — parent_entity_type says whether the "from ..." phrasing
+   should read "version" (same entity) or "cv" (a base version). #}
+{% macro version_url(v, current_version_id, version_base_url, is_base=False) -%}
 {%- if v.id == current_version_id -%}
-{{ version_base_url if version_base_url == '/cv' else version_base_url ~ '/preview' }}
+{{ version_base_url if is_base else version_base_url ~ '/preview' }}
 {%- else -%}
-{{ ('/cv?version=' ~ v.id) if version_base_url == '/cv' else (version_base_url ~ '/preview?version=' ~ v.id) }}
+{{ (version_base_url ~ '?version=' ~ v.id) if is_base else (version_base_url ~ '/preview?version=' ~ v.id) }}
 {%- endif -%}
 {%- endmacro %}
 {# version_badges/version_meta take current_version_id explicitly (rather
@@ -45,7 +48,7 @@
 {% macro version_meta(v) -%}
 {{ v.updated_at | age }}{% if v.action in _ACTION_LABELS %} &middot; {{ _ACTION_LABELS[v.action] }}{% endif %}{% if v.parent_hash %} &middot; from {{ 'cv' if v.parent_entity_type != v.entity_type else 'version' }} {{ v.parent_hash[:6] }}{% endif %}{% if v.note %} &middot; {{ v.note }}{% endif %}
 {%- endmacro %}
-{% macro version_picker(versions, current_version_id, viewing_id, version_base_url, reopen_url=None, compact=False) %}
+{% macro version_picker(versions, current_version_id, viewing_id, version_base_url, reopen_url=None, compact=False, is_base=False) %}
 {% set viewing_id = viewing_id if viewing_id else current_version_id %}
 {% set selected = (versions | selectattr('id', 'equalto', viewing_id) | list | first) %}
 {% if versions and selected %}
@@ -61,7 +64,7 @@
     <div class="cv-version-menu" role="menu" hidden>
       {% for v in versions %}
       <a class="cv-version-option{{ ' is-selected' if v.id == viewing_id else '' }}"
-         role="menuitem" href="{{ version_url(v, current_version_id, version_base_url) }}">
+         role="menuitem" href="{{ version_url(v, current_version_id, version_base_url, is_base) }}">
         <span class="cv-version-option-top">
           <code>{{ v.hash[:6] }}</code>
           {{ version_badges(v, current_version_id) }}
@@ -85,6 +88,6 @@
 <div class="cv-version-list" id="cv-version-list"{% if oob %} hx-swap-oob="true"{% endif %}>
   <h3 class="cv-section-heading">History</h3>
   {{ version_picker(versions, current_version_id, viewing_id if viewing_id is defined else None, version_base_url,
-                     reopen_url if reopen_url is defined else None) }}
+                     reopen_url if reopen_url is defined else None, is_base=(is_base if is_base is defined else False)) }}
 </div>
 {% endif %}

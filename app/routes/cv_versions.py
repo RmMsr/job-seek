@@ -20,12 +20,12 @@ def revert_tailored_version(job_id: int, version_id: int, conn: sqlite3.Connecti
     return RedirectResponse(f"/jobs/{job_id}/cv/preview", status_code=303)
 
 
-@router.post("/cv/versions/{version_id}/revert")
-def revert_base_version(version_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    if q.get_version(conn, "base", 1, version_id) is None:
+@router.post("/cv/{base_cv_id}/versions/{version_id}/revert")
+def revert_base_version(base_cv_id: int, version_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_version(conn, "base", base_cv_id, version_id) is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    q.revert_base_cv_version(conn, version_id)
-    return RedirectResponse("/cv", status_code=303)
+    q.revert_base_cv_version(conn, base_cv_id, version_id)
+    return RedirectResponse(f"/cv/{base_cv_id}", status_code=303)
 
 
 @router.post("/jobs/{job_id}/cv/versions/{version_id}/accept")
@@ -40,15 +40,15 @@ def accept_tailored_version(job_id: int, version_id: int, conn: sqlite3.Connecti
     return RedirectResponse(f"/jobs/{job_id}/cv/preview?version={version_id}", status_code=303)
 
 
-@router.post("/cv/versions/{version_id}/accept")
-def accept_base_version(version_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    if q.get_version(conn, "base", 1, version_id) is None:
+@router.post("/cv/{base_cv_id}/versions/{version_id}/accept")
+def accept_base_version(base_cv_id: int, version_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_version(conn, "base", base_cv_id, version_id) is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    q.accept_base_cv_version(conn, version_id)
-    return RedirectResponse(f"/cv?version={version_id}", status_code=303)
+    q.accept_base_cv_version(conn, base_cv_id, version_id)
+    return RedirectResponse(f"/cv/{base_cv_id}?version={version_id}", status_code=303)
 
 
-@router.post("/cv/accept")
-def accept_base(conn: sqlite3.Connection = Depends(get_db)):
-    q.accept_base_cv(conn)
-    return RedirectResponse("/cv", status_code=303)
+@router.post("/cv/{base_cv_id}/accept")
+def accept_base(base_cv_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    q.accept_base_cv(conn, base_cv_id)
+    return RedirectResponse(f"/cv/{base_cv_id}", status_code=303)

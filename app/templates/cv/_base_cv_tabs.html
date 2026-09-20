@@ -1,0 +1,59 @@
+{# The base-CV tab strip — one tab per named base CV, plus a "+" tab to
+   create one. Params: base_cvs (list of {id, name}), active_base_cv_id. #}
+<div class="cv-base-tabs" id="cv-base-tabs" role="tablist" aria-label="Base CVs">
+  {% for b in base_cvs %}
+  <a class="cv-base-tab{{ ' is-active' if b.id == active_base_cv_id else '' }}" role="tab"
+     aria-selected="{{ 'true' if b.id == active_base_cv_id else 'false' }}"
+     href="/cv/{{ b.id }}">
+    <span class="cv-base-tab-name" data-base-cv-id="{{ b.id }}">{{ b.name }}</span>
+  </a>
+  {% endfor %}
+  <button type="button" class="cv-base-tab cv-base-tab-new" id="cv-base-tab-new">+</button>
+  <form id="cv-base-tab-create-form" method="post" action="/cv" style="display:none;">
+    <input type="text" name="name" placeholder="Base CV name" required>
+    <button type="submit" class="btn btn-subtle">Create</button>
+  </form>
+</div>
+<script>
+  (function () {
+    var btn = document.getElementById("cv-base-tab-new");
+    var form = document.getElementById("cv-base-tab-create-form");
+    if (btn && form) {
+      btn.addEventListener("click", function () {
+        form.style.display = form.style.display === "none" ? "flex" : "none";
+        var input = form.querySelector("input[name=name]");
+        if (form.style.display !== "none" && input) input.focus();
+      });
+    }
+    window.cvBaseTabStartRename = function (baseCvId) {
+      var span = document.querySelector('.cv-base-tab-name[data-base-cv-id="' + baseCvId + '"]');
+      if (!span) return;
+      var id = span.getAttribute("data-base-cv-id");
+      var current = span.textContent;
+      var input = document.createElement("input");
+      input.type = "text";
+      input.value = current;
+      input.className = "cv-base-tab-rename-input";
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+      function commit() {
+        var name = input.value.trim();
+        if (!name || name === current) { input.replaceWith(span); return; }
+        htmx.ajax("POST", "/cv/" + id + "/rename", {
+          values: { name: name }, target: "#cv-base-tabs", swap: "outerHTML",
+        });
+      }
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") input.blur();
+        if (e.key === "Escape") { input.value = current; input.blur(); }
+      });
+    };
+    document.querySelectorAll(".cv-base-tab-name").forEach(function (span) {
+      span.addEventListener("dblclick", function () {
+        window.cvBaseTabStartRename(span.getAttribute("data-base-cv-id"));
+      });
+    });
+  })();
+</script>

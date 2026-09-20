@@ -5,12 +5,18 @@
   <h1 style="margin:0;">CV</h1>
   <a href="/cv/advanced">Advanced CV settings &rarr;</a>
 </div>
-<p style="color:var(--text-muted);">Your base CV — what every tailored, per-job version starts from.</p>
+{% with active_base_cv_id = base.id %}
+{% include "cv/_base_cv_tabs.html" %}
+{% endwith %}
+
+{% with confirming_delete = false %}
+{% include "cv/_base_cv_info_bar.html" %}
+{% endwith %}
 
 {% if viewing_version %}
 <p class="muted" style="margin:.25rem 0 .75rem;">
   Viewing a previous version.
-  <a href="/cv">Go back to current version</a>
+  <a href="/cv/{{ base.id }}">Go back to current version</a>
 </p>
 
 {% if has_doc_write %}
@@ -25,17 +31,17 @@
 
 {% include "cv/_frontmatter_hint.html" %}
 
-{% with viewing_id = viewing_version.id, reopen_url = "/cv/versions/" ~ viewing_version.id ~ "/revert" %}
+{% with viewing_id = viewing_version.id, reopen_url = "/cv/" ~ base.id ~ "/versions/" ~ viewing_version.id ~ "/revert" %}
   {% include "cv/_version_list.html" %}
 {% endwith %}
 
 <div class="cv-preview-actions" style="margin-top:.75rem;">
   {% if not viewing_version.accepted_at %}
-  <form method="post" action="/cv/versions/{{ viewing_version.id }}/accept" style="display:inline;">
+  <form method="post" action="/cv/{{ base.id }}/versions/{{ viewing_version.id }}/accept" style="display:inline;">
     <button type="submit" class="btn btn-accept">&#9733; Accept this version</button>
   </form>
   {% endif %}
-  {% with pdf_url = "/cv.pdf?version=" ~ viewing_version.id, markdown_source = viewing_version.content %}
+  {% with pdf_url = "/cv/" ~ base.id ~ ".pdf?version=" ~ viewing_version.id, markdown_source = viewing_version.content %}
     {% include "cv/_cv_export.html" %}
   {% endwith %}
 </div>
@@ -50,7 +56,7 @@
 {% else %}
 <p class="muted">doc-write-cli is not installed — showing the raw markdown.</p>
 {% from "_markdown_editor.html" import markdown_editor %}
-{{ markdown_editor("markdown", settings.base_cv, min_height="420px", autosave_url="/cv/save-base") }}
+{{ markdown_editor("markdown", base.base_cv, min_height="420px", autosave_url=("/cv/" ~ base.id ~ "/save-base")) }}
 {% endif %}
 
 {% include "cv/_frontmatter_hint.html" %}
@@ -67,13 +73,13 @@
      otherwise silently read as "nothing accepted" and the button below
      would replace that accepted version without warning. #}
   <p class="muted" style="margin:0;">&#9733; Version <code>{{ accepted_version.hash[:6] }}</code> is accepted and used for tailoring —
-    <a href="/cv?version={{ accepted_version.id }}">view it</a>.</p>
+    <a href="/cv/{{ base.id }}?version={{ accepted_version.id }}">view it</a>.</p>
   {% endif %}
-  <form method="post" action="/cv/accept" style="display:inline;">
+  <form method="post" action="/cv/{{ base.id }}/accept" style="display:inline;">
     <button type="submit" class="btn btn-accept">&#9733; Accept {{ 'this version instead' if accepted_version else 'this version for tailoring' }}</button>
   </form>
   {% endif %}
-  {% with pdf_url = "/cv.pdf", markdown_source = settings.base_cv %}
+  {% with pdf_url = "/cv/" ~ base.id ~ ".pdf", markdown_source = base.base_cv %}
     {% include "cv/_cv_export.html" %}
   {% endwith %}
 </div>

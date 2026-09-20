@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
-        "profile", "cv_versions", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_versions", "base_cvs", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -28,7 +28,7 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)
     init_db(conn)  # should not raise
     assert _tables(conn) == {
-        "profile", "cv_versions", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
+        "profile", "cv_versions", "base_cvs", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
         "tasks", "inbox_items", "job_events",
     }
 
@@ -1356,12 +1356,12 @@ def test_cv_settings_and_job_cv_columns_after_version_migration():
     init_db(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_settings)")}
     assert cols == {
-        "id", "current_version_id", "base_instruction", "base_guardrails",
+        "id", "base_instruction", "base_guardrails",
         "css", "default_scope", "directives_template", "updated_at",
     }
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
     assert cols == {
-        "job_id", "current_version_id", "scope", "tuning_directives", "plan",
+        "job_id", "current_version_id", "base_cv_id", "scope", "tuning_directives", "plan",
         "handled_suggestions", "guardrail_findings", "change_report", "base_hash",
         "base_cv_snapshot", "guardrails_hash", "plan_generated_at", "directives_edited_at",
         "generated_at", "scope_edited_at", "edited_at", "guardrails_checked_at",
@@ -1453,11 +1453,17 @@ def test_init_db_migrates_existing_base_cv_and_tailored_cv_into_versions(conn):
 
     init_db(conn)
 
-    settings = conn.execute(
-        "SELECT cv_settings.*, cv_versions.content AS base_cv FROM cv_settings "
-        "LEFT JOIN cv_versions ON cv_versions.id = cv_settings.current_version_id WHERE cv_settings.id = 1"
+    # After migration, base_cv has moved to base_cvs table with current_version_id
+    base = conn.execute(
+        "SELECT base_cvs.*, cv_versions.content AS base_cv FROM base_cvs "
+        "LEFT JOIN cv_versions ON cv_versions.id = base_cvs.current_version_id WHERE base_cvs.id = 1"
     ).fetchone()
-    assert settings["base_cv"] == "# My CV"
+    assert base["base_cv"] == "# My CV"
+    assert base["name"] == "Default"
+
+    settings = conn.execute(
+        "SELECT * FROM cv_settings WHERE id = 1"
+    ).fetchone()
     assert settings["base_instruction"] == "instr"
 
     jc = conn.execute(
@@ -1473,6 +1479,62 @@ def test_init_db_migrates_existing_base_cv_and_tailored_cv_into_versions(conn):
         "SELECT COUNT(*) FROM cv_versions WHERE entity_type = 'tailored' AND entity_id = 1"
     ).fetchone()[0]
     assert count == 1
+
+
+def test_base_cvs_table_and_updated_column_shapes():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(base_cvs)")}
+    assert cols == {"id", "name", "current_version_id", "created_at"}
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    assert "current_version_id" not in cols
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    assert "base_cv_id" in cols
+    conn.close()
+
+
+def test_init_db_migrates_singleton_cv_settings_into_base_cvs():
+    # Simulate a pre-migration DB: cv_settings still has current_version_id,
+    # no base_cvs table, no job_cv.base_cv_id.
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    # Roll cv_settings back to the pre-migration shape by dropping base_cvs
+    # and re-adding current_version_id, so this test exercises the migration
+    # itself rather than a hand-built fixture drifting from the real one.
+    conn.execute("DROP TABLE base_cvs")
+    conn.execute(
+        "ALTER TABLE cv_settings ADD COLUMN current_version_id INTEGER REFERENCES cv_versions(id)"
+    )
+    conn.execute(
+        "INSERT INTO cv_versions (hash, entity_type, entity_id, content, action) "
+        "VALUES ('abc12345', 'base', 1, '# My CV', 'manual_edit')"
+    )
+    version_id = conn.execute(
+        "SELECT id FROM cv_versions WHERE hash = 'abc12345'"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO cv_settings (id, current_version_id, base_instruction, base_guardrails, "
+        "css, default_scope, directives_template) VALUES (1, ?, '', '', '', '[]', '')",
+        (version_id,),
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    base = conn.execute("SELECT * FROM base_cvs WHERE id = 1").fetchone()
+    assert base["name"] == "Default"
+    assert base["current_version_id"] == version_id
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(cv_settings)")}
+    assert "current_version_id" not in cols
+
+    # Idempotent: running again must not raise or duplicate the row.
+    init_db(conn)
+    count = conn.execute("SELECT COUNT(*) FROM base_cvs").fetchone()[0]
+    assert count == 1
+    conn.close()
 
 
 def test_cv_settings_table_is_singleton():
@@ -1498,6 +1560,25 @@ def test_job_cv_table_columns_and_cascade():
     conn.execute("INSERT INTO job_cv (job_id) VALUES (1)")
     conn.execute("DELETE FROM jobs WHERE id = 1")
     assert conn.execute("SELECT COUNT(*) FROM job_cv").fetchone()[0] == 0
+
+
+def test_job_cv_base_cv_id_is_nulled_when_its_base_cv_is_deleted():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    conn.execute("INSERT INTO base_cvs (id, name) VALUES (1, 'Default')")
+    conn.execute("INSERT INTO sources (name, url, fetcher_type) VALUES ('s', 'http://x', 'manual')")
+    conn.execute("INSERT INTO jobs (source_id, url) VALUES (1, 'http://x/1')")
+    conn.execute("INSERT INTO job_cv (job_id, base_cv_id) VALUES (1, 1)")
+    conn.commit()
+
+    conn.execute("DELETE FROM base_cvs WHERE id = 1")  # must not raise
+    conn.commit()
+
+    row = conn.execute("SELECT base_cv_id FROM job_cv WHERE job_id = 1").fetchone()
+    assert row["base_cv_id"] is None
+    conn.close()
 
 
 def test_init_db_drops_job_cv_preview_pages(conn):

@@ -1,17 +1,28 @@
 <h2>Tailoring plan
   <span class="cv-stage-status" data-state="{{ plan_status }}">{{ {
     "none": "Not run yet", "fresh": "Up to date",
-    "stale": "Job posting changed — re-analyze", "running": "Working…",
+    "stale": "Job posting or base CV changed — re-analyze", "running": "Working…",
   }.get(plan_status, "") }}</span>
 </h2>
 
 <form id="cv-directives-form" method="post" action="/jobs/{{ job.id }}/cv/save-directives">
   <p class="muted" style="font-size:.85em;margin:.2rem 0 .6rem;">
-    Your <a href="/cv">base CV</a> can be optimized to fit this job. The instructions
+    Your <a href="/cv/{{ selected_base_cv_id }}">base CV</a> can be optimized to fit this job. The instructions
     below identify potential improvements and guide the automated CV adjustments.
     You choose how much to apply with <strong>Edit scope</strong>, on the
     <a href="/jobs/{{ job.id }}/cv/preview">Preview CV</a> page.
   </p>
+  {% if base_cvs | length > 1 %}
+  <label style="display:block;margin-bottom:.6rem;">Tailoring from
+    <select name="base_cv_id"
+      hx-post="/jobs/{{ job.id }}/cv/set-base" hx-target="#cv-plan-pane" hx-swap="innerHTML"
+      hx-trigger="change">
+      {% for b in base_cvs %}
+      <option value="{{ b.id }}"{{ ' selected' if b.id == selected_base_cv_id }}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
 
   <label style="display:block;margin-top:.75rem;">Tuning directives<br>
     <span class="cv-editor-wrap">

@@ -54,12 +54,17 @@ def _job_notes(conn, job: dict) -> str:
     return "\n".join(lines)
 
 
-def _resolved_settings(conn: sqlite3.Connection) -> dict:
+def _job_base_cv_id(conn: sqlite3.Connection, job_id: int) -> int:
+    return q.resolve_job_base_cv_id(conn, job_id)
+
+
+def _resolved_settings(conn: sqlite3.Connection, base_cv_id: int) -> dict:
     """Settings as tailoring/diffing/the job workbench's Base tab see them —
     base_cv resolved to the accepted version (or current, if nothing's been
-    accepted yet). Everything else is live/unversioned."""
+    accepted yet) of the given base CV. Everything else is live/unversioned
+    and shared across all base CVs."""
     settings = q.get_cv_settings(conn)
-    settings["base_cv"] = q.resolve_base_cv(conn)
+    settings["base_cv"] = q.resolve_base_cv(conn, base_cv_id)
     return settings
 
 
@@ -77,10 +82,12 @@ def _guardrails_hash(settings: dict) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _plan_context_hash(job_context: str, job_notes: str) -> str:
-    """Identifies the inputs a plan run saw (posting + notes) so the workbench can
-    show the plan stage as stale when they change."""
-    return hashlib.sha256(f"{job_context}\x00{job_notes}".encode()).hexdigest()
+def _plan_context_hash(job_context: str, job_notes: str, base_cv_id: int) -> str:
+    """Identifies the inputs a plan run saw (posting + notes + which base CV
+    it was compared against) so the workbench can show the plan stage as
+    stale when they change — including when the job switches which base CV
+    it tailors from, even if the job posting and notes haven't changed."""
+    return hashlib.sha256(f"{job_context}\x00{job_notes}\x00{base_cv_id}".encode()).hexdigest()
 
 
 def _persist_draft(conn, job_id: int, *, draft: str, findings: list, settings: dict,
@@ -167,7 +174,9 @@ def _guardrails_stale(job_cv: dict | None, settings: dict) -> bool:
     return job_cv.get("guardrails_hash", "") != _guardrails_hash(settings)
 
 
-def _plan_status(conn: sqlite3.Connection, job: dict, job_cv: dict | None, running: bool) -> str:
+def _plan_status(
+    conn: sqlite3.Connection, job: dict, job_cv: dict | None, running: bool, base_cv_id: int,
+) -> str:
     if running:
         return "running"
     if not job_cv or not job_cv.get("plan_generated_at"):
@@ -175,7 +184,7 @@ def _plan_status(conn: sqlite3.Connection, job: dict, job_cv: dict | None, runni
     stored = job_cv.get("plan_context_hash")
     if not stored:                      # plan predates hash tracking — don't nag
         return "fresh"
-    current = _plan_context_hash(_job_context(job), _job_notes(conn, job))
+    current = _plan_context_hash(_job_context(job), _job_notes(conn, job), base_cv_id)
     return "fresh" if stored == current else "stale"
 
 
@@ -198,21 +207,26 @@ def _guardrail_status(job_cv: dict | None, settings: dict, running: bool) -> str
 
 
 def _cv_page_ctx(
-    conn: sqlite3.Connection, against: int | None = None, viewing_version_id: int | None = None,
+    conn: sqlite3.Connection, base_cv_id: int, against: int | None = None,
+    viewing_version_id: int | None = None,
 ) -> dict:
-    settings = q.get_cv_settings(conn)
+    base = q.get_base_cv(conn, base_cv_id)
     return {
-        "settings": settings,
+        "settings": q.get_cv_settings(conn),
+        "base": base,
+        "base_cvs": q.list_base_cvs(conn),
         "has_doc_write": doc_write_available(),
         "app_version": get_app_version(),
         "build_date": get_build_date(),
-        "versions": q.get_versions(conn, "base", 1),
-        "current_version_id": settings.get("current_version_id"),
-        "accepted_version": q.get_accepted_base_version(conn),
+        "versions": q.get_versions(conn, "base", base_cv_id),
+        "current_version_id": base.get("current_version_id") if base else None,
+        "accepted_version": q.get_accepted_base_version(conn, base_cv_id),
         "diff_against_id": (
-            against if against is not None else q.resolve_base_diff_target(conn, viewing_version_id)
+            against if against is not None
+            else q.resolve_base_diff_target(conn, base_cv_id, viewing_version_id)
         ),
-        "version_base_url": "/cv",
+        "version_base_url": f"/cv/{base_cv_id}",
+        "is_base": True,
     }
 
 
@@ -238,7 +252,7 @@ def _rendered_chunk(conn: sqlite3.Connection, job_id: int, which: str, **ctx_ove
         ctx["guardrail_status"] = _guardrail_status(ctx["job_cv"], ctx["settings"], run)
     if "plan_task_id" in ctx_overrides and ctx["job"]:
         ctx["plan_status"] = _plan_status(
-            conn, ctx["job"], ctx["job_cv"], bool(ctx["plan_task_id"])
+            conn, ctx["job"], ctx["job_cv"], bool(ctx["plan_task_id"]), ctx["selected_base_cv_id"]
         )
     _PANE_TEMPLATES = {
         "plan_pane": ("cv/_plan_pane.html", "cv-plan-pane"),
@@ -283,7 +297,7 @@ def _resolve_diff_target(
     conn: sqlite3.Connection, job_id: int, against_type: str | None, against_id: int | None,
 ) -> tuple[str, int] | None:
     """Validates an explicit (against_type, against_id) diff-target pair —
-    'base' resolves against the base CV (entity_id 1), 'tailored' against
+    'base' resolves against the job's selected base CV, 'tailored' against
     this job's own versions. Returns the resolved content, or None when no
     target was given (against_id omitted) so the caller can fall back to its
     own default. Raises 404 for an unknown type or a version id that
@@ -292,7 +306,7 @@ def _resolve_diff_target(
         return None
     if against_type not in ("base", "tailored"):
         raise HTTPException(status_code=404, detail="Unknown diff target")
-    entity_id = 1 if against_type == "base" else job_id
+    entity_id = _job_base_cv_id(conn, job_id) if against_type == "base" else job_id
     version = q.get_version(conn, against_type, entity_id, against_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -305,7 +319,8 @@ def _workbench_ctx(
 ) -> dict:
     job = q.get_job_with_source_name(conn, job_id)
     job_cv = q.get_job_cv(conn, job_id)
-    settings = _resolved_settings(conn)
+    selected_base_cv_id = _job_base_cv_id(conn, job_id)
+    settings = _resolved_settings(conn, selected_base_cv_id)
     updating = q.cv_generate_task_id(conn, job_id)
     planning = q.cv_plan_task_id(conn, job_id)
     return {
@@ -315,22 +330,27 @@ def _workbench_ctx(
         "scope_options": q.get_scope_options(conn),
         "updating_task_id": updating,
         "plan_task_id": planning,
-        "plan_status": _plan_status(conn, job, job_cv, bool(planning)) if job else "none",
+        "plan_status": _plan_status(conn, job, job_cv, bool(planning), selected_base_cv_id) if job else "none",
         "draft_status": _draft_status(job_cv, settings, bool(updating)),
         "draft_stale_reason": _draft_staleness_reason(job_cv, settings),
         "guardrail_status": _guardrail_status(job_cv, settings, bool(updating)),
         "has_doc_write": doc_write_available(),
         "cv_diff_view": _cv_diff_view(job_cv),
         "versions": q.get_versions(conn, "tailored", job_id),
-        "base_versions": q.get_versions(conn, "base", 1),
+        "base_versions": q.get_versions(conn, "base", selected_base_cv_id),
+        "base_cvs": q.list_base_cvs(conn),
+        "selected_base_cv_id": selected_base_cv_id,
         "current_version_id": job_cv["current_version_id"] if job_cv else None,
         "accepted_version": q.get_accepted_job_cv_version(conn, job_id),
         # The Differences tab's default target: whatever's currently accepted
-        # for the base CV (or its current version, if nothing's accepted
-        # yet) — overridable to any base or own version via the diff-target
-        # picker in cv/_preview_tabs.html.
+        # for the job's selected base CV (or its current version, if nothing's
+        # accepted yet) — overridable to any base or own version via the
+        # diff-target picker in cv/_preview_tabs.html.
         "diff_against_type": against_type or "base",
-        "diff_against_id": against_id if against_id is not None else q.resolve_base_version_id(conn),
+        "diff_against_id": (
+            against_id if against_id is not None
+            else q.resolve_base_version_id(conn, selected_base_cv_id)
+        ),
         "version_base_url": f"/jobs/{job_id}/cv",
     }
 
@@ -378,7 +398,7 @@ def cv_preview_html(job_id: int, variant: str = "tailored", version: int | None 
         raise HTTPException(status_code=404, detail="Job not found")
     settings = q.get_cv_settings(conn)
     if variant == "base":
-        markdown = q.resolve_base_cv(conn)
+        markdown = q.resolve_base_cv(conn, _job_base_cv_id(conn, job_id))
     elif version is not None:
         v = q.get_version(conn, "tailored", job_id, version)
         if v is None:
@@ -417,7 +437,7 @@ def cv_diff_html(job_id: int, request: Request, version: int | None = None,
     resolved = _resolve_diff_target(conn, job_id, against_type, against_id)
     if resolved is not None:
         r_type, r_id = resolved
-        entity_id = 1 if r_type == "base" else job_id
+        entity_id = _job_base_cv_id(conn, job_id) if r_type == "base" else job_id
         against_content = q.get_version(conn, r_type, entity_id, r_id)["content"]
     elif not row["base_cv_snapshot"]:
         return templates.TemplateResponse(
@@ -443,94 +463,45 @@ def cv_diff_html(job_id: int, request: Request, version: int | None = None,
 
 
 @router.get("/cv", response_class=HTMLResponse)
-def cv_page(request: Request, version: int | None = None, against: int | None = None,
-           conn: sqlite3.Connection = Depends(get_db)):
-    if against is not None and q.get_version(conn, "base", 1, against) is None:
-        raise HTTPException(status_code=404, detail="Version not found")
-    ctx = _cv_page_ctx(conn, against=against, viewing_version_id=version)
-    # An explicit diff target in the URL means the diff-picker was just used
-    # to pick it — land on the Differences tab instead of resetting to
-    # Preview underneath a picker that now shows a different target.
-    ctx["active"] = "diff" if against is not None else "preview"
-    if version is not None:
-        v = q.get_version(conn, "base", 1, version)
-        if v is None:
-            raise HTTPException(status_code=404, detail="Version not found")
-        ctx["viewing_version"] = v
-    return templates.TemplateResponse(request, "cv/index.html", ctx)
+def cv_page_root(conn: sqlite3.Connection = Depends(get_db)):
+    base_cvs = q.list_base_cvs(conn)
+    return RedirectResponse(f"/cv/{base_cvs[0]['id']}", status_code=303)
 
 
-@router.post("/cv/save-base", response_class=HTMLResponse)
-async def cv_save_base(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+@router.post("/cv", response_class=HTMLResponse)
+async def cv_create_base(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
-    q.set_base_cv(conn, form.get("markdown", ""))
-    return templates.TemplateResponse(
-        request, "cv/_save_base_oob.html", _cv_page_ctx(conn),
-    )
-
-
-@router.get("/cv/preview.html", response_class=HTMLResponse)
-def cv_preview_base_html(version: int | None = None, conn: sqlite3.Connection = Depends(get_db)):
-    settings = q.get_cv_settings(conn)
-    content = settings["base_cv"]
-    if version is not None:
-        v = q.get_version(conn, "base", 1, version)
-        if v is None:
-            raise HTTPException(status_code=404, detail="Version not found")
-        content = v["content"]
-    if not doc_write_available():
-        raise HTTPException(status_code=503, detail="doc-write-cli is not installed")
+    name = form.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
     try:
-        return HTMLResponse(render_preview_html(content, settings["css"]))
-    except CvRenderError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        base_cv_id = q.create_base_cv(conn, name)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="A base CV with that name already exists")
+    return RedirectResponse(f"/cv/{base_cv_id}", status_code=303)
 
 
-@router.get("/cv/diff.html", response_class=HTMLResponse)
-def cv_diff_base_html(request: Request, version: int | None = None, against: int | None = None,
-                      conn: sqlite3.Connection = Depends(get_db)):
+@router.get("/cv/advanced", response_class=HTMLResponse)
+def cv_advanced_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    ctx = _advanced_ctx(conn)
+    ctx["saved"] = request.query_params.get("saved")
+    return templates.TemplateResponse(request, "cv/advanced.html", ctx)
+
+
+# Registered before /cv/{base_cv_id} (below): both are GET, 2-segment paths,
+# and Starlette matches routes in registration order using the raw string
+# converter for an untyped path param -- so "/cv/advanced" would otherwise be
+# swallowed by /cv/{base_cv_id} (FastAPI then 422s trying to parse "advanced"
+# as int) before ever reaching this literal route.
+@router.get("/cv/{base_cv_id}.pdf")
+def cv_base_pdf(base_cv_id: int, version: int | None = None, conn: sqlite3.Connection = Depends(get_db)):
+    base = q.get_base_cv(conn, base_cv_id)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
     settings = q.get_cv_settings(conn)
-    content = settings["base_cv"]
+    content = base["base_cv"]
     if version is not None:
-        v = q.get_version(conn, "base", 1, version)
-        if v is None:
-            raise HTTPException(status_code=404, detail="Version not found")
-        content = v["content"]
-    if against is not None:
-        against_v = q.get_version(conn, "base", 1, against)
-        if against_v is None:
-            raise HTTPException(status_code=404, detail="Version not found")
-        against_content = against_v["content"]
-    else:
-        target_id = q.resolve_base_diff_target(conn, version)
-        if target_id is None:
-            return templates.TemplateResponse(
-                request, "cv/_cv_diff_fallback.html",
-                {"predates": False, "body_html": "", "message": "Nothing to compare against yet."},
-            )
-        against_content = q.get_version(conn, "base", 1, target_id)["content"]
-    try:
-        annotated = build_cv_diff(against_content, content).annotated_markdown
-    except Exception:
-        logger.exception("cv_diff build failed for base CV")
-        annotated = content
-    if doc_write_available():
-        try:
-            return HTMLResponse(render_diff_html(annotated, settings["css"]))
-        except CvRenderError as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
-    body_html = _markdown.markdown(annotated, extensions=["nl2br"])
-    return templates.TemplateResponse(
-        request, "cv/_cv_diff_fallback.html", {"predates": False, "body_html": body_html},
-    )
-
-
-@router.get("/cv.pdf")
-def cv_base_pdf(version: int | None = None, conn: sqlite3.Connection = Depends(get_db)):
-    settings = q.get_cv_settings(conn)
-    content = settings["base_cv"]
-    if version is not None:
-        v = q.get_version(conn, "base", 1, version)
+        v = q.get_version(conn, "base", base_cv_id, version)
         if v is None:
             raise HTTPException(status_code=404, detail="Version not found")
         content = v["content"]
@@ -544,11 +515,154 @@ def cv_base_pdf(version: int | None = None, conn: sqlite3.Connection = Depends(g
                     headers={"Content-Disposition": 'attachment; filename="cv.pdf"'})
 
 
-@router.get("/cv/advanced", response_class=HTMLResponse)
-def cv_advanced_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    ctx = _advanced_ctx(conn)
-    ctx["saved"] = request.query_params.get("saved")
-    return templates.TemplateResponse(request, "cv/advanced.html", ctx)
+@router.get("/cv/{base_cv_id}", response_class=HTMLResponse)
+def cv_page(base_cv_id: int, request: Request, version: int | None = None,
+           against: int | None = None, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_base_cv(conn, base_cv_id) is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    if against is not None and q.get_version(conn, "base", base_cv_id, against) is None:
+        raise HTTPException(status_code=404, detail="Version not found")
+    ctx = _cv_page_ctx(conn, base_cv_id, against=against, viewing_version_id=version)
+    # An explicit diff target in the URL means the diff-picker was just used
+    # to pick it — land on the Differences tab instead of resetting to
+    # Preview underneath a picker that now shows a different target.
+    ctx["active"] = "diff" if against is not None else "preview"
+    if version is not None:
+        v = q.get_version(conn, "base", base_cv_id, version)
+        if v is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        ctx["viewing_version"] = v
+    return templates.TemplateResponse(request, "cv/index.html", ctx)
+
+
+@router.post("/cv/{base_cv_id}/rename", response_class=HTMLResponse)
+async def cv_rename_base(base_cv_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_base_cv(conn, base_cv_id) is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    form = await request.form()
+    name = form.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    try:
+        q.rename_base_cv(conn, base_cv_id, name)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="A base CV with that name already exists")
+    return templates.TemplateResponse(
+        request, "cv/_base_cv_tabs.html",
+        {"base_cvs": q.list_base_cvs(conn), "active_base_cv_id": base_cv_id},
+    )
+
+
+@router.get("/cv/{base_cv_id}/info-bar", response_class=HTMLResponse)
+def cv_base_info_bar(base_cv_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    base = q.get_base_cv(conn, base_cv_id)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    return templates.TemplateResponse(
+        request, "cv/_base_cv_info_bar.html",
+        {"base": base, "base_cvs": q.list_base_cvs(conn), "confirming_delete": False},
+    )
+
+
+@router.delete("/cv/{base_cv_id}", response_class=HTMLResponse)
+def cv_delete_base(base_cv_id: int, request: Request, force: bool = False,
+                   conn: sqlite3.Connection = Depends(get_db)):
+    base = q.get_base_cv(conn, base_cv_id)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    if not force:
+        # Every delete requires an explicit confirm step — never delete
+        # immediately on the first click, referenced or not (an accidental
+        # delete was too easy before). Still refuse up front, before
+        # rendering the confirm state, if this is the last remaining base
+        # CV — never promise a delete that's actually impossible.
+        if len(q.list_base_cvs(conn)) <= 1:
+            raise HTTPException(status_code=400, detail="Can't delete the last remaining base CV")
+        return templates.TemplateResponse(
+            request, "cv/_base_cv_info_bar.html",
+            {"base": base, "base_cvs": q.list_base_cvs(conn), "confirming_delete": True,
+             "referencing_count": q.count_jobs_using_base_cv(conn, base_cv_id)},
+        )
+    try:
+        q.delete_base_cv(conn, base_cv_id, force=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return HTMLResponse(content="", headers={"HX-Redirect": "/cv"})
+
+
+@router.post("/cv/{base_cv_id}/save-base", response_class=HTMLResponse)
+async def cv_save_base(base_cv_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    if q.get_base_cv(conn, base_cv_id) is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    form = await request.form()
+    q.set_base_cv(conn, base_cv_id, form.get("markdown", ""))
+    return templates.TemplateResponse(
+        request, "cv/_save_base_oob.html", _cv_page_ctx(conn, base_cv_id),
+    )
+
+
+@router.get("/cv/{base_cv_id}/preview.html", response_class=HTMLResponse)
+def cv_preview_base_html(base_cv_id: int, version: int | None = None,
+                         conn: sqlite3.Connection = Depends(get_db)):
+    base = q.get_base_cv(conn, base_cv_id)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    content = base["base_cv"]
+    if version is not None:
+        v = q.get_version(conn, "base", base_cv_id, version)
+        if v is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        content = v["content"]
+    settings = q.get_cv_settings(conn)
+    if not doc_write_available():
+        raise HTTPException(status_code=503, detail="doc-write-cli is not installed")
+    try:
+        return HTMLResponse(render_preview_html(content, settings["css"]))
+    except CvRenderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/cv/{base_cv_id}/diff.html", response_class=HTMLResponse)
+def cv_diff_base_html(base_cv_id: int, request: Request, version: int | None = None,
+                      against: int | None = None, conn: sqlite3.Connection = Depends(get_db)):
+    base = q.get_base_cv(conn, base_cv_id)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    content = base["base_cv"]
+    if version is not None:
+        v = q.get_version(conn, "base", base_cv_id, version)
+        if v is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        content = v["content"]
+    if against is not None:
+        against_v = q.get_version(conn, "base", base_cv_id, against)
+        if against_v is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        against_content = against_v["content"]
+    else:
+        target_id = q.resolve_base_diff_target(conn, base_cv_id, version)
+        if target_id is None:
+            return templates.TemplateResponse(
+                request, "cv/_cv_diff_fallback.html",
+                {"predates": False, "body_html": "", "message": "Nothing to compare against yet."},
+            )
+        against_content = q.get_version(conn, "base", base_cv_id, target_id)["content"]
+    settings = q.get_cv_settings(conn)
+    try:
+        annotated = build_cv_diff(against_content, content).annotated_markdown
+    except Exception:
+        logger.exception("cv_diff build failed for base CV %s", base_cv_id)
+        annotated = content
+    if doc_write_available():
+        try:
+            return HTMLResponse(render_diff_html(annotated, settings["css"]))
+        except CvRenderError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    body_html = _markdown.markdown(annotated, extensions=["nl2br"])
+    return templates.TemplateResponse(
+        request, "cv/_cv_diff_fallback.html", {"predates": False, "body_html": body_html},
+    )
+
 
 
 # The save/reset routes below follow the codebase's post-redirect-get pattern
@@ -560,7 +674,7 @@ async def cv_save_style(request: Request, conn: sqlite3.Connection = Depends(get
     form = await request.form()
     current = q.get_cv_settings(conn)
     q.save_cv_settings(
-        conn, base_cv=current["base_cv"], base_instruction=form.get("base_instruction", ""),
+        conn, base_instruction=form.get("base_instruction", ""),
         base_guardrails=current["base_guardrails"], css=current["css"],
         default_scope=current["default_scope"],
         directives_template=current["directives_template"],
@@ -573,7 +687,7 @@ async def cv_save_guardrails(request: Request, conn: sqlite3.Connection = Depend
     form = await request.form()
     current = q.get_cv_settings(conn)
     q.save_cv_settings(
-        conn, base_cv=current["base_cv"], base_instruction=current["base_instruction"],
+        conn, base_instruction=current["base_instruction"],
         base_guardrails=form.get("base_guardrails", ""), css=current["css"],
         default_scope=current["default_scope"],
         directives_template=current["directives_template"],
@@ -595,7 +709,7 @@ async def cv_save_css(request: Request, conn: sqlite3.Connection = Depends(get_d
         ctx["settings"] = {**ctx["settings"], "css": css}
         return templates.TemplateResponse(request, "cv/advanced.html", ctx)
     q.save_cv_settings(
-        conn, base_cv=current["base_cv"], base_instruction=current["base_instruction"],
+        conn, base_instruction=current["base_instruction"],
         base_guardrails=current["base_guardrails"], css=css, default_scope=current["default_scope"],
         directives_template=current["directives_template"],
     )
@@ -606,7 +720,7 @@ async def cv_save_css(request: Request, conn: sqlite3.Connection = Depends(get_d
 def cv_reset_guardrails(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
-        conn, base_cv=settings["base_cv"], base_instruction=settings["base_instruction"],
+        conn, base_instruction=settings["base_instruction"],
         base_guardrails=DEFAULT_GUARDRAILS, css=settings["css"], default_scope=settings["default_scope"],
         directives_template=settings["directives_template"],
     )
@@ -617,7 +731,7 @@ def cv_reset_guardrails(conn: sqlite3.Connection = Depends(get_db)):
 def cv_reset_style(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
-        conn, base_cv=settings["base_cv"], base_instruction="",
+        conn, base_instruction="",
         base_guardrails=settings["base_guardrails"], css=settings["css"],
         default_scope=settings["default_scope"],
         directives_template=settings["directives_template"],
@@ -629,7 +743,7 @@ def cv_reset_style(conn: sqlite3.Connection = Depends(get_db)):
 def cv_reset_css(conn: sqlite3.Connection = Depends(get_db)):
     settings = q.get_cv_settings(conn)
     q.save_cv_settings(
-        conn, base_cv=settings["base_cv"], base_instruction=settings["base_instruction"],
+        conn, base_instruction=settings["base_instruction"],
         base_guardrails=settings["base_guardrails"], css="",
         default_scope=settings["default_scope"],
         directives_template=settings["directives_template"],
@@ -641,7 +755,7 @@ def cv_reset_css(conn: sqlite3.Connection = Depends(get_db)):
 async def cv_save_directives_template(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     form = await request.form()
     c = q.get_cv_settings(conn)
-    q.save_cv_settings(conn, base_cv=c["base_cv"], base_instruction=c["base_instruction"],
+    q.save_cv_settings(conn, base_instruction=c["base_instruction"],
                        base_guardrails=c["base_guardrails"], css=c["css"],
                        default_scope=c["default_scope"],
                        directives_template=form.get("directives_template", ""))
@@ -652,7 +766,7 @@ async def cv_save_directives_template(request: Request, conn: sqlite3.Connection
 def cv_reset_directives_template(conn: sqlite3.Connection = Depends(get_db)):
     from app.cv.instruction import DEFAULT_DIRECTIVES_TEMPLATE
     c = q.get_cv_settings(conn)
-    q.save_cv_settings(conn, base_cv=c["base_cv"], base_instruction=c["base_instruction"],
+    q.save_cv_settings(conn, base_instruction=c["base_instruction"],
                        base_guardrails=c["base_guardrails"], css=c["css"],
                        default_scope=c["default_scope"],
                        directives_template=DEFAULT_DIRECTIVES_TEMPLATE)
@@ -716,7 +830,8 @@ def _task_cv_tailor(conn, client, model, config, params):
     job = q.get_job(conn, job_id)
     if job is None:
         return {"job_id": job_id}
-    settings = _resolved_settings(conn)
+    base_cv_id = _job_base_cv_id(conn, job_id)
+    settings = _resolved_settings(conn, base_cv_id)
     scope_options = q.get_scope_options(conn)
     row = q.get_job_cv(conn, job_id)
     jc = _job_context(job)
@@ -742,7 +857,7 @@ def _task_cv_tailor(conn, client, model, config, params):
         conn.execute(
             "UPDATE job_cv SET plan_generated_at = datetime('now'), plan_context_hash = ? "
             "WHERE job_id = ?",
-            (_plan_context_hash(jc, notes), job_id),
+            (_plan_context_hash(jc, notes, base_cv_id), job_id),
         )
         conn.commit()
         q.add_job_event(conn, job_id, "cv", "CV plan generated")
@@ -826,6 +941,20 @@ def _plan_pane(
     if extra:
         ctx.update(extra)
     return templates.TemplateResponse(request, "cv/_plan_pane.html", ctx)
+
+
+@router.post("/jobs/{job_id}/cv/set-base", response_class=HTMLResponse)
+async def cv_set_base(job_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    _require_job(conn, job_id)
+    form = await request.form()
+    try:
+        base_cv_id = int(form.get("base_cv_id", ""))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid base CV")
+    if q.get_base_cv(conn, base_cv_id) is None:
+        raise HTTPException(status_code=404, detail="Base CV not found")
+    q.upsert_job_cv(conn, job_id, base_cv_id=base_cv_id)
+    return _plan_pane(request, conn, job_id)
 
 
 @router.post("/jobs/{job_id}/cv/plan")

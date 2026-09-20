@@ -4,6 +4,12 @@
   {% include "cv/_draft_status.html" %}
 </h2>
 
+{% set _selected_base = base_cvs | selectattr('id', 'equalto', selected_base_cv_id) | list | first %}
+<p class="muted" style="margin:.25rem 0 .5rem;font-size:.85em;">
+  {% if _selected_base %}Tailoring from <strong>{{ _selected_base.name }}</strong>{% endif %}
+  &middot; <a href="/jobs/{{ job.id }}/cv">Change tailoring base CV &rarr;</a>
+</p>
+
 <form id="cv-latitude-form" class="cv-latitude" method="post"
       action="/jobs/{{ job.id }}/cv/save-scope">
   <span class="cv-scope-label">Edit scope</span>

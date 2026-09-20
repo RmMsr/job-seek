@@ -41,9 +41,9 @@ def test_revert_rejects_a_version_belonging_to_another_job(client, conn):
 
 
 def test_revert_base_cv_version_repoints_current(client, conn):
-    q.save_cv_settings(conn, base_cv="v1", base_instruction="", base_guardrails="",
-                       css="", default_scope=[])
-    old_id = q.get_cv_settings(conn)["current_version_id"]
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "v1")
+    old_id = q.get_base_cv(conn, base_cv_id)["current_version_id"]
     # Force the second save past the 1h manual-edit stacking window so it opens
     # a distinct version instead of overwriting v1's row in place.
     conn.execute(
@@ -51,17 +51,29 @@ def test_revert_base_cv_version_repoints_current(client, conn):
         (old_id,),
     )
     conn.commit()
-    q.save_cv_settings(conn, base_cv="v2", base_instruction="", base_guardrails="",
-                       css="", default_scope=[])
+    q.set_base_cv(conn, base_cv_id, "v2")
 
-    r = client.post(f"/cv/versions/{old_id}/revert", follow_redirects=False)
+    r = client.post(f"/cv/{base_cv_id}/versions/{old_id}/revert", follow_redirects=False)
     assert r.status_code == 303
-    assert q.get_cv_settings(conn)["base_cv"] == "v1"
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == "v1"
 
 
 def test_base_cv_accept(client, conn):
-    q.save_cv_settings(conn, base_cv="v1", base_instruction="", base_guardrails="",
-                       css="", default_scope=[])
-    r = client.post("/cv/accept", follow_redirects=False)
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "v1")
+    r = client.post(f"/cv/{base_cv_id}/accept", follow_redirects=False)
     assert r.status_code == 303
-    assert q.get_cv_settings(conn)["accepted_at"] is not None
+    assert q.get_base_cv(conn, base_cv_id)["accepted_at"] is not None
+
+
+def test_revert_base_version_is_scoped_to_its_base_cv(client, conn):
+    base_cv_id = q.list_base_cvs(conn)[0]["id"]
+    q.set_base_cv(conn, base_cv_id, "v1")
+    q.accept_base_cv(conn, base_cv_id)
+    q.set_base_cv(conn, base_cv_id, "v2")
+    v1_id = q.get_accepted_base_version(conn, base_cv_id)["id"]
+
+    r = client.post(f"/cv/{base_cv_id}/versions/{v1_id}/revert", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/cv/{base_cv_id}"
+    assert q.get_base_cv(conn, base_cv_id)["base_cv"] == "v1"
