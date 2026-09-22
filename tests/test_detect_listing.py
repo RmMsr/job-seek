@@ -70,3 +70,13 @@ def test_detect_listing_prompt_warns_against_role_location_category_pages():
     sent_system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
     assert sent_system == _SYSTEM
     assert "role" in _SYSTEM and "location" in _SYSTEM
+
+
+def test_detect_listing_prompt_treats_distinct_urls_as_decisive():
+    # Similar/overlapping titles on the same source page are expected on real
+    # job boards (e.g. several seniority variants on one team) and must not
+    # by themselves disqualify a link — a distinct URL per posting is what
+    # the prompt should tell the model to trust.
+    assert "distinct" in _SYSTEM
+    assert "URL" in _SYSTEM
+    assert "do NOT make a link a category" in _SYSTEM
