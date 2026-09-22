@@ -439,8 +439,8 @@ wheels = [
 
 [[package]]
 name = "doc-write"
-version = "0.2.4"
-source = { git = "https://gitlab.com/RmMsr/doc-write-mcp.git?branch=main#b1f218a77b6bf8099914aca71d5fc54aa21abcb3" }
+version = "0.3.0"
+source = { git = "https://gitlab.com/RmMsr/doc-write-mcp.git?branch=main#d499ad50c2ad2bafa1429ae72d80620e0671e67c" }
 dependencies = [
     { name = "linkify-it-py" },
     { name = "markdown" },
