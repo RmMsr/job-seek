@@ -1,10 +1,7 @@
 {% extends "base.html" %}
 {% block title %}CV — Job Seek{% endblock %}
 {% block content %}
-<div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">CV</h1>
-  <a href="/cv/advanced">Advanced CV settings &rarr;</a>
-</div>
+{% include "cv/_cv_header.html" %}
 {% with active_base_cv_id = base.id %}
 {% include "cv/_base_cv_tabs.html" %}
 {% endwith %}

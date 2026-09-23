@@ -488,6 +488,15 @@ def cv_advanced_page(request: Request, conn: sqlite3.Connection = Depends(get_db
     return templates.TemplateResponse(request, "cv/advanced.html", ctx)
 
 
+# Also must precede /cv/{base_cv_id} — see the note below.
+@router.get("/cv/tailored", response_class=HTMLResponse)
+def cv_tailored_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    return templates.TemplateResponse(request, "cv/tailored.html", {
+        "base_cvs": q.list_base_cvs(conn),
+        "tailored_cvs": q.list_tailored_cvs(conn),
+    })
+
+
 # Registered before /cv/{base_cv_id} (below): both are GET, 2-segment paths,
 # and Starlette matches routes in registration order using the raw string
 # converter for an untyped path param -- so "/cv/advanced" would otherwise be

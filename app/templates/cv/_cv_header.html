@@ -1,0 +1,15 @@
+{# /cv page heading: title, the shared "Add" panel for creating a base CV,
+   and the Advanced settings link. Shared by the base-CV and Tailored CVs
+   tabs. #}
+{% from "_add_panel.html" import add_panel %}
+<div class="page-head">
+  <h1>CV</h1>
+  {% call add_panel("Add base CV") %}
+  <form method="post" action="/cv" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <input type="text" name="name" placeholder="Base CV name" required>
+    <button type="button" class="btn btn-subtle add-panel-cancel">Cancel</button>
+    <button type="submit" class="btn btn-primary">Create</button>
+  </form>
+  {% endcall %}
+  <a href="/cv/advanced" style="margin-left:auto;">Advanced CV settings &rarr;</a>
+</div>

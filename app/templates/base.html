@@ -729,12 +729,16 @@
       border-bottom: 2px solid transparent; text-decoration: none; }
     .cv-base-tab:hover { color: var(--accent); }
     .cv-base-tab.is-active { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--accent); }
-    .cv-base-tab-new { background: none; border: none; cursor: pointer; padding: 0.4rem 0.5rem;
-      margin-bottom: -1px; color: var(--text-muted); font-weight: 600; font-size: 1rem;
-      border-bottom: 2px solid transparent; }
-    .cv-base-tab-new:hover { color: var(--accent); border-bottom-color: var(--accent); }
     .cv-base-tab-rename-input { font: inherit; font-weight: 600; font-size: 0.9rem;
       padding: 0.15rem 0.3rem; border: 1px solid var(--accent); border-radius: 3px; }
+    .cv-base-tab-prefix { color: var(--text-muted); font-weight: 400; }
+
+    .cv-tailored-list { list-style: none; margin: 0; padding: 0; }
+    .cv-tailored-item { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+      padding: 0.55rem 0; border-bottom: 1px solid var(--border); }
+    .cv-tailored-title { font-weight: 500; }
+    .cv-tailored-meta { color: var(--text-muted); font-size: 0.85rem; }
+    .cv-tailored-age { margin-left: auto; color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
 
     /* Info line for the active base CV + its Rename/Delete actions, right
        below the tab strip (see the CV info-bar partial). Same row shape as
@@ -994,6 +998,9 @@
     .md-editor-wrap { display: block; }
     .md-editor-mount { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
     .cv-editor-status { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; }
+    /* Its horizontal margin alone would otherwise hold open an empty line box
+       where it sits on its own between blocks (the base CV page). */
+    .cv-editor-status:empty { display: none; }
     .cv-preview-editor { padding: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
     .cv-preview-editor .md-editor-mount { border: none; border-radius: 0; height: 100%; }
     /* EasyMDE theming: it has no theming API, so these are plain overrides

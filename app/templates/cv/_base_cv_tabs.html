@@ -1,30 +1,22 @@
-{# The base-CV tab strip — one tab per named base CV, plus a "+" tab to
-   create one. Params: base_cvs (list of {id, name}), active_base_cv_id. #}
-<div class="cv-base-tabs" id="cv-base-tabs" role="tablist" aria-label="Base CVs">
+{# The /cv tab strip — one tab per named base CV, then a "Tailored CVs" tab
+   listing tailored CVs. (Creating a base CV is a heading action, see
+   _cv_header.html.) Params: base_cvs (list of {id, name}),
+   active_base_cv_id, tailored_active. #}
+<div class="cv-base-tabs" id="cv-base-tabs" role="tablist" aria-label="CVs">
   {% for b in base_cvs %}
   <a class="cv-base-tab{{ ' is-active' if b.id == active_base_cv_id else '' }}" role="tab"
      aria-selected="{{ 'true' if b.id == active_base_cv_id else 'false' }}"
      href="/cv/{{ b.id }}">
+    <span class="cv-base-tab-prefix">base:</span>
     <span class="cv-base-tab-name" data-base-cv-id="{{ b.id }}">{{ b.name }}</span>
   </a>
   {% endfor %}
-  <button type="button" class="cv-base-tab cv-base-tab-new" id="cv-base-tab-new">+</button>
-  <form id="cv-base-tab-create-form" method="post" action="/cv" style="display:none;">
-    <input type="text" name="name" placeholder="Base CV name" required>
-    <button type="submit" class="btn btn-subtle">Create</button>
-  </form>
+  <a class="cv-base-tab{{ ' is-active' if tailored_active else '' }}" role="tab"
+     aria-selected="{{ 'true' if tailored_active else 'false' }}"
+     href="/cv/tailored">Tailored CVs</a>
 </div>
 <script>
   (function () {
-    var btn = document.getElementById("cv-base-tab-new");
-    var form = document.getElementById("cv-base-tab-create-form");
-    if (btn && form) {
-      btn.addEventListener("click", function () {
-        form.style.display = form.style.display === "none" ? "flex" : "none";
-        var input = form.querySelector("input[name=name]");
-        if (form.style.display !== "none" && input) input.focus();
-      });
-    }
     window.cvBaseTabStartRename = function (baseCvId) {
       var span = document.querySelector('.cv-base-tab-name[data-base-cv-id="' + baseCvId + '"]');
       if (!span) return;

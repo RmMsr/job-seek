@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Tailored CVs — Job Seek{% endblock %}
+{% block content %}
+{% include "cv/_cv_header.html" %}
+{% with tailored_active = true %}
+{% include "cv/_base_cv_tabs.html" %}
+{% endwith %}
+
+{% if tailored_cvs %}
+<ul class="cv-tailored-list">
+  {% for t in tailored_cvs %}
+  <li class="cv-tailored-item">
+    <a class="cv-tailored-title" href="/jobs/{{ t.job_id }}/cv/preview">{{ t.title or "(untitled job)" }}</a>
+    <span class="cv-tailored-meta">{% if t.company %}{{ t.company }} · {% endif %}base: {{ t.base_cv_name }}</span>
+    <span class="cv-tailored-age" title="{{ t.cv_updated_at }} UTC">{{ t.cv_updated_at | age }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No tailored CVs yet. Tailor one from a job's CV workbench.</p>
+{% endif %}
+{% endblock %}

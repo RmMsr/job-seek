@@ -821,3 +821,71 @@ def test_cv_info_bar_delete_button_shown_with_multiple_base_cvs(client, conn):
     # The delete button should now render since we have more than one base CV.
     assert f'hx-delete="/cv/{default_id}"' in r.text
     assert 'class="btn btn-delete"' in r.text
+
+
+def test_base_cv_tabs_are_prefixed_with_base(client, conn):
+    r = client.get("/cv", follow_redirects=True)
+    assert '<span class="cv-base-tab-prefix">base:</span>' in r.text
+
+
+def test_cv_tab_strip_ends_with_tailored_cvs_tab(client, conn):
+    last_base_id = q.create_base_cv(conn, "Backend")
+    r = client.get("/cv", follow_redirects=True)
+    text = r.text
+    tailored_at = text.index('href="/cv/tailored"')
+    assert text.index(f'href="/cv/{last_base_id}"') < tailored_at
+    assert text[tailored_at:text.index("</a>", tailored_at)].endswith(">Tailored CVs")
+
+
+def test_new_base_cv_is_a_heading_action_not_a_tab(client):
+    for url in ("/cv", "/cv/tailored"):
+        text = client.get(url, follow_redirects=True).text
+        assert "cv-base-tab-new" not in text
+        h1_close = text.index("</h1>")
+        button_at = text.index('add-panel-trigger">+ Add base CV</button>')
+        assert h1_close < button_at < text.index('id="cv-base-tabs"')
+        assert 'action="/cv"' in text
+
+
+def _tailored_job(conn, title, url, base_cv_id=None):
+    source_id = conn.execute("SELECT id FROM sources LIMIT 1").fetchone()
+    source_id = source_id[0] if source_id else q.insert_source(conn, "s", "https://s", "manual")
+    job_id = q.insert_job(conn, source_id=source_id, url=url, title=title, company="Acme", raw_text="r")
+    if base_cv_id is not None:
+        q.upsert_job_cv(conn, job_id, base_cv_id=base_cv_id)
+    q.set_job_cv_tailored(conn, job_id, f"# CV for {title}")
+    return job_id
+
+
+def test_tailored_tab_lists_recent_tailored_cvs_newest_first(client, conn):
+    default_id = q.list_base_cvs(conn)[0]["id"]
+    q.rename_base_cv(conn, default_id, "General")
+    backend_id = q.create_base_cv(conn, "Backend")
+    old = _tailored_job(conn, "Old Job", "http://e/old")
+    new = _tailored_job(conn, "New Job", "http://e/new", base_cv_id=backend_id)
+    conn.execute(
+        "UPDATE cv_versions SET updated_at = datetime('now', '-3 days') "
+        "WHERE entity_type = 'tailored' AND entity_id = ?", (old,))
+    conn.commit()
+    untailored = q.insert_job(conn, source_id=conn.execute("SELECT id FROM sources").fetchone()[0],
+                              url="http://e/none", title="Never Tailored", company="X", raw_text="r")
+    q.set_job_cv_directives(conn, untailored, "some directive")
+
+    r = client.get("/cv/tailored")
+    assert r.status_code == 200
+    text = r.text
+    assert f'href="/jobs/{new}/cv/preview"' in text
+    assert f'href="/jobs/{old}/cv/preview"' in text
+    assert text.index("New Job") < text.index("Old Job")
+    assert "Never Tailored" not in text
+    new_row = text[text.index("New Job"):text.index("Old Job")]
+    assert "Backend" in new_row and "just now" in new_row
+    old_row = text[text.index("Old Job"):text.index("</ul>", text.index("Old Job"))]
+    assert "General" in old_row and "3d ago" in old_row
+    assert 'cv-base-tab is-active' in text and 'href="/cv/tailored"' in text
+
+
+def test_tailored_tab_empty_state(client):
+    r = client.get("/cv/tailored")
+    assert r.status_code == 200
+    assert "No tailored CVs yet" in r.text
