@@ -72,11 +72,17 @@ def _jobs_for_filter(conn: sqlite3.Connection, f: JobFilter) -> list[dict]:
     )
 
 
+def _effective_fit(j) -> float | None:
+    """User override if set, else the computed fit score."""
+    ov = j.get("fit_score_override")
+    return ov if ov is not None else j["fit_score"]
+
+
 def _sort_key(order: str):
     """Match get_jobs' ORDER BY for the in-Python re-sort of merged stale rows."""
     if order == "score":
         return lambda j: (
-            j["fit_score"] if j["fit_score"] is not None else float("-inf"),
+            _effective_fit(j) if _effective_fit(j) is not None else float("-inf"),
             j["created_at"] or "",
         )
     if order == "age":
@@ -357,6 +363,21 @@ def job_feedback(
         if decided is not None and _stale_badge(conn, decided, f) is not None:
             headers["HX-Reswap"] = "outerHTML swap:0.35s"
     return HTMLResponse(content=row_html + counts_html, headers=headers)
+
+
+@router.post("/jobs/{job_id}/score-override", response_class=HTMLResponse)
+def job_score_override(
+    job_id: int,
+    request: Request,
+    score: int = Form(..., ge=0, le=100),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Set (or, when equal to the computed score, clear) the user's fit-score
+    override, then re-render the job like the feedback form does."""
+    q.set_fit_score_override(conn, job_id, score)
+    f = _filter_from_request(request)
+    detail = _is_detail_page_request(request)
+    return HTMLResponse(_render_updated_job_html(conn, request, job_id, f, detail=detail))
 
 
 @router.post("/jobs/{job_id}/note")

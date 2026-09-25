@@ -1003,6 +1003,22 @@ def log_score_change(
     add_job_event(conn, job_id, "score", message)
 
 
+def set_fit_score_override(conn: sqlite3.Connection, job_id: int, score: int) -> None:
+    """Store a user override (0..100) of the fit score. Picking the computed
+    score itself clears the override."""
+    row = conn.execute("SELECT fit_score FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return
+    fit = row["fit_score"]
+    value = None if fit is not None and score == round(fit * 100) else score / 100
+    conn.execute("UPDATE jobs SET fit_score_override = ? WHERE id = ?", (value, job_id))
+    conn.commit()
+    if value is None:
+        add_job_event(conn, job_id, "score", "Score override cleared")
+    else:
+        add_job_event(conn, job_id, "score", f"Score overridden → {score}%")
+
+
 def update_job_pipeline(
     conn: sqlite3.Connection,
     job_id: int,
@@ -1157,6 +1173,7 @@ def reset_job(conn: sqlite3.Connection, job_id: int) -> None:
             attainability_score = NULL,
             attainability_reasoning = NULL,
             fit_score = NULL,
+            fit_score_override = NULL,
             profile_version_hash = NULL,
             gate_override = 0,
             evaluation_completed_at = NULL
@@ -1338,7 +1355,7 @@ _ORDER_BY = {
         "COALESCE(jobs.evaluation_completed_at, ''), jobs.created_at) "
         "DESC, jobs.id DESC"
     ),
-    "score": "jobs.fit_score DESC NULLS LAST, jobs.created_at DESC",
+    "score": "COALESCE(jobs.fit_score_override, jobs.fit_score) DESC NULLS LAST, jobs.created_at DESC",
     "age": "COALESCE(jobs.published_at, jobs.created_at) DESC, jobs.id DESC",
 }
 

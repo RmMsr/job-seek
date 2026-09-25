@@ -2241,3 +2241,61 @@ def test_cv_plan_task_id_only_matches_plan_mode(conn):
     assert q.cv_plan_task_id(conn, jid) is None
     t = q.enqueue_task(conn, kind="cv_tailor", params={"job_id": jid, "mode": "plan"})
     assert q.cv_plan_task_id(conn, jid) == t["id"]
+
+
+def _fit_job(conn, fit=0.58):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/o", title="T", company="C", raw_text="r")
+    if fit is not None:
+        q.update_job_fit(conn, jid, fit, "i", fit, "a", "ph")
+    return jid
+
+
+def test_set_fit_score_override_stores_fraction(conn):
+    jid = _fit_job(conn)
+    q.set_fit_score_override(conn, jid, 73)
+    assert q.get_job(conn, jid)["fit_score_override"] == pytest.approx(0.73)
+
+
+def test_set_fit_score_override_identical_to_computed_clears(conn):
+    jid = _fit_job(conn, fit=0.58)
+    q.set_fit_score_override(conn, jid, 73)
+    q.set_fit_score_override(conn, jid, 58)
+    assert q.get_job(conn, jid)["fit_score_override"] is None
+
+
+def test_set_fit_score_override_on_unscored_job_stores(conn):
+    jid = _fit_job(conn, fit=None)
+    q.set_fit_score_override(conn, jid, 0)
+    assert q.get_job(conn, jid)["fit_score_override"] == 0
+
+
+def test_set_fit_score_override_logs_event(conn):
+    jid = _fit_job(conn, fit=0.58)
+    q.set_fit_score_override(conn, jid, 73)
+    q.set_fit_score_override(conn, jid, 58)
+    msgs = [e["message"] for e in q.get_job_events(conn, jid)]
+    assert any("Score overridden" in m and "73" in m for m in msgs)
+    assert any("Score override cleared" in m for m in msgs)
+
+
+def test_reset_job_clears_fit_score_override(conn):
+    jid = _fit_job(conn)
+    q.set_fit_score_override(conn, jid, 73)
+    q.reset_job(conn, jid)
+    assert q.get_job(conn, jid)["fit_score_override"] is None
+
+
+def test_update_job_fit_keeps_fit_score_override(conn):
+    jid = _fit_job(conn)
+    q.set_fit_score_override(conn, jid, 73)
+    q.update_job_fit(conn, jid, 0.2, "i", 0.2, "a", "ph2")
+    assert q.get_job(conn, jid)["fit_score_override"] == pytest.approx(0.73)
+
+
+def test_get_jobs_order_score_uses_override(conn):
+    lo = _mk_job(conn, "https://x.test/lo", created="2024-01-01T00:00:00", fit=0.2)
+    hi = _mk_job(conn, "https://x.test/hi", created="2024-01-01T00:00:00", fit=0.9)
+    q.set_fit_score_override(conn, lo, 95)
+    ids = [j["id"] for j in q.get_jobs(conn, status="new", order="score")]
+    assert ids.index(lo) < ids.index(hi)

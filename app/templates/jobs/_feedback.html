@@ -18,7 +18,7 @@
   {% if is_detail_page %}
   <div class="job-detail-extra">
     <div class="job-detail-meta">
-      {% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
+      {% if job.fit_score is not none or job.fit_score_override is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
       {% if job.company %}<span>{{ job.company }}</span>{% endif %}
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
       <a href="{{ job.url }}" target="_blank" rel="noopener">&#8599; original</a>
@@ -47,7 +47,7 @@
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
     </div>
     <div class="job-detail-meta">
-      {% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
+      {% if job.fit_score is not none or job.fit_score_override is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
       {% if job.company %}<span>{{ job.company }}</span>{% endif %}
       <a href="{{ job.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">&#8599; original</a>
     </div>
@@ -125,6 +125,7 @@
     <div class="job-action-group">
       <span class="job-actions-group-label">Organize</span>
       <div class="actions" role="group" aria-label="Organize">
+        {{ macros.score_override_button(job, filter, detail=is_detail_page|default(false)) }}
         <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
         <button type="submit" name="status" value="pending" class="btn btn-pending">Mark pending</button>
         <button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>

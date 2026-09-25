@@ -1865,3 +1865,18 @@ def test_job_cv_new_columns_migration_is_idempotent(conn):
     _migrate_job_cv_add_plan_context_hash(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)").fetchall()}
     assert {"scope_edited_at", "plan_context_hash"} <= cols
+
+
+def test_jobs_table_has_fit_score_override_column(conn):
+    init_db(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("fit_score_override") == 1
+
+
+def test_init_db_migrates_jobs_adds_fit_score_override(conn):
+    init_db(conn)
+    conn.execute("ALTER TABLE jobs DROP COLUMN fit_score_override")
+    conn.commit()
+    init_db(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert cols.count("fit_score_override") == 1

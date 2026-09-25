@@ -3038,3 +3038,115 @@ def test_main_nav_shows_cv_link_after_profile(client):
     assert text.index('href="/cv"') < text.index('href="/scenarios"')
 
 
+def test_score_override_sets_and_renders(client, conn):
+    _, jid, _ = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/score-override", data={"score": "90"})
+    assert resp.status_code == 200
+    assert q.get_job(conn, jid)["fit_score_override"] == pytest.approx(0.90)
+    assert f'id="job-{jid}"' in resp.text
+
+
+def test_score_override_identical_clears(client, conn):
+    _, jid, _ = _seed(conn)
+    client.post(f"/jobs/{jid}/score-override", data={"score": "90"})
+    client.post(f"/jobs/{jid}/score-override", data={"score": "75"})
+    assert q.get_job(conn, jid)["fit_score_override"] is None
+
+
+@pytest.mark.parametrize("bad", ["-1", "101", "abc"])
+def test_score_override_rejects_out_of_range(client, conn, bad):
+    _, jid, _ = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/score-override", data={"score": bad})
+    assert resp.status_code == 422
+
+
+def test_score_override_detail_renders_detail_variant(client, conn):
+    _, jid, _ = _seed(conn)
+    resp = client.post(f"/jobs/{jid}/score-override?detail=1", data={"score": "90"})
+    assert resp.status_code == 200
+    assert "job-detail-extra" in resp.text
+
+
+def test_sort_key_score_uses_override():
+    from app.routes.jobs import _sort_key
+    a = {"fit_score": 0.9, "fit_score_override": None, "created_at": "1"}
+    b = {"fit_score": 0.2, "fit_score_override": 0.95, "created_at": "1"}
+    assert sorted([a, b], key=_sort_key("score"), reverse=True)[0] is b
+
+
+def test_row_shows_struck_original_and_override(client, conn):
+    _, jid, _ = _seed(conn)
+    q.set_fit_score_override(conn, jid, 90)
+    html = client.get("/jobs").text
+    start = html.index('id="job-%d"' % jid)
+    row = html[start:html.index("job-row-content", start)]
+    assert "score-overridden-stacked" in row
+    # Old number first, then ▾ pointing down to the override.
+    assert row.index("score-original") < row.index("75%") < row.index("&#9662;") < row.index("90%")
+
+
+def test_expanded_meta_shows_inline_struck_original_then_override(client, conn):
+    _, jid, _ = _seed(conn)
+    q.set_fit_score_override(conn, jid, 90)
+    html = client.get(f"/jobs/{jid}/expand").text
+    start = html.index('class="job-detail-meta"')
+    meta = html[start:html.index("</div>", start)]
+    # Old number lives inside the single override score tag.
+    tag_start = meta.index('class="score-badge score-fluid score-overridden-inline')
+    tag = meta[tag_start:meta.index("90%", tag_start)]
+    assert 'class="score-original"' in tag
+    assert tag.index("75%") < tag.index("&#9656;")
+    assert "</span>" not in tag.replace('<span class="sr-only">computed </span>', "").replace(
+        '<span class="score-arrow" aria-hidden="true">&#9656;</span>', "")
+
+
+def test_unscored_job_with_override_shows_only_override_badge(client, conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/u", title="U", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", summary="s")
+    q.set_fit_score_override(conn, jid, 40)
+    html = client.get(f"/jobs/{jid}/expand").text
+    start = html.index('class="job-detail-meta"')
+    meta = html[start:html.index("</div>", start)]
+    assert "40%" in meta
+    assert "score-original" not in meta
+
+
+def test_expanded_shows_override_button_before_accept(client, conn):
+    _, jid, _ = _seed(conn)
+    html = client.get(f"/jobs/{jid}/expand").text
+    assert 'data-score-override-url="/jobs/%d/score-override' % jid in html
+    assert html.index("score-override-btn") < html.index('value="accepted"')
+    start = html.index("score-override-btn")
+    btn = html[start:html.index("</button>", start)]
+    assert 'type="button"' in html[html.rindex("<button", 0, start):start]
+    assert 'data-computed="75"' in btn and 'data-override=""' in btn
+    assert "75%" in btn
+
+
+def test_detail_override_button_posts_with_detail_flag(client, conn):
+    _, jid, _ = _seed(conn)
+    html = client.get(f"/jobs/{jid}").text
+    assert 'data-score-override-url="/jobs/%d/score-override?detail=1"' % jid in html
+
+
+def test_override_button_shows_dash_for_unscored(client, conn):
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="http://job/u", title="U", company="C", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", summary="s")
+    html = client.get(f"/jobs/{jid}/expand").text
+    start = html.index("score-override-btn")
+    assert "–" in html[start:html.index("</button>", start)]
+
+
+def test_no_struck_original_without_override(client, conn):
+    _seed(conn)
+    assert 'class="score-original"' not in client.get("/jobs").text
+
+
+def test_score_override_dial_script_present(client, conn):
+    html = client.get("/jobs").text
+    assert "score-override-dial" in html
+    assert ".score-override-btn" in html
+
+

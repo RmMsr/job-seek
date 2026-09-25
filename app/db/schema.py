@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     attainability_score REAL,
     attainability_reasoning TEXT,
     fit_score REAL,
+    fit_score_override REAL,
     profile_version_hash TEXT,
     gate_override INTEGER NOT NULL DEFAULT 0,
     evaluation_completed_at TEXT,
@@ -1293,6 +1294,18 @@ def _migrate_jobs_add_pending_status(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_add_fit_score_override(conn: sqlite3.Connection) -> None:
+    # Purely additive column. Runs last so earlier jobs-rebuild migrations
+    # can't drop it.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or "fit_score_override" in row[0]:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN fit_score_override REAL")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -1341,3 +1354,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_cv_versions_add_reset_and_note(conn)
     _migrate_base_cvs_from_singleton(conn)
     _migrate_job_cv_add_base_cv_id(conn)
+    _migrate_jobs_add_fit_score_override(conn)

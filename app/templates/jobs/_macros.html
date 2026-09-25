@@ -2,11 +2,42 @@
 {%- if detail -%}?detail=1{%- else -%}?{{ filter.query_params() | urlencode }}{%- endif -%}
 {%- endmacro %}
 
-{% macro fit_score_badge(job, size="") %}
-{% if job.fit_score is not none %}
-{% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format(job.interest_score * 100, job.attainability_score * 100) %}
-<span class="score-badge score-fluid{% if size %} {{ size }}{% endif %}" style="{{ job.fit_score | score_style }}" title="{{ fit_title }}">{{ "%.0f"|format(job.fit_score * 100) }}%</span>
+{#- layout: "inline" (one tag: ~~58%~~ ▸ 73%) or "stacked" (folded card
+    score column: struck original on top, ▾ and the override below). -#}
+{% macro fit_score_badge(job, size="", layout="inline") %}
+{% set ov = job.fit_score_override %}
+{% set fit = job.fit_score %}
+{% if fit is not none %}
+{% set fit_title = "Profile fit: average of Interest (%.0f%%) and Attainability (%.0f%%) against your profile"|format((job.interest_score or 0) * 100, (job.attainability_score or 0) * 100) %}
 {% endif %}
+{% if ov is not none %}
+{% set ov_badge %}<span class="score-badge score-fluid{% if size %} {{ size }}{% endif %}" style="{{ ov | score_style }}" title="Your override">{{ "%.0f"|format(ov * 100) }}%</span>{% endset %}
+{% if fit is none %}{{ ov_badge }}
+{% elif layout == "stacked" %}
+<span class="score-overridden score-overridden-stacked score-fluid" style="{{ ov | score_style }}">
+  <s class="score-original" title="{{ fit_title }}"><span class="sr-only">computed </span>{{ "%.0f"|format(fit * 100) }}%</s>
+  <span class="score-arrow" aria-hidden="true">&#9662;</span>
+  {{ ov_badge }}
+</span>
+{% else %}
+<span class="score-badge score-fluid score-overridden-inline{% if size %} {{ size }}{% endif %}" style="{{ ov | score_style }}" title="Your override"><s class="score-original" title="{{ fit_title }}"><span class="sr-only">computed </span>{{ "%.0f"|format(fit * 100) }}%</s><span class="score-arrow" aria-hidden="true">&#9656;</span>{{ "%.0f"|format(ov * 100) }}%</span>
+{% endif %}
+{% elif fit is not none %}
+<span class="score-badge score-fluid{% if size %} {{ size }}{% endif %}" style="{{ fit | score_style }}" title="{{ fit_title }}">{{ "%.0f"|format(fit * 100) }}%</span>
+{% endif %}
+{% endmacro %}
+
+{#- Opens the score-override dial (base.html). type="button" because it sits
+    inside the feedback form. -#}
+{% macro score_override_button(job, filter, detail=false) %}
+{% set eff = job.fit_score_override if job.fit_score_override is not none else job.fit_score %}
+<button type="button" class="btn score-override-btn{% if eff is not none %} score-fluid{% endif %}"
+  {% if eff is not none %}style="{{ eff | score_style }}"{% endif %}
+  data-score-override-url="/jobs/{{ job.id }}/score-override{{ qsuffix(filter, detail=detail) }}"
+  data-score-override-target="#job-{{ job.id }}"
+  data-computed="{{ (job.fit_score * 100)|round|int if job.fit_score is not none else '' }}"
+  data-override="{{ (job.fit_score_override * 100)|round|int if job.fit_score_override is not none else '' }}"
+  title="Override the fit score" aria-haspopup="dialog"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.3 12.7A6.5 6.5 0 1 1 12.7 12.7"/><path d="M8 9.5 11 5.5"/></svg>{% if eff is not none %}{{ "%.0f"|format(eff * 100) }}%{% else %}–{% endif %}</button>
 {% endmacro %}
 
 {% macro status_pill(job) %}

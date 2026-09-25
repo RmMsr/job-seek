@@ -4,7 +4,7 @@
   hx-target="#job-{{ job.id }}"
   hx-swap="outerHTML transition:true"
   hx-trigger="click, keyup[key=='Enter']">
-  <div class="job-row-score">{% if job.fit_score is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}</div>
+  <div class="job-row-score">{% if job.fit_score is not none or job.fit_score_override is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job, layout="stacked") }}{% endif %}</div>
   <div class="job-row-content">
     {% if not is_detail_page %}
     <label class="job-select-wrap">
