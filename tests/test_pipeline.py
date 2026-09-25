@@ -605,6 +605,43 @@ def test_run_reprocess_job_reruns_full_pipeline(conn, source):
     assert any("Scored 0.9" in m for m in messages)
 
 
+def _reprocess_with_mocks(conn, jid):
+    with patch("app.pipeline.classify", return_value=("job_posting", "full description")), \
+         patch("app.pipeline.summarize", return_value=JobSummary(title="T", headline="h", summary="s")) as mock_summarize, \
+         patch("app.pipeline.evaluate", return_value=(0.1, "r")), \
+         patch("app.pipeline.assess_fit", return_value={
+             "interest": 0.5, "interest_reasoning": "r",
+             "attainability": 0.5, "attainability_reasoning": "r",
+         }):
+        _drain(run_reprocess_job(
+            conn, MagicMock(), "llama3.2", q.get_job(conn, jid), q.get_scenarios(conn), q.get_profile(conn),
+        ))
+    return mock_summarize
+
+
+def test_run_reprocess_job_passes_job_note_to_summarize(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="<p>We are hiring</p>",
+    )
+    q.update_job_feedback(conn, jid, "rejected", "actually fully remote")
+
+    mock_summarize = _reprocess_with_mocks(conn, jid)
+
+    assert mock_summarize.call_args.kwargs["job_note"] == "actually fully remote"
+
+
+def test_run_reprocess_job_without_note_passes_empty_job_note(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="<p>We are hiring</p>",
+    )
+
+    mock_summarize = _reprocess_with_mocks(conn, jid)
+
+    assert mock_summarize.call_args.kwargs["job_note"] == ""
+
+
 def test_run_reprocess_job_irrelevant_deletes_job(conn, source):
     jid = q.insert_job(
         conn, source_id=source["id"], url="http://example.com/job/1",
@@ -692,6 +729,45 @@ def test_run_reevaluate_job_always_recomputes_even_when_unchanged(conn, source):
 
     assert mock_evaluate.call_count == 2
     assert mock_assess.call_count == 2
+
+
+def _reevaluate_with_mocks(conn, jid):
+    with patch("app.pipeline.summarize", return_value=JobSummary(title="T", headline="h", summary="s")) as mock_summarize, \
+         patch("app.pipeline.evaluate", return_value=(0.1, "r")), \
+         patch("app.pipeline.assess_fit", return_value={
+             "interest": 0.5, "interest_reasoning": "r",
+             "attainability": 0.5, "attainability_reasoning": "r",
+         }):
+        _drain(run_reevaluate_job(
+            conn, MagicMock(), "llama3.2", q.get_job(conn, jid), q.get_scenarios(conn), q.get_profile(conn),
+        ))
+    return mock_summarize
+
+
+def test_run_reevaluate_job_passes_job_note_to_summarize(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, jid, "accepted", "salary is 90k")
+
+    mock_summarize = _reevaluate_with_mocks(conn, jid)
+
+    assert mock_summarize.call_args.kwargs["job_note"] == "salary is 90k"
+
+
+def test_run_reevaluate_job_without_note_passes_empty_job_note(conn, source):
+    jid = q.insert_job(
+        conn, source_id=source["id"], url="http://example.com/job/1",
+        title="T", company="C", raw_text="raw",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="clean text", content_type="job_posting", summary="s")
+    q.update_job_feedback(conn, jid, "accepted", "")
+
+    mock_summarize = _reevaluate_with_mocks(conn, jid)
+
+    assert mock_summarize.call_args.kwargs["job_note"] == ""
 
 
 def test_run_reevaluate_job_skips_rejected_job(conn, source):

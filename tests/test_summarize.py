@@ -283,3 +283,64 @@ def test_summarize_title_spec_excludes_organization():
     assert "(remote/hybrid/onsite)>" in system          # title format kept, minus the org
     assert "@ Organization" not in system
     assert "include the organization name" not in system
+
+
+_NOTE_HEADER = "# The candidate's own note on this job (trusted)"
+
+
+def _messages(client: MagicMock) -> list[dict]:
+    return client.chat.completions.create.call_args.kwargs["messages"]
+
+
+def test_summarize_blank_job_note_leaves_messages_unchanged():
+    response = '{"title": "T", "headline": "H", "summary": "S"}'
+    baseline = _mock_client(response)
+    summarize(baseline, "llama3.2", "posting text", today=_TODAY)
+    for note in ("", "   \n\t "):
+        client = _mock_client(response)
+        summarize(client, "llama3.2", "posting text", today=_TODAY, job_note=note)
+        assert _messages(client) == _messages(baseline)
+
+
+def test_summarize_job_note_appended_after_posting_with_instruction():
+    client = _mock_client('{"title": "T", "headline": "H", "summary": "S"}')
+    summarize(client, "llama3.2", "posting text", today=_TODAY, job_note="  actually fully remote \n")
+    system, user = _messages(client)[0]["content"], _messages(client)[1]["content"]
+    assert "(per your note)" in system
+    assert "note" in system.lower() and "trusted" in system.lower()
+    assert user.endswith(f"\n\n{_NOTE_HEADER}\nactually fully remote")
+    assert user.index("posting text") < user.index(_NOTE_HEADER)
+
+
+def test_summarize_job_note_follows_truncated_posting():
+    client = _mock_client('{"title": "T", "headline": "H", "summary": "S"}')
+    summarize(client, "llama3.2", "x" * 10000, today=_TODAY, job_note="my note")
+    user = _messages(client)[1]["content"]
+    assert f"{'x' * 6000}\n\n{_NOTE_HEADER}\nmy note" in user
+    assert "x" * 6001 not in user
+
+
+def test_summarize_raw_lead_with_job_note():
+    original = "Posted by U1:\n\nAcme might be hiring"
+    client = _mock_client('{"organizations": ["Acme"], "headline": "H"}')
+    result = summarize(
+        client, "llama3.2", original, content_type="lead", raw_passthrough=True,
+        today=_TODAY, job_note="they are hiring a data lead",
+    )
+    system, user = _messages(client)[0]["content"], _messages(client)[1]["content"]
+    assert "organizations" in system
+    assert "candidate's own note" in system and "trusted" in system
+    assert user.endswith(f"\n\n{_NOTE_HEADER}\nthey are hiring a data lead")
+    assert result.summary == original
+
+
+def test_summarize_rejects_source_link_only_in_job_note():
+    response = (
+        '{"title": "T", "headline": "H", "summary": "S", '
+        '"source_link": "https://note-only.example.com/job"}'
+    )
+    result = summarize(
+        _mock_client(response), "llama3.2", "posting text", today=_TODAY,
+        job_note="apply at https://note-only.example.com/job",
+    )
+    assert result.summary == "S"

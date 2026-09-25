@@ -60,6 +60,26 @@ _LEAD_SYSTEM = (
     "organization is identifiable, return an empty organizations list."
 )
 
+# Appended to the system prompt only when the candidate left a note on the job
+# (reset / re-evaluate), so note-less calls keep the exact original prompt.
+_NOTE_INSTRUCTION = (
+    " The candidate's own note on this job follows the text and is trusted: it is "
+    "their own words. Where it contradicts or adds to the posting (location, remote "
+    "status, salary, scope, company), the note wins, and mark facts taken from the "
+    "note inline as *(per your note)*. Let the note steer what you emphasise. Don't "
+    "paste the note in wholesale."
+)
+
+_LEAD_NOTE_INSTRUCTION = (
+    " The candidate's own note on this job follows the message and is trusted: it is "
+    "their own words. Where it contradicts or adds to the message (e.g. which "
+    "organizations are hiring, the role, location or remote status), the note wins "
+    "for organizations and headline. Let the note steer what the headline emphasises. "
+    "Don't paste the note in wholesale."
+)
+
+_NOTE_HEADER = "# The candidate's own note on this job (trusted)"
+
 
 def _valid_source_link(link: str, simplified_content: str) -> str:
     if not isinstance(link, str):
@@ -95,6 +115,7 @@ def summarize(
     raw_passthrough: bool = True,
     *,
     today: date | None = None,
+    job_note: str = "",
 ) -> JobSummary:
     today = today if today is not None else datetime.now(timezone.utc).date()
     # A "lead" keeps its source text verbatim as the summary only when that text
@@ -105,11 +126,18 @@ def summarize(
     user_content = simplified_content[:6000]
     if not raw_lead:
         user_content = f"Today is {today.isoformat()}.\n\n{user_content}"
+    system = _LEAD_SYSTEM if raw_lead else _SYSTEM
+    # The note is appended after the posting's truncation so it is never cut off.
+    # Validation below (source_link, raw-lead summary) still only trusts the posting.
+    note = job_note.strip()
+    if note:
+        system += _LEAD_NOTE_INSTRUCTION if raw_lead else _NOTE_INSTRUCTION
+        user_content = f"{user_content}\n\n{_NOTE_HEADER}\n{note}"
     content = complete(
         client,
         model,
         [
-            {"role": "system", "content": _LEAD_SYSTEM if raw_lead else _SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": user_content},
         ],
         temperature=0.3,

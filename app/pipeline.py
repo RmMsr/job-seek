@@ -77,10 +77,11 @@ def _evaluate_posting(
     url: str,
     progress_prefix: str = "",
     preserve_existing_metadata: bool = False,
+    job_note: str = "",
 ) -> Generator[str, None, None]:
     job_summary = summarize(
         client, model, simplified, content_type=content_type, raw_passthrough=is_slack,
-        today=datetime.now(timezone.utc).date(),
+        today=datetime.now(timezone.utc).date(), job_note=job_note,
     )
     # `preserve_existing_metadata` guards the *date*: a fetcher-supplied
     # published_at is authoritative and relative phrases must not be re-resolved
@@ -136,6 +137,7 @@ def _ingest_posting(
     url: str,
     progress_prefix: str = "",
     preserve_existing_metadata: bool = False,
+    job_note: str = "",
 ) -> Generator[str, None, None]:
     simplified = simplify(raw_text)
     content_type, _ = classify(client, model, simplified, is_slack=is_slack)
@@ -149,6 +151,7 @@ def _ingest_posting(
             profile=profile, scenarios=scenarios, url=url,
             progress_prefix=progress_prefix,
             preserve_existing_metadata=preserve_existing_metadata,
+            job_note=job_note,
         )
     elif content_type == "irrelevant":
         q.delete_job(conn, job_id)
@@ -354,6 +357,8 @@ def run_reprocess_job(
         conn, client, model, job["id"], job["raw_text"], job["title"], is_slack, profile, scenarios,
         url=job["url"], progress_prefix=progress_prefix,
         preserve_existing_metadata=job["published_at"] is not None,
+        # The candidate's note survives reset_job and feeds back into the new summary.
+        job_note=job.get("feedback_note") or "",
     )
     if q.job_exists(conn, job["id"]):
         for s in q.get_job_scores(conn, job["id"]):
@@ -408,7 +413,10 @@ def run_reevaluate_job(
         yield _progress(f"{progress_prefix}Skipped (not eligible for re-evaluation): {job['url']}")
         return
 
-    s = summarize(client, model, job["simplified_content"], content_type=job["content_type"])
+    s = summarize(
+        client, model, job["simplified_content"], content_type=job["content_type"],
+        job_note=job.get("feedback_note") or "",
+    )
     new_summary = s.summary
     q.update_job_pipeline(
         conn, job["id"],
