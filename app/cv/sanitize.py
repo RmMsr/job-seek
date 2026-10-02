@@ -3,7 +3,12 @@ import re
 from bs4 import BeautifulSoup, Comment
 
 _DROP_TAGS = {"script", "style", "link", "iframe", "object", "embed", "meta", "base"}
+# Resources WeasyPrint fetches (images, src attributes).
 _SAFE_URL_RE = re.compile(r"^(#|/(?!/)|mailto:|data:image/(png|jpeg|jpg|gif|webp)(?=[;,]|$))", re.IGNORECASE)
+# Hyperlink targets are never fetched by the renderer, only written into the
+# PDF annotation, so http(s) is safe. file:, javascript:, protocol-relative
+# //host etc. stay blocked.
+_SAFE_LINK_RE = re.compile(r"^(#|/(?!/)|mailto:|https?://)", re.IGNORECASE)
 _FRONTMATTER_RE = re.compile(r"\A(---\n.*?\n---\n)", re.DOTALL)
 
 # Markdown-native links/images that BeautifulSoup never sees. DEST is either an
@@ -18,32 +23,57 @@ _MD_REF_DEF_RE = re.compile(r'^([ ]{0,3}\[[^\]]+\]:\s*)(\S+)(.*)$', re.MULTILINE
 # such as "[Note]: I prefer remote work" untouched (a bare word is not a URL a
 # renderer would fetch).
 _FETCHABLE_URL_RE = re.compile(r'^<?(//|[a-z][a-z0-9+.\-]*:)', re.IGNORECASE)
+# Reference-style image usages: ![alt][label], collapsed ![label][] and
+# shortcut ![label]. Their labels' definitions are fetched, so stay strict.
+_MD_REF_IMAGE_RE = re.compile(r'!\[([^\]]*)\](?:\[([^\]]*)\]|(?![(\[]))')
+
+
+def _ref_label(label: str) -> str:
+    # Markdown matches reference labels case-insensitively, whitespace-collapsed.
+    return " ".join(label.split()).casefold()
 
 
 def _neutralise_markdown_urls(body: str) -> str:
-    """Rewrite markdown image/link destinations and bare autolinks that don't
-    match _SAFE_URL_RE to a harmless '#', so WeasyPrint never fetches them."""
-    def _rewrite(prefix: str):
+    """Rewrite markdown image/link destinations and bare autolinks that aren't
+    on the allow-list to a harmless '#', so WeasyPrint never fetches them.
+    Images must match _SAFE_URL_RE; hyperlinks (never fetched) may also keep
+    http(s) targets (_SAFE_LINK_RE)."""
+    def _rewrite(prefix: str, safe_re: re.Pattern):
         def _sub(m: re.Match) -> str:
             dest = m.group(2).strip().strip("<>")
-            if _SAFE_URL_RE.match(dest):
+            if safe_re.match(dest):
                 return m.group(0)
             return f"{prefix}[{m.group(1)}](#)"
         return _sub
 
-    body = _MD_IMAGE_RE.sub(_rewrite("!"), body)
-    body = _MD_LINK_RE.sub(_rewrite(""), body)
-    body = _BARE_AUTOLINK_RE.sub("#", body)
+    def _rewrite_autolink(m: re.Match) -> str:
+        url = m.group(1)
+        if _SAFE_LINK_RE.match(url):
+            # Re-express as an inline link: BeautifulSoup would swallow the
+            # bare <https://...> as a bogus tag.
+            return f"[{url}]({url})"
+        return "#"
+
+    body = _MD_IMAGE_RE.sub(_rewrite("!", _SAFE_URL_RE), body)
+    body = _MD_LINK_RE.sub(_rewrite("", _SAFE_LINK_RE), body)
+    body = _BARE_AUTOLINK_RE.sub(_rewrite_autolink, body)
+
+    image_labels = {
+        _ref_label(m.group(2) or m.group(1)) for m in _MD_REF_IMAGE_RE.finditer(body)
+    }
 
     # Handle reference-style link/image definitions: [ref]: url ...
     # Only act when the destination both looks like a fetchable URL and is not
     # on the safe allow-list — so ordinary prose ("[Note]: I prefer ...") and
-    # relative paths are left alone.
+    # relative paths are left alone. A label used by any image gets the strict
+    # image allow-list; one used only by links may keep http(s).
     def _rewrite_ref_def(m: re.Match) -> str:
         prefix = m.group(1)  # "[ref]: "
         dest = m.group(2).strip().strip("<>")  # the URL, possibly in angle brackets
         suffix = m.group(3)  # optional title and whitespace
-        if _FETCHABLE_URL_RE.match(m.group(2).strip()) and not _SAFE_URL_RE.match(dest):
+        label = _ref_label(prefix.strip()[1:-2])
+        safe_re = _SAFE_URL_RE if label in image_labels else _SAFE_LINK_RE
+        if _FETCHABLE_URL_RE.match(m.group(2).strip()) and not safe_re.match(dest):
             return f"{prefix}#{suffix}"
         return m.group(0)
 
@@ -75,7 +105,8 @@ def sanitize_cv_markdown(md: str) -> str:
     """Sanitise markdown for safe rendering via doc-write (WeasyPrint PDF/PNG output).
 
     Removes script/style tags, event handlers, inline styles, and neutralises remote/file URLs,
-    protocol-relative URLs, and SVG/non-raster data URIs. Output is safe for render-time
+    protocol-relative URLs, and SVG/non-raster data URIs in fetched resources. Hyperlinks
+    (markdown links, <a href>) keep http(s) targets, which are never fetched. Output is safe for render-time
     resource fetches but is NOT HTML-escaped for browser display (use separate HTML escaping).
     """
     front, body = _split_frontmatter(md)
@@ -96,7 +127,8 @@ def sanitize_cv_markdown(md: str) -> str:
                 del tag.attrs[attr]
             elif low in ("href", "src"):
                 val = str(tag.attrs[attr]).strip()
-                if not _SAFE_URL_RE.match(val):
+                safe_re = _SAFE_LINK_RE if tag.name == "a" and low == "href" else _SAFE_URL_RE
+                if not safe_re.match(val):
                     tag.attrs[attr] = "#"
     return front + _restore_blockquote_markers(str(soup))
 
