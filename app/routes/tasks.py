@@ -293,7 +293,8 @@ def _subtree_status(subtree: list[dict]) -> str:
     1) anything still queued/running -> running
     2) else anything needs_action  -> needs you
     3) else the root itself was cancelled (whole run stopped) -> cancelled
-    4) else the latest-finished task failed -> failed
+    4) else the latest-finished task failed -> failed (for a fetch_all fan-out,
+       whose steps are independent, any failed step -> failed)
     5) else every child step was cancelled -> cancelled
     6) else -> done
 
@@ -308,6 +309,8 @@ def _subtree_status(subtree: list[dict]) -> str:
     root = next((t for t in subtree if not t["parent_task_id"]), subtree[0])
     if root["status"] == "cancelled":
         return "cancelled"
+    if root["kind"] == "fetch_all" and any(t["status"] == "failed" for t in subtree):
+        return "failed"
     finished = [t for t in subtree if t["finished_at"]]
     if finished:
         latest = max(finished, key=lambda t: (t["finished_at"], t["id"]))
@@ -350,20 +353,20 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
 
     if status == "needs_action":
         next_step = _next_step(conn, na)
-    elif status == "failed":
-        failed = [t for t in subtree if t["status"] == "failed"]
-        next_step = (failed[-1]["error"] or "Failed").strip().split("\n")[0]
     elif status == "cancelled":
         next_step = "Cancelled"
-    elif kind == "fetch_all":
+    elif kind == "fetch_all" and root["status"] != "failed":
         settled, total, failed = _child_step_counts(children)
         next_step = f"{total} source{'s' if total != 1 else ''} — {settled} done"
         if failed:
             next_step += f", {failed} failed"
-        if status == "done":
+        if status in ("done", "failed"):
             new = sum((t.get("result") or {}).get("jobs_new") or 0 for t in children)
             if new:
                 next_step += f" — {new} new job{'s' if new != 1 else ''}"
+    elif status == "failed":
+        failed = [t for t in subtree if t["status"] == "failed"]
+        next_step = (failed[-1]["error"] or "Failed").strip().split("\n")[0]
     elif status == "running":
         active = next((t for t in subtree if t["status"] in ("queued", "running")), None)
         next_step = _next_step(conn, active) if active else "Working"

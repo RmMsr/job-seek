@@ -50,7 +50,12 @@ def _task_fetch_source(conn, client, model, config, params):
     if fetch_result is not None:
         result["jobs_new"] = fetch_result.jobs_new
         result["new_job_ids"] = fetch_result.new_job_ids
-        result.update(_auth_error_result(conn, source, fetch_result.run_id))
+        auth = _auth_error_result(conn, source, fetch_result.run_id)
+        if fetch_result.error and not auth:
+            # Fail the task (execute_task's failure path) instead of reporting
+            # a broken fetch as done; a Slack auth error stays needs_action.
+            raise RuntimeError(fetch_result.error)
+        result.update(auth)
     return result
 
 

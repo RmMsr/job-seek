@@ -183,6 +183,31 @@ def test_fetch_source_task_flags_auth_error_as_needing_action(conn):
     assert [i for i in q.get_unresolved_inbox_items(conn) if i["kind"] == "task_followup"] == []
 
 
+def test_fetch_source_task_with_failed_fetch_ends_failed(conn):
+    sid = _seed(conn)
+
+    def fake_fetch(*args, **kwargs):
+        run_id = q.start_fetch_run(conn, sid)
+        yield "Starting fetch for 'finn/AI' (http)"
+        q.complete_fetch_run(conn, run_id, jobs_found=0, jobs_new=0, error="Connection error.")
+        yield "Fetch failed for 'finn/AI': Connection error."
+        return FetchResult(source_id=sid, run_id=run_id, jobs_found=0, jobs_new=0,
+                           error="Connection error.")
+
+    task = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    with patch("app.routes.fetch.run_fetch", side_effect=fake_fetch):
+        execute_task(conn, MagicMock(), "model", MagicMock(browser_profile_dir="/tmp"), task)
+    fetched = q.get_task(conn, task["id"])
+    assert fetched["status"] == "failed"
+    assert fetched["error"] == "Connection error."
+    # progress lines are kept in the log
+    assert "Starting fetch for 'finn/AI' (http)" in fetched["log"]
+    assert "Fetch failed for 'finn/AI': Connection error." in fetched["log"]
+    # fetch_run bookkeeping untouched
+    run = q.get_recent_fetch_runs(conn)[0]
+    assert run["error"] == "Connection error."
+
+
 def test_post_fetch_all_enqueues_one_root_that_fans_out_children(client, conn):
     sid1 = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
     sid2 = q.insert_source(conn, "other.no", "https://other.no", "generic_listing")

@@ -156,6 +156,45 @@ def test_root_presentation_fetch_all_aggregates(conn):
     assert p["results"] == []
 
 
+def test_root_presentation_fetch_all_failed_child_not_last_reads_failed(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.fail_task(conn, a["id"], "Connection error.")
+    q.complete_task(conn, b["id"], {"jobs_new": 2, "new_job_ids": []})
+    # make the successful step finish strictly after the failed one
+    conn.execute("UPDATE tasks SET finished_at = datetime('now', '+1 second') WHERE id = ?", (b["id"],))
+    conn.commit()
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "failed"
+    assert "2 sources" in p["next_step"]
+    assert "1 failed" in p["next_step"]
+
+
+def test_root_presentation_fetch_all_failed_child_last_keeps_counts(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
+    q.complete_task(conn, a["id"], {"jobs_new": 0, "new_job_ids": []})
+    q.fail_task(conn, b["id"], "Connection error.")
+    conn.execute("UPDATE tasks SET finished_at = datetime('now', '+1 second') WHERE id = ?", (b["id"],))
+    conn.commit()
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "failed"
+    assert "2 sources" in p["next_step"]
+    assert "1 failed" in p["next_step"]
+
+
+def test_root_presentation_fetch_all_root_itself_failed_shows_its_error(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.fail_task(conn, root["id"], "db locked")
+    p = root_presentation(conn, q.get_task(conn, root["id"]), [])
+    assert p["status"] == "failed"
+    assert p["next_step"] == "db locked"
+
+
 def test_root_presentation_status_priority_needs_action(conn):
     root = q.enqueue_task(conn, kind="source_detect", params={"url": "https://x.io"})
     q.resolve_task(conn, root["id"])
