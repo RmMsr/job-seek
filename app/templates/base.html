@@ -475,7 +475,7 @@
       animation: job-fold 0.35s ease forwards;
     }
     @keyframes job-fold {
-      from { max-height: 2000px; opacity: 1; }
+      from { max-height: var(--fold-from, 2000px); opacity: 1; }
       to { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0;
            margin-top: 0; margin-bottom: 0; }
     }
@@ -1627,8 +1627,40 @@
     // at the bottom — swaps it for a short collapsed row while the browser holds
     // scrollTop, so the card the user had scrolled to can end up off-screen.
     (function () {
+      // A decision that moves the card out of the current filter folds it
+      // (HX-Reswap "swap:0.35s") before swapping in the collapsed row. With
+      // the user scrolled down to the Organize buttons, the shrinking card
+      // pulled the rows below up under them and the scroll-into-view below
+      // then dragged the page back up. Instead, pin the row *after* the card
+      // to its on-screen position for the whole fold + swap, so the card
+      // folds upward into the spot where the user clicked.
+      var pinned = null;  // { next, top }
+      function holdPin() {
+        if (!pinned || !pinned.next.isConnected) return;
+        var drift = pinned.next.getBoundingClientRect().top - pinned.top;
+        if (drift) window.scrollBy(0, drift);
+      }
+      document.body.addEventListener("htmx:beforeSwap", function (e) {
+        var xhr = e.detail && e.detail.xhr;
+        var row = e.detail && e.detail.target;
+        if (!xhr || !row || !row.classList.contains("job-row-expanded")) return;
+        if (!/\/jobs\/\d+\/feedback\b/.test(xhr.responseURL || "")) return;
+        if (!/swap:/.test(xhr.getResponseHeader("HX-Reswap") || "")) return;
+        row.style.setProperty("--fold-from", row.offsetHeight + "px");
+        var next = row.nextElementSibling;
+        if (!next || row.getBoundingClientRect().top >= 0) return;  // top in view: folds in place fine
+        // The browser's own scroll anchoring would compensate on top of ours.
+        document.documentElement.style.overflowAnchor = "none";
+        pinned = { next: next, top: next.getBoundingClientRect().top };
+        (function loop() { if (pinned) { holdPin(); requestAnimationFrame(loop); } })();
+      });
       document.body.addEventListener("htmx:afterSwap", function (e) {
         var xhr = e.detail && e.detail.xhr;
+        if (pinned) {  // absorb the collapsed row's height too, then let go
+          holdPin();
+          pinned = null;
+          document.documentElement.style.overflowAnchor = "";
+        }
         if (!xhr || xhr.getResponseHeader("HX-Redirect")) return;
         var m = (xhr.responseURL || "").match(/\/jobs\/(\d+)\/(feedback|collapse)\b/);
         if (!m) return;
@@ -1774,7 +1806,9 @@ document.body.addEventListener('click', function (e) {
   var row = btn.closest('.job-row');
   var scenarioForm = row && row.querySelector('.scenario-feedback-form');
   if (scenarioForm && window.htmx) {
-    htmx.trigger(scenarioForm, 'submit');
+    // Save only — swapping in the re-rendered (opened, "All feedback saved")
+    // score section would grow the card just as the decision folds it away.
+    htmx.ajax('POST', scenarioForm.getAttribute('hx-post'), { source: scenarioForm, swap: 'none' });
   }
 });
   </script>
