@@ -11,6 +11,7 @@
   {% for t in tailored_cvs %}
   <li class="cv-tailored-item">
     <a class="cv-tailored-title" href="/jobs/{{ t.job_id }}/cv/preview">{{ t.title or "(untitled job)" }}</a>
+    {% if t.has_accepted %}<span class="cv-tailored-accepted" title="Has an accepted CV version" aria-label="Accepted">&#10003;</span>{% endif %}
     <span class="cv-tailored-meta">{% if t.company %}{{ t.company }} · {% endif %}base: {{ t.base_cv_name }}</span>
     <span class="cv-tailored-age" title="{{ t.cv_updated_at }} UTC">{{ t.cv_updated_at | age }}</span>
   </li>

@@ -381,6 +381,20 @@ def test_save_tailored_404_missing_job(client, conn):
     assert client.post("/jobs/999/cv/save-tailored", data={"markdown": "x"}).status_code == 404
 
 
+def test_save_tailored_over_accepted_version_refreshes_accept_controls(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, tailored_cv="# Old", base_cv_snapshot="# Me\n")
+    q.accept_job_cv_version(conn, jid, q.get_job_cv(conn, jid)["current_version_id"])
+
+    r = client.post(f"/jobs/{jid}/cv/save-tailored", data={"markdown": "# Hand-edited\n"})
+
+    start = r.text.index('id="cv-accept-decision"')
+    assert 'hx-swap-oob="true"' in r.text[r.text.rindex("<div", 0, start):start + 60]
+    block = r.text[start:]
+    assert "Accept this version instead" in block
+    assert "Accepted just now" not in block
+
+
 def test_save_tailored_succeeds_after_accept(client, conn):
     jid = _job(conn)
     q.upsert_job_cv(conn, jid, tailored_cv="# Done")

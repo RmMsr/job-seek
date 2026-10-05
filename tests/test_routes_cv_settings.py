@@ -889,3 +889,16 @@ def test_tailored_tab_empty_state(client):
     r = client.get("/cv/tailored")
     assert r.status_code == 200
     assert "No tailored CVs yet" in r.text
+
+
+def test_tailored_tab_marks_jobs_with_an_accepted_cv(client, conn):
+    accepted = _tailored_job(conn, "Accepted Job", "http://e/acc")
+    _tailored_job(conn, "Draft Job", "http://e/draft")
+    version_id = q.get_versions(conn, "tailored", accepted)[0]["id"]
+    q.accept_job_cv_version(conn, accepted, version_id)
+
+    text = client.get("/cv/tailored").text
+    acc_row = text[text.index("Accepted Job"):text.index("</li>", text.index("Accepted Job"))]
+    draft_row = text[text.index("Draft Job"):text.index("</li>", text.index("Draft Job"))]
+    assert "cv-tailored-accepted" in acc_row  # after the title
+    assert "cv-tailored-accepted" not in draft_row

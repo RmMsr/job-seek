@@ -408,11 +408,15 @@ def resolve_job_base_cv_id(conn: sqlite3.Connection, job_id: int) -> int:
 def list_tailored_cvs(conn: sqlite3.Connection) -> list[dict]:
     """Jobs with a non-empty tailored CV, most recently updated CV first,
     each with the name of the base CV it tailors from (the job's own choice,
-    else the lowest-id base CV — as in resolve_job_base_cv_id)."""
+    else the lowest-id base CV — as in resolve_job_base_cv_id), and whether
+    any of its tailored versions is accepted."""
     rows = conn.execute(
         """
         SELECT job_cv.job_id, jobs.title, jobs.company,
                cv_versions.updated_at AS cv_updated_at,
+               EXISTS (SELECT 1 FROM cv_versions AS acc
+                       WHERE acc.entity_type = 'tailored' AND acc.entity_id = job_cv.job_id
+                         AND acc.accepted_at IS NOT NULL) AS has_accepted,
                COALESCE(chosen.name, (SELECT name FROM base_cvs ORDER BY id LIMIT 1))
                    AS base_cv_name
         FROM job_cv
