@@ -1048,3 +1048,67 @@ def test_evaluate_posting_scores_without_touching_status(conn, source):
     assert row["summary"] == "s"
     assert row["evaluation_completed_at"] is not None
     assert q.get_job_scores(conn, jid)[0]["relevance_score"] == 0.9
+
+
+def _flaky_client(failures: int, exc_factory):
+    """_mock_client whose first `failures` LLM calls raise exc_factory()."""
+    client = _mock_client(
+        '{"type": "job_posting", "reason": "full description"}',
+        '{"title": "ML Engineer", "headline": "Great role", "summary": "Good ML role"}',
+        '{"score": 0.1, "reasoning": "meh"}',
+    )
+    create = client.chat.completions.create.side_effect
+    calls = [0]
+    def flaky(**kwargs):
+        calls[0] += 1
+        if calls[0] <= failures:
+            raise exc_factory()
+        return create(**kwargs)
+    client.chat.completions.create.side_effect = flaky
+    return client
+
+
+def _connection_error():
+    import httpx, openai
+    return openai.APIConnectionError(request=httpx.Request("POST", "http://llm/v1/chat/completions"))
+
+
+def _bad_request():
+    import httpx, openai
+    req = httpx.Request("POST", "http://llm/v1/chat/completions")
+    return openai.BadRequestError("too long", response=httpx.Response(400, request=req), body=None)
+
+
+def _fetch_one(conn, source, client):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="ML Eng", company="Acme", raw_text="<p>Hiring</p>")]
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher, \
+            patch("app.pipeline.time.sleep") as sleep:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        messages, result = _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    return messages, result, sleep
+
+
+def test_run_fetch_retries_posting_after_transient_llm_error(conn, source):
+    messages, result, sleep = _fetch_one(conn, source, _flaky_client(2, _connection_error))
+
+    assert result.error is None
+    assert result.jobs_new == 1
+    assert q.get_jobs(conn)[0]["content_type"] == "job_posting"
+    assert sum("retrying in" in m for m in messages) == 2
+    assert sleep.call_count == 2
+
+
+def test_run_fetch_fails_once_llm_retries_are_exhausted(conn, source):
+    from app.pipeline import _LLM_RETRY_DELAYS_SECONDS
+    messages, result, sleep = _fetch_one(conn, source, _flaky_client(99, _connection_error))
+
+    assert result.error is not None
+    assert sleep.call_count == len(_LLM_RETRY_DELAYS_SECONDS)
+    assert any("Fetch failed" in m for m in messages)
+
+
+def test_run_fetch_does_not_retry_non_transient_llm_error(conn, source):
+    messages, result, sleep = _fetch_one(conn, source, _flaky_client(1, _bad_request))
+
+    assert result.error is not None
+    assert sleep.call_count == 0

@@ -262,6 +262,34 @@ def run_revisit_job(
     return RevisitOutcome("unchanged")
 
 
+# Backoff between whole-posting retries when the LLM endpoint drops out
+# mid-fetch. The openai client's own retries (two, under ~2s) don't ride out a
+# self-hosted model restarting; these do, then the fetch still fails loudly.
+_LLM_RETRY_DELAYS_SECONDS = (10.0, 30.0, 60.0)
+_TRANSIENT_LLM_ERRORS = (
+    openai.APIConnectionError,  # includes APITimeoutError
+    openai.InternalServerError,
+    openai.RateLimitError,
+)
+
+
+def _ingest_with_retry(*args, progress_prefix: str, **kwargs) -> Generator[str, None, None]:
+    """_ingest_posting, re-run from the top after a transient LLM error. Safe
+    to repeat: every write it makes for the job is an overwrite/upsert."""
+    for attempt, delay in enumerate((*_LLM_RETRY_DELAYS_SECONDS, None), start=1):
+        try:
+            yield from _ingest_posting(*args, progress_prefix=progress_prefix, **kwargs)
+            return
+        except _TRANSIENT_LLM_ERRORS as exc:
+            if delay is None:
+                raise
+            yield _progress(
+                f"{progress_prefix}LLM error ({exc}) — retrying in {delay:.0f}s "
+                f"(attempt {attempt + 1}/{len(_LLM_RETRY_DELAYS_SECONDS) + 1})"
+            )
+            time.sleep(delay)
+
+
 def run_fetch(
     source: dict,
     conn: sqlite3.Connection,
@@ -298,7 +326,7 @@ def run_fetch(
                 published_at=raw.published_at,
             )
             is_slack = source["fetcher_type"] == "slack"
-            yield from _ingest_posting(
+            yield from _ingest_with_retry(
                 conn, client, model, job_id, raw.raw_text, raw.title, is_slack, profile, scenarios,
                 url=raw_url, progress_prefix=f"[{i}/{jobs_found}] ",
                 preserve_existing_metadata=raw.published_at is not None,
