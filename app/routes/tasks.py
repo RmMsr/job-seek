@@ -159,6 +159,8 @@ def _done_summary(conn: sqlite3.Connection, task: dict) -> str:
         return f"Source '{src['name']}' created" if src else "Source created"
     if kind == "job_add_by_url" and r.get("job_id"):
         return "Job added"
+    if kind == "job_add_by_url" and r.get("existing_job_id"):
+        return "Already tracked"
     return "Done"
 
 
@@ -209,6 +211,10 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
     elif kind == "job_add_by_url" and r.get("job_id"):
         title = _job_title(conn, r["job_id"])
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{r['job_id']}"})
+    elif kind == "job_add_by_url" and r.get("existing_job_id"):
+        title = _job_title(conn, r["existing_job_id"])
+        out.append({"label": f"View {title}" if title else "View job",
+                    "href": f"/jobs/{r['existing_job_id']}"})
     elif kind in _SINGLE_JOB_KINDS and params.get("job_id"):
         title = _job_title(conn, params["job_id"])
         out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{params['job_id']}"})
@@ -255,8 +261,8 @@ def _link(conn: sqlite3.Connection, task: dict) -> str | None:
     if (rjid := _single_revisit_job_id(task)) is not None:
         return f"/jobs/{rjid}"
     r = task.get("result") or {}
-    if task["kind"] == "job_add_by_url" and r.get("job_id"):
-        return f"/jobs/{r['job_id']}"
+    if task["kind"] == "job_add_by_url" and (jid := r.get("job_id") or r.get("existing_job_id")):
+        return f"/jobs/{jid}"
     return None
 
 

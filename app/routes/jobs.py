@@ -782,6 +782,7 @@ def _task_job_add_by_url(conn, client, model, config, params):
 
     existing_job = q.get_job_by_url(conn, url)
     if existing_job is not None:
+        result["existing_job_id"] = existing_job["id"]
         if existing_job["content_type"] == "error":
             notices.append({
                 "level": "warning",

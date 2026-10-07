@@ -1938,6 +1938,7 @@ def test_add_job_by_url_duplicate_url_does_not_insert(conn):
     notice_html = fetched["result"]["notices"][0]["html"]
     assert "Already tracked" in notice_html
     assert f"/jobs/{jid}" in notice_html
+    assert fetched["result"]["existing_job_id"] == jid
     assert len(q.get_jobs(conn)) == 1
 
 

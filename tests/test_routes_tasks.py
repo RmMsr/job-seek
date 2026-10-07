@@ -103,6 +103,17 @@ def test_presentation_done_results_link_for_add_by_url(conn):
     assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
 
 
+def test_presentation_add_by_url_already_tracked_links_existing_job(conn):
+    sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://e.com/j"})
+    q.complete_task(conn, t["id"], {"existing_job_id": jid, "notices": [], "html_chunks": []})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "Already tracked"
+    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+    assert p["link"] == f"/jobs/{jid}"
+
+
 def test_single_job_revisit_links_to_job(conn):
     sid = q.insert_source(conn, "S", "https://e.com", "generic_listing")
     jid = q.insert_job(conn, source_id=sid, url="https://e.com/j", title="Dev", company="", raw_text="")
