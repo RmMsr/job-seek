@@ -79,6 +79,24 @@ def test_order_roundtrips_when_non_default():
     assert f.query_params()["order"] == "score"
 
 
+def test_accepted_tab_defaults_to_score_order():
+    f = JobFilter.from_params({"status": "accepted"})
+    assert f.order == "score"
+    assert "order" not in f.query_params()
+
+
+def test_explicit_change_order_sticks_on_accepted_tab():
+    f = JobFilter.from_params({"status": "accepted", "order": "change"})
+    assert f.order == "change"
+    assert JobFilter.from_params(f.query_params()).order == "change"
+
+
+def test_tab_switch_without_pick_uses_new_tabs_default():
+    f = JobFilter.from_params({"status": "new"})
+    assert f.for_status("accepted").order == "score"
+    assert f.for_status("accepted").for_status("rejected").order == "change"
+
+
 def test_unknown_order_falls_back_to_change():
     assert JobFilter.from_params({"order": "bogus"}).order == "change"
 

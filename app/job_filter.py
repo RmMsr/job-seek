@@ -16,7 +16,8 @@ class JobFilter:
     source_id: int | None = None
     org: str | None = None
     org_none: bool = False
-    order: str = "change"
+    # The explicitly picked sort order, or None to use the tab's default (see `order`).
+    order_pick: str | None = None
     q: str = ""
     # Set by an explicit single-status pick (a tab/More-panel link, the mobile
     # status <select>, or a Combine checkbox toggle) -- distinguishes "the
@@ -54,14 +55,21 @@ class JobFilter:
         org = None if org_none else (raw_org or None)
 
         order = (get("order") or "").strip()
-        if order not in VALID_ORDERS:
-            order = "change"
+        order_pick = order if order in VALID_ORDERS else None
 
         query = (get("q") or "").strip()
 
         solo = (get("solo") or "").strip() == "1"
 
-        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order, query, solo)
+        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order_pick, query, solo)
+
+    @property
+    def order(self) -> str:
+        """Effective sort order: the explicit pick, else accepted jobs by fit
+        score and everything else by newest change."""
+        if self.order_pick is not None:
+            return self.order_pick
+        return "score" if self.statuses == ("accepted",) else "change"
 
     @property
     def is_narrowed(self) -> bool:
@@ -90,8 +98,8 @@ class JobFilter:
             out["org"] = "none"
         elif self.org is not None:
             out["org"] = self.org
-        if self.order != "change":
-            out["order"] = self.order
+        if self.order_pick is not None:
+            out["order"] = self.order_pick
         if self.q:
             out["q"] = self.q
         if self.solo:
@@ -105,7 +113,7 @@ class JobFilter:
 
     def cleared(self) -> "JobFilter":
         """Drop the query and every scenario/source/org narrowing; keep statuses + order."""
-        return JobFilter(statuses=self.statuses, order=self.order)
+        return JobFilter(statuses=self.statuses, order_pick=self.order_pick)
 
     @property
     def status_tab(self) -> str:
