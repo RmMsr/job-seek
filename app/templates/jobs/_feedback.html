@@ -21,6 +21,7 @@
       {% if job.fit_score is not none or job.fit_score_override is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}
       {% if job.company %}<span>{{ job.company }}</span>{% endif %}
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      {{ macros.closing_chip(job) }}
       <a href="{{ job.url }}" target="_blank" rel="noopener">&#8599; original</a>
     </div>
     {% if job.stale_badge %}
@@ -45,6 +46,7 @@
     <div class="job-detail-title-row">
       <h2 class="job-detail-title">{{ job.title or "(no title)" }}</h2>
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      {{ macros.closing_chip(job) }}
     </div>
     <div class="job-detail-meta">
       {% if job.fit_score is not none or job.fit_score_override is not none %}<span class="sr-only">Fit score</span>{{ macros.fit_score_badge(job) }}{% endif %}

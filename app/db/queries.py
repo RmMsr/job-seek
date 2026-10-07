@@ -1034,6 +1034,7 @@ def update_job_pipeline(
     headline: str = "",
     company: str = "",
     published_at: str = "",
+    apply_by: str = "",
 ) -> None:
     conn.execute(
         """UPDATE jobs SET
@@ -1043,9 +1044,11 @@ def update_job_pipeline(
             summary = ?,
             headline = ?,
             company = COALESCE(NULLIF(?, ''), company),
-            published_at = COALESCE(NULLIF(?, ''), published_at, created_at)
+            published_at = COALESCE(NULLIF(?, ''), published_at, created_at),
+            apply_by = COALESCE(NULLIF(?, ''), apply_by)
         WHERE id = ?""",
-        (simplified_content, content_type, title, summary, headline, company, published_at, job_id),
+        (simplified_content, content_type, title, summary, headline, company, published_at,
+         apply_by, job_id),
     )
     conn.commit()
 
@@ -1361,6 +1364,19 @@ _ORDER_BY = {
     ),
     "score": "COALESCE(jobs.fit_score_override, jobs.fit_score) DESC NULLS LAST, jobs.created_at DESC",
     "age": "COALESCE(jobs.published_at, jobs.created_at) DESC, jobs.id DESC",
+    # Dated & open (nearest first), no date, rolling, closed (most recent first).
+    # 'rolling' is matched before the date comparisons: as a string it sorts
+    # above any ISO date. Mirrored by routes.jobs._sort_key("closing").
+    "closing": (
+        "CASE WHEN jobs.apply_by IS NULL THEN 1 "
+        "WHEN jobs.apply_by = 'rolling' THEN 2 "
+        "WHEN jobs.apply_by >= date('now') THEN 0 ELSE 3 END, "
+        "CASE WHEN jobs.apply_by != 'rolling' AND jobs.apply_by >= date('now') "
+        "THEN jobs.apply_by END ASC, "
+        "CASE WHEN jobs.apply_by != 'rolling' AND jobs.apply_by < date('now') "
+        "THEN jobs.apply_by END DESC, "
+        "COALESCE(jobs.published_at, jobs.created_at) DESC, jobs.id DESC"
+    ),
 }
 
 

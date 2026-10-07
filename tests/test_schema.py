@@ -1901,3 +1901,13 @@ def test_init_db_backfills_missing_published_at_from_created_at(conn):
 
     rows = dict(conn.execute("SELECT url, published_at FROM jobs").fetchall())
     assert rows == {"http://job/1": "2026-08-01 10:00:00", "http://job/2": "2026-07-01"}
+
+
+def test_migrate_jobs_add_apply_by_adds_column_to_existing_table(conn):
+    from app.db.schema import _migrate_jobs_add_apply_by
+    init_db(conn)
+    conn.execute("ALTER TABLE jobs DROP COLUMN apply_by")
+    _migrate_jobs_add_apply_by(conn)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    assert "apply_by" in cols
+    _migrate_jobs_add_apply_by(conn)  # idempotent

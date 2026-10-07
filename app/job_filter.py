@@ -5,7 +5,7 @@ from typing import Mapping
 from urllib.parse import urlencode
 
 VALID_TABS = ("new", "lead", "accepted", "pending", "rejected", "not_relevant", "trash")
-VALID_ORDERS = ("change", "score", "age")
+VALID_ORDERS = ("change", "score", "age", "closing")
 
 
 @dataclass(frozen=True)

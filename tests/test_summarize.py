@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 from app.ai.summarize import summarize, JobSummary
@@ -344,3 +345,42 @@ def test_summarize_rejects_source_link_only_in_job_note():
         job_note="apply at https://note-only.example.com/job",
     )
     assert result.summary == "S"
+
+
+def test_summarize_extracts_apply_by_date():
+    r = '{"title": "T", "headline": "H", "summary": "S", "apply_by": "2026-09-15"}'
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == "2026-09-15"
+
+
+def test_summarize_apply_by_allows_past_date():
+    r = '{"title": "T", "headline": "H", "summary": "S", "apply_by": "2026-08-01"}'
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == "2026-08-01"
+
+
+def test_summarize_apply_by_rolling_is_normalised():
+    r = '{"title": "T", "headline": "H", "summary": "S", "apply_by": " Rolling "}'
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == "rolling"
+
+
+def test_summarize_apply_by_accepts_datetime_shape():
+    r = '{"title": "T", "headline": "H", "summary": "S", "apply_by": "2026-09-15T23:59:00"}'
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == "2026-09-15"
+
+
+@pytest.mark.parametrize("value", ["ASAP", "soon", "2028-01-01", "2025-01-01", None, 5, ""])
+def test_summarize_apply_by_rejects_other_values(value):
+    import json as _json
+    r = _json.dumps({"title": "T", "headline": "H", "summary": "S", "apply_by": value})
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == ""
+
+
+def test_summarize_apply_by_missing_is_empty():
+    r = '{"title": "T", "headline": "H", "summary": "S"}'
+    assert summarize(_mock_client(r), "llama3.2", "x", today=_TODAY).apply_by == ""
+
+
+def test_summarize_prompt_asks_for_apply_by():
+    client = _mock_client('{"title": "T", "headline": "H", "summary": "S"}')
+    summarize(client, "llama3.2", "x", today=_TODAY)
+    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert '"apply_by"' in system and "rolling" in system

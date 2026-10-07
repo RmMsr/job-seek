@@ -99,6 +99,7 @@ def _evaluate_posting(
         summary=job_summary.summary,
         company="" if has_company else job_summary.company,
         published_at="" if preserve_existing_metadata else job_summary.posted_date,
+        apply_by=job_summary.apply_by,
     )
     passed_gate = False
     for scenario in scenarios:
@@ -453,6 +454,7 @@ def run_reevaluate_job(
         title=s.title or job["title"],
         headline=s.headline,
         summary=new_summary,
+        apply_by=s.apply_by,
     )
 
     for scenario in scenarios:

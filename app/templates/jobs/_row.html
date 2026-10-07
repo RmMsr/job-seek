@@ -16,6 +16,7 @@
     <div class="job-row-header">
       <h3 class="job-title">{{ job.title or "(no title)" }}</h3>
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
+      {{ macros.closing_chip(job) }}
     </div>
     <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
       title="Copy link to this job" aria-label="Copy link to this job"

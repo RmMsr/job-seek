@@ -2317,3 +2317,64 @@ def test_get_jobs_order_score_uses_override(conn):
     q.set_fit_score_override(conn, lo, 95)
     ids = [j["id"] for j in q.get_jobs(conn, status="new", order="score")]
     assert ids.index(lo) < ids.index(hi)
+
+
+def test_update_job_pipeline_stores_apply_by_and_keeps_it_on_empty(conn):
+    sid = q.insert_source(conn, "S", "https://s.test", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://s.test/1", title="T", company="", raw_text="r")
+    assert q.get_job(conn, jid)["apply_by"] is None
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", apply_by="2026-09-15")
+    assert q.get_job(conn, jid)["apply_by"] == "2026-09-15"
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", apply_by="")
+    assert q.get_job(conn, jid)["apply_by"] == "2026-09-15"
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", apply_by="rolling")
+    assert q.get_job(conn, jid)["apply_by"] == "rolling"
+
+
+def _set_apply_by(conn, jid, value):
+    conn.execute("UPDATE jobs SET apply_by=? WHERE id=?", (value, jid))
+    conn.commit()
+
+
+def _closing_fixture(conn):
+    from datetime import datetime, timezone, timedelta
+    today = datetime.now(timezone.utc).date()
+    d = lambda n: (today + timedelta(days=n)).isoformat()
+    jobs = {}
+    for name, apply_by, published in [
+        ("closed_old", d(-10), "2024-01-01T00:00:00"),
+        ("rolling", "rolling", "2024-01-01T00:00:00"),
+        ("none_old", None, "2024-01-01T00:00:00"),
+        ("dated_far", d(20), "2024-01-01T00:00:00"),
+        ("closed_recent", d(-1), "2024-01-01T00:00:00"),
+        ("none_new", None, "2024-06-01T00:00:00"),
+        ("dated_today", d(0), "2024-01-01T00:00:00"),
+        ("dated_near", d(3), "2024-01-01T00:00:00"),
+    ]:
+        jid = _mk_job(conn, f"https://x.test/{name}", created="2024-01-01T00:00:00", published=published)
+        _set_apply_by(conn, jid, apply_by)
+        jobs[jid] = name
+    return jobs
+
+
+_CLOSING_EXPECTED = [
+    "dated_today", "dated_near", "dated_far",
+    "none_new", "none_old",
+    "rolling",
+    "closed_recent", "closed_old",
+]
+
+
+def test_get_jobs_order_closing_groups_and_orders(conn):
+    names = _closing_fixture(conn)
+    got = [names[j["id"]] for j in q.get_jobs(conn, status="new", order="closing")]
+    assert got == _CLOSING_EXPECTED
+
+
+def test_sort_key_closing_matches_sql_order(conn):
+    from app.routes.jobs import _sort_key
+    names = _closing_fixture(conn)
+    rows = q.get_jobs(conn, status="new", order="closing")
+    shuffled = list(reversed(rows))
+    resorted = sorted(shuffled, key=_sort_key("closing"), reverse=True)
+    assert [names[j["id"]] for j in resorted] == _CLOSING_EXPECTED

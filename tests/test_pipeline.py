@@ -1,5 +1,6 @@
 import sqlite3
 import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from app.db.schema import init_db
 from app.db import queries as q
@@ -206,6 +207,21 @@ def test_run_fetch_stores_extracted_company_and_posted_date(conn, source):
     job = q.get_jobs(conn)[0]
     assert job["company"] == "Zivid"
     assert job["published_at"] == "2026-08-17"
+
+
+def test_run_fetch_stores_extracted_apply_by(conn, source):
+    raw_jobs = [RawJob(url="http://example.com/job/1", title="", company="", raw_text="<p>desc</p>")]
+    apply_by = (datetime.now(timezone.utc).date() + timedelta(days=10)).isoformat()
+    client = _mock_client(
+        classify_resp='{"type": "job_posting", "reason": "full description"}',
+        summarize_resp='{"title": "T", "company": "Zivid", "headline": "H", '
+                       f'"summary": "S", "apply_by": "{apply_by}"}}',
+        evaluate_resp='{"score": 0.9, "reasoning": "match"}',
+    )
+    with patch("app.pipeline.GenericListingFetcher") as MockFetcher:
+        MockFetcher.return_value.fetch.return_value = raw_jobs
+        _drain(run_fetch(source, conn, client, "llama3.2", "browser-profile"))
+    assert q.get_jobs(conn)[0]["apply_by"] == apply_by
 
 
 def test_run_fetch_falls_back_to_processing_time_when_no_posted_date(conn, source):

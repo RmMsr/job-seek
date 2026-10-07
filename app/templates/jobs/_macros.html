@@ -40,6 +40,13 @@
   title="Override the fit score" aria-haspopup="dialog"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.3 12.7A6.5 6.5 0 1 1 12.7 12.7"/><path d="M8 9.5 11 5.5"/></svg>{% if eff is not none %}{{ "%.0f"|format(eff * 100) }}%{% else %}–{% endif %}</button>
 {% endmacro %}
 
+{# Application closing label, shown beside the posting age. #}
+{% macro closing_chip(job) -%}
+{%- set tone = job.apply_by | closing_tone -%}
+<span class="job-closing{% if tone %} job-closing-{{ tone }}{% endif %}"
+  {%- if job.apply_by and job.apply_by != 'rolling' %} title="Applications close {{ job.apply_by }}"{% endif %}>{{ job.apply_by | closing }}</span>
+{%- endmacro %}
+
 {% macro status_pill(job) %}
 {% if job.status == "accepted" %}<span class="status-pill status-pill-accepted">Accepted</span>
 {% elif job.status == "pending" %}<span class="status-pill status-pill-pending">Pending</span>

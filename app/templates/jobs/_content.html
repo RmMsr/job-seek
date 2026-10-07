@@ -133,6 +133,7 @@
           <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
           <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
           <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
+          <option value="closing" {% if filter.order == 'closing' %}selected{% endif %}>Closing soonest</option>
         </select>
         {% endif %}
         {% if filter.is_narrowed %}

@@ -225,3 +225,7 @@ def test_cleared_drops_query_and_filters_keeps_statuses_and_order():
     assert c.statuses == ("new", "accepted") and c.order == "score"
     assert c.q == "" and not c.is_narrowed
     assert "q" not in c.query_params()
+
+
+def test_order_closing_is_valid():
+    assert JobFilter.from_params({"order": "closing"}).order == "closing"

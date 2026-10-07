@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sqlite3
+from datetime import date, datetime, timezone
 from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
@@ -87,6 +88,25 @@ def _sort_key(order: str):
         )
     if order == "age":
         return lambda j: (j["published_at"] or j["created_at"] or "",)
+    if order == "closing":
+        today = datetime.now(timezone.utc).date()
+
+        def closing_key(j):
+            # Applied with reverse=True, so every component is inverted
+            # relative to the ascending SQL order.
+            ab = j.get("apply_by")
+            bucket, day = 1, 0
+            if ab == "rolling":
+                bucket = 2
+            elif ab:
+                try:
+                    d = date.fromisoformat(ab)
+                except ValueError:
+                    d = None
+                if d is not None:
+                    bucket, day = (0, -d.toordinal()) if d >= today else (3, d.toordinal())
+            return (-bucket, day, j["published_at"] or j["created_at"] or "", j["id"])
+        return closing_key
     return lambda j: (
         max(
             j.get("status_changed_at") or "",

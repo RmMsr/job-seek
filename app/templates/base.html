@@ -26,6 +26,7 @@
       --success-tint: #e8ede7;
       --warning: #d4a574;
       --warning-tint: #faf4eb;
+      --warning-strong: #8a5a24;
       --alert: #b85c5c;
       --alert-tint: #f2e8e8;
       --neutral: #d0c9bf;
@@ -79,6 +80,7 @@
         --success-tint: #1f3a2f;
         --warning: #d4a574;
         --warning-tint: #3a3020;
+        --warning-strong: #e6bf8f;
         --alert: #d18686;
         --alert-tint: #3a1f1f;
         --neutral-strong: #b5aca0;
@@ -109,6 +111,7 @@
       --success-tint: #1f3a2f;
       --warning: #d4a574;
       --warning-tint: #3a3020;
+      --warning-strong: #e6bf8f;
       --alert: #d18686;
       --alert-tint: #3a1f1f;
       --neutral-strong: #b5aca0;
@@ -315,9 +318,18 @@
 
     .job-row-content { flex: 1 1 auto; min-width: 0; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; }
     .job-row-header { display: flex; align-items: baseline; gap: 0.9rem; padding-right: 2.4rem; line-height: 1.3; }
-    .job-row-content:has(.job-select-wrap) .job-row-header { padding-right: 4.2rem; }
+    /* Clears the checkbox + permalink + edit icons, so the right-most
+       age/closing chip is never drawn under them. */
+    .job-row-content:has(.job-select-wrap) .job-row-header { padding-right: 6rem; }
     .job-title { margin: 0; font-family: var(--font-serif); font-weight: 600; font-size: 1.05rem; line-height: 1.3; color: var(--text-primary); flex: 0 1 auto; min-width: 0; }
     .job-age { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
+    /* Application closing label beside the age: as quiet as the age itself,
+       a small amber pill only when it closes within 3 days. */
+    .job-closing { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+    .job-title + .job-closing { margin-left: auto; }
+    .job-closing-soon { color: var(--warning-strong); background: var(--warning-tint);
+      font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 999px; }
+    .job-closing-closed { opacity: 0.7; }
     .job-link-icon { position: absolute; top: 0.3rem; right: 0.5rem; z-index: 3;
       display: inline-flex; align-items: center; height: 1.6rem;
       text-decoration: none; font-size: 0.95rem; line-height: 1;
@@ -343,7 +355,7 @@
        leaving an inert gap above it. */
     .job-detail-header { cursor: pointer; margin: 0 -1.1rem; padding: 1rem 1.1rem 0; }
     .job-detail-title-row { display: flex; align-items: baseline; gap: 0.75rem; padding-right: 2.4rem; }
-    .job-row-expanded:has(.job-select-wrap) .job-detail-title-row { padding-right: 4.2rem; }
+    .job-row-expanded:has(.job-select-wrap) .job-detail-title-row { padding-right: 6rem; }
     .job-detail-title { font-family: var(--font-serif); font-weight: 600; font-size: 1.5rem; margin: 0; flex: 1 1 auto; min-width: 0; }
     .job-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.35rem; font-size: 0.9rem; color: var(--text-secondary); }
     .job-detail-meta a { color: var(--text-secondary); }
@@ -1082,7 +1094,7 @@
       .job-row-content:has(.job-select-wrap) .job-link-icon,
       .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: auto; }
       .job-row-header, .job-detail-title-row { display: block; padding-right: 0; }
-      .job-row-header .job-age { margin-right: 0.6rem; }
+      .job-row-header .job-age, .job-row-header .job-closing { margin-right: 0.6rem; }
     }
     .md-editor-wrap { display: block; }
     .md-editor-mount { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }

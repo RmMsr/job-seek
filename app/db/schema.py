@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     summary TEXT NOT NULL DEFAULT '',
     headline TEXT NOT NULL DEFAULT '',
     published_at TEXT,
+    apply_by TEXT,
     content_type TEXT CHECK(content_type IN ('job_posting', 'lead', 'irrelevant', 'error')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1312,6 +1313,16 @@ def _migrate_jobs_backfill_published_at(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_add_apply_by(conn: sqlite3.Connection) -> None:
+    # Purely additive column (application closing date). Runs last so earlier
+    # jobs-rebuild migrations can't drop it.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    if not cols or "apply_by" in cols:
+        return
+    conn.execute("ALTER TABLE jobs ADD COLUMN apply_by TEXT")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -1362,3 +1373,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_job_cv_add_base_cv_id(conn)
     _migrate_jobs_add_fit_score_override(conn)
     _migrate_jobs_backfill_published_at(conn)
+    _migrate_jobs_add_apply_by(conn)

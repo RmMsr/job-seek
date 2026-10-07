@@ -98,3 +98,41 @@ def test_duration_missing_or_reversed():
     assert duration(None, "2026-09-10T10:00:00") == ""
     assert duration("2026-09-10T10:00:00", None) == ""
     assert duration("2026-09-10T10:05:00", "2026-09-10T10:00:00") == ""
+
+
+from datetime import date
+import pytest
+from app.dates import closing, closing_tone
+
+_T = date(2026, 10, 7)
+
+
+@pytest.mark.parametrize("value, label", [
+    (None, "apply soonest"),
+    ("", "apply soonest"),
+    ("rolling", "rolling"),
+    ("2026-10-07", "closes today"),
+    ("2026-10-08", "closes tomorrow"),
+    ("2026-10-12", "closes in 5 days"),
+    ("2026-10-21", "closes in 14 days"),
+    ("2026-10-22", "closes 22 Oct"),
+    ("2026-11-17", "closes 17 Nov"),
+    ("2026-10-06", "closed yesterday"),
+    ("2026-10-04", "closed 3 days ago"),
+    ("garbage", "apply soonest"),
+])
+def test_closing_labels(value, label):
+    assert closing(value, today=_T) == label
+
+
+@pytest.mark.parametrize("value, tone", [
+    (None, ""), ("rolling", ""), ("2026-10-07", "soon"), ("2026-10-10", "soon"),
+    ("2026-10-11", ""), ("2026-10-06", "closed"), ("garbage", ""),
+])
+def test_closing_tone(value, tone):
+    assert closing_tone(value, today=_T) == tone
+
+
+def test_closing_labels_never_say_deadline():
+    for v in (None, "rolling", "2026-10-07", "2026-10-30", "2026-09-01"):
+        assert "deadline" not in closing(v, today=_T).lower()

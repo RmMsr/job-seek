@@ -14,6 +14,7 @@ class JobSummary:
     headline: str = ""
     summary: str = ""
     posted_date: str = ""
+    apply_by: str = ""
 
 
 _SYSTEM = (
@@ -27,6 +28,11 @@ _SYSTEM = (
     "relative phrases such as '2 weeks ago' or 'posted last month' against the current "
     'date given at the top of the text; empty string if the posting does not state or '
     'clearly imply when it was published>", '
+    '"apply_by": "<the last day applications are accepted, formatted YYYY-MM-DD; resolve '
+    "relative phrases such as 'within 2 weeks' or 'by end of month' against the current "
+    "date given at the top of the text; the word rolling if applications are reviewed on "
+    "a rolling basis or the posting is open until filled; empty string if no closing date "
+    'is stated or it only says ASAP>", '
     '"source_link": "<a URL copied verbatim from the text below that points to the '
     'original job description, application form, or the hiring organization/job page, '
     'or empty string if none is present>"}. '
@@ -42,6 +48,7 @@ _SYSTEM = (
     "such as unusual scope or impact, concrete technical/domain details, or notable team "
     "or organization context. "
     "For posted_date: only a date you can support from the text; never guess one. "
+    "For apply_by: only a date or rolling status you can support from the text; never guess one. "
     "For source_link: only return a URL that appears verbatim in the text below — never "
     "construct, guess, or modify one. If several links are present, prefer the most direct "
     "application link or the original detailed posting over generic organization/social links."
@@ -107,6 +114,25 @@ def _valid_posted_date(value: object, today: date) -> str:
     return parsed.isoformat()
 
 
+def _valid_apply_by(value: object, today: date) -> str:
+    # Past dates are allowed: they mean applications have closed.
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    text = value.strip()
+    if text.lower() == "rolling":
+        return "rolling"
+    try:
+        parsed = date.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(text).date()
+        except ValueError:
+            return ""
+    if abs((parsed - today).days) > 366:
+        return ""
+    return parsed.isoformat()
+
+
 def summarize(
     client: openai.OpenAI,
     model: str,
@@ -165,6 +191,7 @@ def summarize(
             headline=data.get("headline", ""),
             summary=summary,
             posted_date=_valid_posted_date(data.get("posted_date"), today),
+            apply_by=_valid_apply_by(data.get("apply_by"), today),
         )
     except Exception:
         return JobSummary(summary=simplified_content if raw_lead else "")

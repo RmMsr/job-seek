@@ -3151,3 +3151,45 @@ def test_score_override_dial_script_present(client, conn):
     assert ".score-override-btn" in html
 
 
+def test_job_list_order_dropdown_has_closing_soonest(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs")
+    assert '<option value="closing"' in resp.text
+    assert "Closing soonest" in resp.text
+    assert "deadline" not in resp.text.lower()
+
+
+def test_job_list_order_closing_returns_200(client, conn):
+    _seed(conn)
+    resp = client.get("/jobs?order=closing")
+    assert resp.status_code == 200
+    assert '<option value="closing" selected' in resp.text
+
+
+def _set_apply_by(conn, jid, value):
+    conn.execute("UPDATE jobs SET apply_by=? WHERE id=?", (value, jid))
+    conn.commit()
+
+
+def test_job_list_row_shows_closing_label(client, conn):
+    _, jid, _ = _seed(conn)
+    soon = (datetime.now(timezone.utc).date() + timedelta(days=2)).isoformat()
+    _set_apply_by(conn, jid, soon)
+    resp = client.get("/jobs")
+    assert "closes in 2 days" in resp.text
+    assert f'title="Applications close {soon}"' in resp.text
+    assert "job-closing-soon" in resp.text
+
+
+def test_job_list_row_shows_apply_soonest_without_date(client, conn):
+    _seed(conn)
+    assert "apply soonest" in client.get("/jobs").text
+
+
+def test_job_expand_and_detail_show_closing_label(client, conn):
+    _, jid, _ = _seed(conn)
+    _set_apply_by(conn, jid, "rolling")
+    assert "rolling" in client.get(f"/jobs/{jid}/expand").text
+    assert 'class="job-closing' in client.get(f"/jobs/{jid}").text
+
+
