@@ -486,7 +486,8 @@ def test_init_db_migrates_jobs_adds_published_at_column(conn):
 
     row = conn.execute("SELECT title, published_at FROM jobs WHERE url = 'http://job/1'").fetchone()
     assert row["title"] == "Existing Title"
-    assert row["published_at"] is None
+    # Backfilled: an unknown posting date falls back to when the job was first seen.
+    assert row["published_at"] is not None
 
     # Idempotent: running init_db again doesn't error or duplicate columns.
     init_db(conn)
@@ -1880,3 +1881,23 @@ def test_init_db_migrates_jobs_adds_fit_score_override(conn):
     init_db(conn)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
     assert cols.count("fit_score_override") == 1
+
+
+def test_init_db_backfills_missing_published_at_from_created_at(conn):
+    from app.db import queries as q
+    init_db(conn)
+    sid = q.insert_source(conn, "s", "http://x", "generic_listing")
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, created_at, published_at) VALUES (?, 'http://job/1', '2026-08-01 10:00:00', NULL)",
+        (sid,),
+    )
+    conn.execute(
+        "INSERT INTO jobs (source_id, url, created_at, published_at) VALUES (?, 'http://job/2', '2026-08-01 10:00:00', '2026-07-01')",
+        (sid,),
+    )
+    conn.commit()
+
+    init_db(conn)
+
+    rows = dict(conn.execute("SELECT url, published_at FROM jobs").fetchall())
+    assert rows == {"http://job/1": "2026-08-01 10:00:00", "http://job/2": "2026-07-01"}

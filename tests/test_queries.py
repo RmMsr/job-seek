@@ -369,6 +369,24 @@ def test_insert_job_published_at_defaults_to_processing_time(conn):
     assert job["published_at"] == job["fetched_at"]
 
 
+def test_update_job_pipeline_falls_back_to_created_at_when_no_date_known(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r")
+    conn.execute("UPDATE jobs SET published_at = NULL, created_at = '2026-08-01 10:00:00' WHERE id = ?", (jid,))
+    q.update_job_pipeline(conn, jid, simplified_content="s", content_type="job_posting")
+    assert q.get_job(conn, jid)["published_at"] == "2026-08-01 10:00:00"
+
+
+def test_update_job_pipeline_keeps_known_date_over_created_at(conn):
+    source_id = q.insert_source(conn, "s", "http://x", "generic_listing")
+    jid = q.insert_job(
+        conn, source_id=source_id, url="http://job/1", title="T", company="C", raw_text="r",
+        published_at="2026-07-01",
+    )
+    q.update_job_pipeline(conn, jid, simplified_content="s", content_type="job_posting")
+    assert q.get_job(conn, jid)["published_at"] == "2026-07-01"
+
+
 def test_get_all_job_urls_empty(conn):
     assert q.get_all_job_urls(conn) == frozenset()
 

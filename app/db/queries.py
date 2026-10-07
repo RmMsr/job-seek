@@ -1043,7 +1043,7 @@ def update_job_pipeline(
             summary = ?,
             headline = ?,
             company = COALESCE(NULLIF(?, ''), company),
-            published_at = COALESCE(NULLIF(?, ''), published_at)
+            published_at = COALESCE(NULLIF(?, ''), published_at, created_at)
         WHERE id = ?""",
         (simplified_content, content_type, title, summary, headline, company, published_at, job_id),
     )

@@ -1306,6 +1306,12 @@ def _migrate_jobs_add_fit_score_override(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_jobs_backfill_published_at(conn: sqlite3.Connection) -> None:
+    # A job with no known posting date is at least as old as when we first saw it.
+    conn.execute("UPDATE jobs SET published_at = created_at WHERE published_at IS NULL OR published_at = ''")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -1355,3 +1361,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_base_cvs_from_singleton(conn)
     _migrate_job_cv_add_base_cv_id(conn)
     _migrate_jobs_add_fit_score_override(conn)
+    _migrate_jobs_backfill_published_at(conn)
