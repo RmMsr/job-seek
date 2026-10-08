@@ -168,3 +168,11 @@ def test_extract_text_is_unchanged_by_boilerplate_stripping():
     # extract_text stays pure — only extract_readable_text strips.
     html = "<html><body><div class='cookie-banner'>cookies</div><p>body</p></body></html>"
     assert "cookies" in extract_text(html)
+
+
+@respx.mock
+def test_fetch_url_html_sends_browser_like_accept_header():
+    # Hostinger's CDN bot-checks (403) httpx's bare default headers.
+    route = respx.get("http://example.com/page").mock(return_value=httpx.Response(200, text="<p>hi</p>"))
+    fetch_url_html("http://example.com/page")
+    assert route.calls.last.request.headers["accept"].startswith("text/html")

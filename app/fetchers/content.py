@@ -8,6 +8,14 @@ MIN_ARTICLE_LENGTH = 1200  # a real job posting's extracted text clears this; a 
                            # ("<site> needs JavaScript" + menu) usually does not
 
 
+# httpx's bare default headers are a known bot fingerprint: Hostinger's CDN
+# answers them with a 403 "Checking your browser" page, while the same request
+# with an explicit Accept header goes through.
+PAGE_REQUEST_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+
 class FetchError(Exception):
     pass
 
@@ -66,7 +74,7 @@ def is_substantially_richer(candidate_html: str, baseline_html: str) -> bool:
 def fetch_url_html(url: str) -> str:
     fetch_url = linkedin_guest_posting_url(url) or url
     try:
-        resp = httpx.get(fetch_url, timeout=30, follow_redirects=True)
+        resp = httpx.get(fetch_url, headers=PAGE_REQUEST_HEADERS, timeout=30, follow_redirects=True)
     except httpx.HTTPError as exc:
         raise FetchError(str(exc)) from exc
     if resp.status_code != 200:

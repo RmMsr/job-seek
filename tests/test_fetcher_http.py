@@ -78,3 +78,11 @@ def test_http_fetcher_leaves_non_linkedin_url_untouched():
     route = respx.get("https://example.com/jobs/1").mock(return_value=httpx.Response(200, text=_LI_BODY))
     HttpFetcher({"url": "https://example.com/jobs/1"}).fetch()
     assert route.called
+
+
+@respx.mock
+def test_http_fetcher_sends_browser_like_accept_header():
+    # Hostinger's CDN bot-checks (403) httpx's bare default headers.
+    route = respx.get("https://example.com/jobs").mock(return_value=httpx.Response(200, text=_HTML))
+    HttpFetcher(_SOURCE).fetch()
+    assert route.calls.last.request.headers["accept"].startswith("text/html")
