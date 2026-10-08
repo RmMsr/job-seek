@@ -171,8 +171,9 @@ def test_extract_text_is_unchanged_by_boilerplate_stripping():
 
 
 @respx.mock
-def test_fetch_url_html_sends_browser_like_accept_header():
-    # Hostinger's CDN bot-checks (403) httpx's bare default headers.
+def test_fetch_url_html_sends_headers_in_fixed_order():
+    # Hostinger's CDN bot-checks (403) httpx's default header order.
     route = respx.get("http://example.com/page").mock(return_value=httpx.Response(200, text="<p>hi</p>"))
     fetch_url_html("http://example.com/page")
-    assert route.calls.last.request.headers["accept"].startswith("text/html")
+    sent = [name.decode().lower() for name, _ in route.calls.last.request.headers.raw]
+    assert sent == ["host", "user-agent", "accept", "accept-encoding", "connection"]

@@ -8,11 +8,16 @@ MIN_ARTICLE_LENGTH = 1200  # a real job posting's extracted text clears this; a 
                            # ("<site> needs JavaScript" + menu) usually does not
 
 
-# httpx's bare default headers are a known bot fingerprint: Hostinger's CDN
-# answers them with a 403 "Checking your browser" page, while the same request
-# with an explicit Accept header goes through.
+# httpx's default header *order* (Accept, Accept-Encoding, Connection,
+# User-Agent) is a known bot fingerprint: Hostinger's CDN answers it with a 403
+# "Checking your browser" page regardless of the values. Passing every default
+# header per request pins the order we list here, since httpx drops each default
+# and appends the given one. Keep the UA honest.
 PAGE_REQUEST_HEADERS = {
+    "User-Agent": f"python-httpx/{httpx.__version__}",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
 }
 
 
