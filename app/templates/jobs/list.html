@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Jobs — Job Seek{% endblock %}
 {% block content %}
-<div class="jobs-page">
+<div class="jobs-page" hx-history-elt>
 <form id="bulk-form" hx-post="/jobs/bulk-feedback" hx-target="#jobs-content" hx-swap="innerHTML"></form>
 {% from "_add_panel.html" import add_panel %}
 <div class="page-head">

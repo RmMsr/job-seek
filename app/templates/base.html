@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Job Seek{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script>
+    // History restore swaps the snapshot in and re-runs its <script>s, so the
+    // jobs page pins history to .jobs-page (hx-history-elt) — snapshotting the
+    // whole <body> re-ran these scripts on every Back/Forward and stacked
+    // their delegated listeners. On a cache miss the server would return only
+    // the HX-Request partial, so do a full page load instead.
+    htmx.config.refreshOnHistoryMiss = true;
+  </script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Fira+Sans:wght@400;500;600&display=swap">
   {# Markdown editor (see the mount() script near the end of <body>).
      Plain UMD build, no ESM/bundling needed. #}

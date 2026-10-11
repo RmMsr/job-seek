@@ -33,6 +33,16 @@ def test_status_bar_has_dismiss_and_bulk_offset(client, conn):
     assert "status-bar-dismiss" in html
 
 
+def test_history_restore_does_not_rerun_body_scripts(client, conn):
+    # htmx history restore re-executes <script>s inside the restored element.
+    # With the default (whole <body>) every Back/Forward re-ran base.html's
+    # scripts, stacking delegated click listeners so toggles cancelled out
+    # (scenario fit wouldn't fold, direction buttons wouldn't press).
+    html = client.get("/jobs").text
+    assert '<div class="jobs-page" hx-history-elt>' in html
+    assert "htmx.config.refreshOnHistoryMiss = true" in html
+
+
 def test_job_list_empty(client, conn):
     resp = client.get("/jobs")
     assert resp.status_code == 200
