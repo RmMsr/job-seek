@@ -1,10 +1,11 @@
+{% import "tasks/_macros.html" as tm %}
 <div class="resolved-panel">
   {% if task.status == "dismissed" %}
     <p>✓ Dismissed <span class="task-age">{{ task.finished_at | age }}</span></p>
   {% elif task.status == "cancelled" or pres.status == "cancelled" %}
     <p>⊘ Cancelled <span class="task-age">{{ task.finished_at | age }}</span></p>
   {% else %}
-    <p>✓ {{ pres.next_step }}</p>
+    <p>✓ {{ tm.next_step(pres) }}</p>
     {% if pres.results %}
     <p>{% for r in pres.results %}{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
     {% endif %}

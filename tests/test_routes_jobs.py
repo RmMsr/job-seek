@@ -1631,14 +1631,6 @@ def test_job_expand_has_permalink_icon(client, conn):
     assert f'href="/jobs/{jid}" class="job-link-icon"' in resp.text
 
 
-def test_job_row_permalink_is_absolute_positioned_copy_control(client, conn):
-    sid, jid, scenario_id = _seed(conn)
-    resp = client.get("/jobs")
-    assert f'href="/jobs/{jid}"' in resp.text
-    assert 'class="job-link-icon"' in resp.text
-    assert 'data-permalink' in resp.text
-
-
 def test_job_list_default_tab_expand_link_carries_empty_filter_params(client, conn):
     sid, jid, scenario_id = _seed(conn)
     resp = client.get("/jobs")
@@ -3013,24 +3005,6 @@ def test_job_list_row_expand_shows_actions_and_organize(client, conn):
     assert text.index('aria-label="Actions"') < text.index('aria-label="Organize"')
 
 
-def test_job_list_row_expand_has_edit_icon_linking_to_job_view(client, conn):
-    conn.execute("INSERT INTO sources (name,url,fetcher_type) VALUES ('s','http://x','manual')")
-    conn.execute("INSERT INTO jobs (source_id,url,title,content_type) VALUES (1,'http://x/1','Role','job_posting')")
-    conn.commit()
-    r = client.get("/jobs/1/expand")
-    assert '<a href="/jobs/1" class="job-link-icon job-edit-icon"' in r.text
-    # sits left of (i.e. after, in source order) the permalink icon
-    assert r.text.index('class="job-link-icon"') < r.text.index('class="job-link-icon job-edit-icon"')
-
-
-def test_job_list_row_has_edit_icon_linking_to_job_view(client, conn):
-    _seed(conn)
-    r = client.get("/jobs")
-    assert '<a href="/jobs/1" class="job-link-icon job-edit-icon"' in r.text
-    # sits left of (i.e. after, in source order) the permalink icon
-    assert r.text.index('class="job-link-icon"') < r.text.index('class="job-link-icon job-edit-icon"')
-
-
 def test_main_nav_shows_cv_link_after_profile(client):
     r = client.get("/jobs")
     text = r.text
@@ -3191,5 +3165,34 @@ def test_job_expand_and_detail_show_closing_label(client, conn):
     _set_apply_by(conn, jid, "rolling")
     assert "rolling" in client.get(f"/jobs/{jid}/expand").text
     assert 'class="job-closing' in client.get(f"/jobs/{jid}").text
+
+
+def test_job_expand_hides_button_for_current_status(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    for status in ("accepted", "pending", "rejected"):
+        q.update_job_feedback(conn, jid, status, "")
+        text = client.get(f"/jobs/{jid}/expand").text
+        assert f'name="status" value="{status}"' not in text
+        for other in {"accepted", "pending", "rejected"} - {status}:
+            assert f'name="status" value="{other}"' in text
+
+
+def test_bulk_bar_hides_button_for_current_tab_status(client, conn):
+    _seed(conn)
+    text = client.get("/jobs?status=accepted").text
+    assert 'form="bulk-form" name="status" value="accepted"' not in text
+    assert 'form="bulk-form" name="status" value="rejected"' in text
+
+
+def test_job_link_icon_is_plain_link_not_copy_control(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    for path in ("/jobs", f"/jobs/{jid}/expand"):
+        text = client.get(path).text
+        assert f'<a href="/jobs/{jid}" class="job-link-icon"' in text
+        assert "data-permalink" not in text
+        assert "Copy link" not in text
+        # one link icon per job, not a separate copy + open pair
+        assert "job-edit-icon" not in text
+    assert "navigator.clipboard.writeText(full)" not in client.get("/jobs").text
 
 

@@ -1,0 +1,4 @@
+{# A task's next-step line; a fetch outcome is highlighted when it found new jobs. #}
+{% macro next_step(pres) -%}
+{% if pres.new_jobs is not none %}<span class="task-outcome{% if pres.new_jobs %} task-outcome-new{% endif %}">{{ pres.next_step }}</span>{% else %}<span>{{ pres.next_step }}</span>{% endif %}
+{%- endmacro %}

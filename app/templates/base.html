@@ -336,16 +336,11 @@
       padding: 0 0.3rem; border-radius: 4px; color: var(--text-muted); }
     .job-row-content:has(.job-select-wrap) .job-link-icon,
     .job-row-expanded:has(.job-select-wrap) .job-link-icon { right: 2.3rem; }
-    /* The edit icon sits left of the permalink icon — one slot further right. */
-    .job-edit-icon { right: 2.3rem; }
-    .job-row-content:has(.job-select-wrap) .job-edit-icon,
-    .job-row-expanded:has(.job-select-wrap) .job-edit-icon { right: 4.1rem; }
     /* Collapsed card: line the permalink + checkbox up with the title's first line,
        not the card's top edge. (Expanded card keeps them at the top corner.) */
     .job-row-content > .job-link-icon { top: 0.6rem; }
     .job-row-content > .job-select-wrap { top: 0.5rem; }
     .job-link-icon:hover { background: var(--ground); color: var(--accent); }
-    .job-link-icon--copied { color: var(--accent); }
     .job-hook { margin: 0.35rem 0 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.45; }
     .job-data-age { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
 
@@ -775,6 +770,9 @@
     .task-steps li:first-child { border-top: none; }
     .task-steps li.task-step-child { padding-left: 1.5rem; }
     .task-step-note { color: var(--text-muted); font-size: 0.9rem; }
+    .task-outcome { color: var(--text-muted); }
+    .task-outcome-new { color: var(--success-strong); background: var(--success-tint); font-weight: 600;
+      padding: 0.05rem 0.45rem; border-radius: 999px; }
     .task-history-table td { padding: 0.4rem 0.5rem; }
     .task-grp-toggle { position: absolute; opacity: 0; width: 0; height: 0; }
     .task-grp-caret { cursor: pointer; display: inline-block; width: 1rem; color: var(--text-muted); }
@@ -2076,29 +2074,6 @@ document.body.addEventListener('change', function (e) {
 });
   </script>
   <script>
-// Capture phase: the permalink anchor carries an inline onclick="event.stopPropagation()"
-// (so a click doesn't also toggle the row), which would stop the event before it
-// bubbled to any delegated listener. Intercepting on the way down sidesteps that.
-document.addEventListener('click', function (e) {
-  var permalink = e.target.closest("a.job-link-icon[data-permalink]");
-  if (!permalink) return;
-  // Modified clicks (Ctrl/Cmd/Shift/Alt, middle button) keep their native
-  // behaviour — open in a new tab/window — instead of copying.
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-  e.preventDefault();
-  e.stopPropagation();
-  var full = new URL(permalink.getAttribute("href"), window.location.origin).href;
-  var flash = function () {
-    permalink.classList.add("job-link-icon--copied");
-    setTimeout(function () { permalink.classList.remove("job-link-icon--copied"); }, 1200);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(full).then(flash, function () { window.location.assign(full); });
-  } else {
-    window.location.assign(full);
-  }
-}, true);
-
 document.body.addEventListener('click', function (e) {
   var trigger = e.target.closest('.add-panel-trigger');
   if (trigger) {

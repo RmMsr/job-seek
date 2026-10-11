@@ -7,14 +7,9 @@
       aria-label="Select {{ job.title or 'this job' }} for bulk action" onclick="event.stopPropagation()">
   </label>
   {% endif %}
-  <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
-    title="Copy link to this job" aria-label="Copy link to this job"
+  <a href="/jobs/{{ job.id }}" class="job-link-icon"
+    title="Open job page" aria-label="Open job page"
     onclick="event.stopPropagation()">&#128279;</a>
-  {% if not is_detail_page %}
-  <a href="/jobs/{{ job.id }}" class="job-link-icon job-edit-icon"
-    title="Open job" aria-label="Open job details"
-    onclick="event.stopPropagation()">&#128221;</a>
-  {% endif %}
   {% if is_detail_page %}
   <div class="job-detail-extra">
     <div class="job-detail-meta">
@@ -128,9 +123,9 @@
       <span class="job-actions-group-label">Organize</span>
       <div class="actions" role="group" aria-label="Organize">
         {{ macros.score_override_button(job, filter, detail=is_detail_page|default(false)) }}
-        <button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>
-        <button type="submit" name="status" value="pending" class="btn btn-pending">Mark pending</button>
-        <button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>
+        {% if job.status != "accepted" %}<button type="submit" name="status" value="accepted" class="btn btn-accept">Accept</button>{% endif %}
+        {% if job.status != "pending" %}<button type="submit" name="status" value="pending" class="btn btn-pending">Mark pending</button>{% endif %}
+        {% if job.status != "rejected" %}<button type="submit" name="status" value="rejected" class="btn btn-reject" title="Does not match your criteria.">Reject</button>{% endif %}
         {% if job.status == "trash" %}
         <button type="button" class="btn btn-delete"
           hx-get="/jobs/{{ job.id }}/delete-confirm{{ macros.qsuffix(filter, detail=is_detail_page|default(false)) }}"

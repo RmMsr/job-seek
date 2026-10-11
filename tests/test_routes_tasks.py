@@ -31,8 +31,8 @@ def test_presentation_fetch_source_lists_new_jobs(conn):
     t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
     q.complete_task(conn, t["id"], {"jobs_new": 2, "new_job_ids": [j1, j2]})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
-    assert {"label": "A", "href": f"/jobs/{j1}"} in p["results"]
-    assert {"label": "B", "href": f"/jobs/{j2}"} in p["results"]
+    assert {"label": "Job: A", "href": f"/jobs/{j1}"} in p["results"]
+    assert {"label": "Job: B", "href": f"/jobs/{j2}"} in p["results"]
 
 
 def test_presentation_fetch_source_no_new_jobs_lists_none(conn):
@@ -75,7 +75,7 @@ def test_presentation_cv_tailor_generate_names_job_and_links_to_workbench(conn):
     p = task_presentation(conn, q.get_task(conn, t["id"]))
     assert p["title"] == "Apply tailoring plan: ML Engineer @ Acme"
     assert "tailored cv" in p["goal"].lower()
-    assert {"label": "CV for ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
+    assert {"label": "CV: ML Engineer @ Acme", "href": f"/jobs/{jid}/cv"} in p["results"]
 
 
 def test_presentation_cv_tailor_plan_is_directive_eval(conn):
@@ -100,7 +100,7 @@ def test_presentation_done_results_link_for_add_by_url(conn):
     t = q.enqueue_task(conn, kind="job_add_by_url", params={"url": "https://e.com/j"})
     q.complete_task(conn, t["id"], {"job_id": jid})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
-    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+    assert {"label": "Job: Dev", "href": f"/jobs/{jid}"} in p["results"]
 
 
 def test_presentation_add_by_url_already_tracked_links_existing_job(conn):
@@ -110,7 +110,7 @@ def test_presentation_add_by_url_already_tracked_links_existing_job(conn):
     q.complete_task(conn, t["id"], {"existing_job_id": jid, "notices": [], "html_chunks": []})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
     assert p["next_step"] == "Already tracked"
-    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+    assert {"label": "Job: Dev", "href": f"/jobs/{jid}"} in p["results"]
     assert p["link"] == f"/jobs/{jid}"
 
 
@@ -120,7 +120,7 @@ def test_single_job_revisit_links_to_job(conn):
     t = q.enqueue_task(conn, kind="jobs_revisit", params={"job_ids": [jid], "trigger": "manual"})
     q.complete_task(conn, t["id"], {"html_chunks": [], "notices": []})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
-    assert {"label": "View Dev", "href": f"/jobs/{jid}"} in p["results"]
+    assert {"label": "Job: Dev", "href": f"/jobs/{jid}"} in p["results"]
 
 
 def test_multi_job_revisit_sweep_has_no_per_job_link(conn):
@@ -253,7 +253,7 @@ def test_results_names_the_source(conn):
     t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
     q.complete_task(conn, t["id"], {"jobs_new": 2})
     p = task_presentation(conn, q.get_task(conn, t["id"]))
-    assert {"label": "Jobs from Cord", "href": f"/jobs?source_id={sid}"} in p["results"]
+    assert {"label": "Filtered jobs for Cord", "href": f"/jobs?source_id={sid}"} in p["results"]
 
 
 def test_presentation_scenario_reevaluate_one_names_the_scenario(conn):
@@ -819,7 +819,7 @@ def test_fetch_source_results_drop_fetch_history(conn):
     q.complete_task(conn, t["id"], {"jobs_new": 1})
     labels = [r["label"] for r in task_presentation(conn, q.get_task(conn, t["id"]))["results"]]
     assert "Fetch history" not in labels
-    assert "Jobs from Cord" in labels
+    assert "Filtered jobs for Cord" in labels
 
 
 def test_revisit_result_view_summarises_and_links_changed(client, conn):
@@ -871,3 +871,59 @@ def test_finished_task_detail_shows_duration(client, conn):
     r = client.get(f"/tasks/{t['id']}")
     assert "Finished" in r.text
     assert "in 2m 30s" in r.text
+
+
+def test_fetch_source_results_label_jobs_by_category(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://cord.co/1", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 1, "new_job_ids": [jid]})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["results"] == [
+        {"label": "Filtered jobs for Cord", "href": f"/jobs?source_id={sid}"},
+        {"label": "Job: Dev", "href": f"/jobs/{jid}"},
+    ]
+    assert p["new_jobs"] == 1
+    assert p["next_step"] == "1 new job"
+
+
+def test_fetch_source_without_new_jobs_says_no_new_jobs(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 0})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert p["next_step"] == "No new jobs"
+    assert p["new_jobs"] == 0
+
+
+def test_non_fetch_task_has_no_new_jobs_outcome(conn):
+    t = q.enqueue_task(conn, kind="profile_refine", params={})
+    q.complete_task(conn, t["id"], {})
+    assert task_presentation(conn, q.get_task(conn, t["id"]))["new_jobs"] is None
+
+
+def test_source_result_names_the_source(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="source_detect", params={"url": "https://cord.co"})
+    q.complete_task(conn, t["id"], {"source_id": sid})
+    p = task_presentation(conn, q.get_task(conn, t["id"]))
+    assert {"label": "Source: Cord", "href": f"/sources#source-{sid}"} in p["results"]
+
+
+def test_fetch_all_root_reports_new_jobs_total(conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid}, parent_task_id=root["id"])
+    q.complete_task(conn, child["id"], {"jobs_new": 0})
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["new_jobs"] == 0
+    assert p["next_step"].endswith("no new jobs")
+
+
+def test_task_detail_highlights_new_jobs(client, conn):
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 3})
+    html = client.get(f"/tasks/{t['id']}").text
+    assert 'class="task-outcome task-outcome-new"' in html

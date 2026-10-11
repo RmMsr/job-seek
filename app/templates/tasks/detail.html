@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% import "tasks/_macros.html" as tm %}
 {% block title %}{{ pres.title }} — Job Seek{% endblock %}
 {% block content %}
 {% if parent %}<p class="task-breadcrumb">Part of: <a href="/tasks/{{ parent.id }}">{{ parent.title }}</a></p>{% endif %}
 <h1>{{ pres.title }}</h1>
 {% if pres.goal %}<p class="resume-message">{{ pres.goal }}</p>{% endif %}
-{% if not resolved_panel %}<p class="resume-subtitle"><strong id="task-next-step">{{ pres.next_step }}</strong></p>{% endif %}
+{% if not resolved_panel %}<p class="resume-subtitle"><strong id="task-next-step">{{ tm.next_step(pres) }}</strong></p>{% endif %}
 
 <dl class="task-meta">
   <dt>State</dt><dd id="task-log-status">{{ pres.status if is_group else task.status }}{% if task.error and not is_group %} — {{ task.error }}{% endif %}</dd>
@@ -42,7 +43,7 @@
   <li{% if s.task.parent_task_id %} class="task-step-child"{% endif %}>
     <span class="task-li-icon icon-{{ s.state }}" aria-hidden="true">{{ s.state | status_icon }}</span>
     <a href="/tasks/{{ s.task.id }}">{{ s.pres.title }}</a>
-    <span class="task-step-note">{{ s.pres.next_step }}</span>
+    <span class="task-step-note">{{ tm.next_step(s.pres) }}</span>
   </li>
 {% endfor %}
 </ul>

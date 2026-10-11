@@ -184,7 +184,20 @@ def test_home_done_task_with_results_still_shows_them(client, conn):
     q.complete_task(conn, t["id"], {"jobs_new": 0})
     html = client.get("/").text
     li = html.split(f'task-card-{t["id"]}', 1)[1].split("</li>", 1)[0]
-    assert "Jobs from Cord" in li
+    assert "Filtered jobs for Cord" in li
+    assert "No new jobs" in li and "task-outcome-new" not in li
+
+
+def test_home_fetch_with_new_jobs_highlights_the_count(client, conn):
+    _use_test_db(conn)
+    sid = q.insert_source(conn, "Cord", "https://cord.co", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://cord.co/1", title="Dev", company="", raw_text="")
+    t = q.enqueue_task(conn, kind="fetch_source", params={"source_id": sid})
+    q.complete_task(conn, t["id"], {"jobs_new": 1, "new_job_ids": [jid]})
+    html = client.get("/").text
+    li = html.split(f'task-card-{t["id"]}', 1)[1].split("</li>", 1)[0]
+    assert '<span class="task-outcome task-outcome-new">1 new job</span>' in li
+    assert "Filtered jobs for Cord" in li
 
 
 def test_home_multi_result_task_shows_only_the_headline(client, conn):

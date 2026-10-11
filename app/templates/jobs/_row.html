@@ -18,14 +18,9 @@
       {% if job.published_at %}<span class="job-age">{{ job.published_at | time_ago }}</span>{% endif %}
       {{ macros.closing_chip(job) }}
     </div>
-    <a href="/jobs/{{ job.id }}" class="job-link-icon" data-permalink
-      title="Copy link to this job" aria-label="Copy link to this job"
+    <a href="/jobs/{{ job.id }}" class="job-link-icon"
+      title="Open job page" aria-label="Open job page"
       onclick="event.stopPropagation()">&#128279;</a>
-    {% if not is_detail_page %}
-    <a href="/jobs/{{ job.id }}" class="job-link-icon job-edit-icon"
-      title="Open job" aria-label="Open job details"
-      onclick="event.stopPropagation()">&#128221;</a>
-    {% endif %}
     {% if job.stale_badge %}
       <p class="stale-note">
         {% if job.stale_badge.href %}

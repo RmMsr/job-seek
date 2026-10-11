@@ -153,7 +153,7 @@ def _done_summary(conn: sqlite3.Connection, task: dict) -> str:
     if kind == "fetch_source":
         n = r.get("jobs_new")
         if n is not None:
-            return f"{n} new job{'s' if n != 1 else ''}" if n else "No new postings"
+            return f"{n} new job{'s' if n != 1 else ''}" if n else "No new jobs"
     if kind in ("source_confirm", "job_add_listing_source", "source_detect") and r.get("source_id"):
         src = q.get_source(conn, r["source_id"])
         return f"Source '{src['name']}' created" if src else "Source created"
@@ -189,12 +189,21 @@ def _next_step(conn: sqlite3.Connection, task: dict) -> str:
 _RESULT_LINK_CAP = 10
 
 
-def _job_links(conn, job_ids, *, prefix="") -> list[dict]:
-    out = []
-    for jid in job_ids[:_RESULT_LINK_CAP]:
-        title = _job_title(conn, jid) or f"job {jid}"
-        out.append({"label": f"{prefix} {title}".strip(), "href": f"/jobs/{jid}"})
-    return out
+def _job_link(conn, jid, *, prefix="Job:", href=None) -> dict:
+    """A "Category: name" result link to one job."""
+    title = _job_title(conn, jid) or f"#{jid}"
+    return {"label": f"{prefix} {title}", "href": href or f"/jobs/{jid}"}
+
+
+def _job_links(conn, job_ids, *, prefix="Job:") -> list[dict]:
+    return [_job_link(conn, jid, prefix=prefix) for jid in job_ids[:_RESULT_LINK_CAP]]
+
+
+def _new_jobs(task: dict) -> int | None:
+    """New-job count of a finished fetch_source, else None (not a fetch outcome)."""
+    if task["kind"] != "fetch_source" or task["status"] != "done":
+        return None
+    return (task.get("result") or {}).get("jobs_new")
 
 
 def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
@@ -205,26 +214,20 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
         sid = params.get("source_id")
         if sid:
             src = q.get_source(conn, sid)
-            label = f"Jobs from {src['name']}" if src else "Jobs from this source"
+            label = f"Filtered jobs for {src['name']}" if src else "Filtered jobs for this source"
             out.append({"label": label, "href": f"/jobs?source_id={sid}"})
         out.extend(_job_links(conn, r.get("new_job_ids") or []))
     elif kind == "job_add_by_url" and r.get("job_id"):
-        title = _job_title(conn, r["job_id"])
-        out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{r['job_id']}"})
+        out.append(_job_link(conn, r["job_id"]))
     elif kind == "job_add_by_url" and r.get("existing_job_id"):
-        title = _job_title(conn, r["existing_job_id"])
-        out.append({"label": f"View {title}" if title else "View job",
-                    "href": f"/jobs/{r['existing_job_id']}"})
+        out.append(_job_link(conn, r["existing_job_id"]))
     elif kind in _SINGLE_JOB_KINDS and params.get("job_id"):
-        title = _job_title(conn, params["job_id"])
-        out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{params['job_id']}"})
+        out.append(_job_link(conn, params["job_id"]))
     elif (rjid := _single_revisit_job_id(task)) is not None:
-        title = _job_title(conn, rjid)
-        out.append({"label": f"View {title}" if title else "View job", "href": f"/jobs/{rjid}"})
+        out.append(_job_link(conn, rjid))
     elif kind == "cv_tailor" and params.get("job_id"):
-        title = _job_title(conn, params["job_id"])
-        out.append({"label": f"CV for {title}" if title else "CV workbench",
-                    "href": f"/jobs/{params['job_id']}/cv"})
+        out.append(_job_link(conn, params["job_id"], prefix="CV:",
+                             href=f"/jobs/{params['job_id']}/cv"))
     elif kind == "jobs_revisit" and (outcome := r.get("outcome")):
         total = outcome.get("total", 0)
         changed, closed = outcome.get("changed", []), outcome.get("closed", [])
@@ -247,7 +250,9 @@ def _results(conn: sqlite3.Connection, task: dict) -> list[dict]:
         if len(ids) > _RESULT_LINK_CAP:
             out.append({"label": "Back to jobs", "href": "/jobs"})
     elif kind in ("source_confirm", "job_add_listing_source", "source_detect") and r.get("source_id"):
-        out.append({"label": "View source", "href": f"/sources#source-{r['source_id']}"})
+        src = q.get_source(conn, r["source_id"])
+        out.append({"label": f"Source: {src['name']}" if src else "Source",
+                    "href": f"/sources#source-{r['source_id']}"})
     elif kind in ("scenarios_refine_all", "scenario_refine_one", "scenarios_reevaluate_all"):
         out.append({"label": "Scenarios", "href": "/scenarios"})
     elif kind == "profile_refine":
@@ -288,6 +293,7 @@ def task_presentation(conn: sqlite3.Connection, task: dict) -> dict:
         "goal": _goal(conn, task),
         "next_step": _next_step(conn, task),
         "results": _results(conn, task),
+        "new_jobs": _new_jobs(task),
         "link": _link(conn, task),
         "review_href": f"/tasks/{task['id']}" if awaiting else None,
         **_needs_you(task),
@@ -357,6 +363,7 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
     goal = _goal(conn, root)
     na = next((t for t in subtree if t["status"] == "needs_action"), None)
 
+    new_jobs = None
     if status == "needs_action":
         next_step = _next_step(conn, na)
     elif status == "cancelled":
@@ -367,9 +374,9 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
         if failed:
             next_step += f", {failed} failed"
         if status in ("done", "failed"):
-            new = sum((t.get("result") or {}).get("jobs_new") or 0 for t in children)
-            if new:
-                next_step += f" — {new} new job{'s' if new != 1 else ''}"
+            new_jobs = sum((t.get("result") or {}).get("jobs_new") or 0 for t in children)
+            next_step += (f" — {new_jobs} new job{'s' if new_jobs != 1 else ''}"
+                          if new_jobs else " — no new jobs")
     elif status == "failed":
         failed = [t for t in subtree if t["status"] == "failed"]
         next_step = (failed[-1]["error"] or "Failed").strip().split("\n")[0]
@@ -380,9 +387,10 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
         finished = [t for t in subtree if t["finished_at"]]
         last = max(finished, key=lambda t: (t["finished_at"], t["id"])) if finished else root
         next_step = _done_summary(conn, last)
+        new_jobs = _new_jobs(last)
 
     if kind == "fetch_all":
-        # Per-source "Jobs from X" links would be a wall on one row; the child
+        # Per-source "Filtered jobs for X" links would be a wall on one row; the child
         # steps below cover the run. Nothing worth a top-level link.
         results = []
     else:
@@ -395,7 +403,7 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
                     results.append(r)
 
     return {"title": title, "goal": goal, "next_step": next_step,
-            "results": results, "status": status, "link": f"/tasks/{root['id']}",
+            "results": results, "new_jobs": new_jobs, "status": status, "link": f"/tasks/{root['id']}",
             # Review on a root always goes to the root's detail page, which
             # surfaces the pending child's panel.
             "review_href": f"/tasks/{root['id']}" if status == "needs_action" else None,

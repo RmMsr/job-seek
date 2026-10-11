@@ -1,3 +1,4 @@
+{% import "tasks/_macros.html" as tm %}
 <li class="task-li task-li-{{ pres.status }}" id="task-card-{{ task.id }}">
   <span class="task-li-icon icon-{{ pres.status }}" aria-hidden="true">{{ pres.status | status_icon }}</span>
   <div class="task-li-body">
@@ -6,7 +7,7 @@
       <span class="task-age">{{ task.created_at | age }}</span>
     </div>
     <div class="task-li-sub">
-      <span>{{ pres.next_step }}</span>
+      {{ tm.next_step(pres) }}
       {# Home card stays compact — just the headline result; the task page has the full list. #}
       {% for r in pres.results[:1] %}{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}<span>{{ r.label }}</span>{% endif %}{% endfor %}
     </div>
