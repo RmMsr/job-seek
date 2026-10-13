@@ -64,11 +64,13 @@ def _jobs_for_filter(conn: sqlite3.Connection, f: JobFilter) -> list[dict]:
             conn, f.q, tabs=tabs,
             source_id=f.source_id, scenario_id=f.scenario_id,
             org=f.org, org_none=f.org_none,
+            tags=f.tags, not_tags=f.not_tags,
         )
     return q.get_jobs_for_tabs(
         conn, tabs,
         source_id=f.source_id, scenario_id=f.scenario_id,
         org=f.org, org_none=f.org_none, scenario_none=f.scenario_none,
+        tags=f.tags, not_tags=f.not_tags,
         order=f.order,
     )
 
@@ -124,6 +126,8 @@ def _counts_for_filter(conn: sqlite3.Connection, f: JobFilter) -> dict[str, int]
         source_id=f.source_id,
         org=f.org,
         org_none=f.org_none,
+        tags=f.tags,
+        not_tags=f.not_tags,
         q=f.q,
     )
 
@@ -238,6 +242,8 @@ def _filter_from_bulk_form(
     order_filter: str | None = None,
     q_filter: str | None = None,
     solo_filter: str | None = None,
+    tag_filter: list[str] | None = None,
+    not_tag_filter: list[str] | None = None,
 ) -> JobFilter:
     return JobFilter.from_params({
         "status": status_filter or "new",
@@ -247,6 +253,8 @@ def _filter_from_bulk_form(
         "order": order_filter or "",
         "q": q_filter or "",
         "solo": solo_filter or "",
+        "tag": tag_filter or [],
+        "not_tag": not_tag_filter or [],
     })
 
 
@@ -257,6 +265,20 @@ def job_list(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     # navigation (no HX-Request header) gets the whole page.
     template = "jobs/_content.html" if request.headers.get("HX-Request") else "jobs/list.html"
     return templates.TemplateResponse(request, template, _content_context(conn, f))
+
+
+@router.get("/jobs/tag-filter", response_class=HTMLResponse)
+def job_list_tag_filter(
+    request: Request, name: str = "", mode: str = "include",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Filter-panel 'Must have' / 'Exclude' buttons: add one tag to the
+    current filter, then behave like /jobs with the resulting URL pushed."""
+    f = _filter_from_request(request)
+    f = f.with_not_tag(name) if mode == "exclude" else f.with_tag(name)
+    resp = templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
+    resp.headers["HX-Push-Url"] = "/jobs?" + f.query_string()
+    return resp
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -715,6 +737,8 @@ def job_bulk_feedback(
     order_filter: str | None = Form(None),
     q_filter: str | None = Form(None),
     solo_filter: str | None = Form(None),
+    tag_filter: list[str] = Form([]),
+    not_tag_filter: list[str] = Form([]),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     for job_id in job_ids:
@@ -729,7 +753,10 @@ def job_bulk_feedback(
             q.enqueue_task(conn, kind="jobs_revisit",
                            params={"job_ids": revisitable, "trigger": "status_change"})
 
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter)
+    f = _filter_from_bulk_form(
+        status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter,
+        tag_filter=tag_filter, not_tag_filter=not_tag_filter,
+    )
     jobs = _enrich_jobs(conn, _jobs_for_filter(conn, f))
     matched_ids = {j["id"] for j in jobs}
 
@@ -776,10 +803,15 @@ def job_bulk_delete(
     order_filter: str | None = Form(None),
     q_filter: str | None = Form(None),
     solo_filter: str | None = Form(None),
+    tag_filter: list[str] = Form([]),
+    not_tag_filter: list[str] = Form([]),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     q.delete_jobs(conn, job_ids)
-    f = _filter_from_bulk_form(status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter)
+    f = _filter_from_bulk_form(
+        status_filter, scenario_filter, source_id_filter, org_filter, order_filter, q_filter, solo_filter,
+        tag_filter=tag_filter, not_tag_filter=not_tag_filter,
+    )
     return templates.TemplateResponse(request, "jobs/_content.html", _content_context(conn, f))
 
 

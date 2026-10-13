@@ -21,6 +21,8 @@
 <input type="hidden" name="org_filter" value="{% if filter.org_none %}none{% else %}{{ filter.org or '' }}{% endif %}" form="bulk-form">
 <input type="hidden" name="order_filter" value="{{ filter.order }}" form="bulk-form">
 <input type="hidden" name="q_filter" value="{{ filter.q }}" form="bulk-form">
+{% for t in filter.tags %}<input type="hidden" name="tag_filter" value="{{ t }}" form="bulk-form">{% endfor %}
+{% for t in filter.not_tags %}<input type="hidden" name="not_tag_filter" value="{{ t }}" form="bulk-form">{% endfor %}
 {% set primary_tabs = tab_defs[:4] %}   {# new, lead, accepted, pending #}
 {% set archive_tabs = tab_defs[4:] %}   {# rejected, not_relevant, trash #}
 {% set scope_tabs = active_tabs if active_tabs is defined else filter.statuses %}
@@ -34,7 +36,8 @@
 {% set active_filter_count =
      (1 if (filter.scenario_id is not none or filter.scenario_none) else 0)
    + (1 if filter.source_id is not none else 0)
-   + (1 if (filter.org is not none or filter.org_none) else 0) %}
+   + (1 if (filter.org is not none or filter.org_none) else 0)
+   + filter.tags | length + filter.not_tags | length %}
 
 <div class="tb-toolbar">
   {# A plain <div>, not <nav>: base.html's bare `nav { }` selector styles the
@@ -67,7 +70,7 @@
     <select class="tb-status-select" name="status"
             hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true"
             hx-vals='{"solo": "1"}'
-            hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='order'],[name='q']">
+            hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
       {% if scope_is_multi %}
       <option value="" selected disabled>Multiple statuses</option>
       {% endif %}
@@ -99,7 +102,7 @@
         <label class="tb-panel-label" for="tb-scenario">Scenario</label>
         <select id="tb-scenario" name="scenario" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
                 hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-                hx-include="[name='source_id'],[name='org'],[name='order'],[name='q']">
+                hx-include="[name='source_id'],[name='org'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
           <option value="">(All)</option>
           <option value="none" {% if filter.scenario_none %}selected{% endif %}>(None)</option>
           {% for s in scenarios %}
@@ -109,7 +112,7 @@
         <label class="tb-panel-label" for="tb-source">Source</label>
         <select id="tb-source" name="source_id" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
                 hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-                hx-include="[name='scenario'],[name='org'],[name='order'],[name='q']">
+                hx-include="[name='scenario'],[name='org'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
           <option value="">(All)</option>
           {% for s in sources %}
           <option value="{{ s.id }}" {% if filter.source_id == s.id %}selected{% endif %}>{{ "(Single / None)" if s.fetcher_type == "manual" else s.name }}</option>
@@ -118,18 +121,32 @@
         <label class="tb-panel-label" for="tb-org">Organization</label>
         <select id="tb-org" name="org" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
                 hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-                hx-include="[name='scenario'],[name='source_id'],[name='order'],[name='q']">
+                hx-include="[name='scenario'],[name='source_id'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
           <option value="">(All)</option>
           <option value="none" {% if filter.org_none %}selected{% endif %}>(None)</option>
           {% for c in companies %}
           <option value="{{ c }}" {% if filter.org == c %}selected{% endif %}>{{ c | truncate(40, True, '…') }}</option>
           {% endfor %}
         </select>
+        <label class="tb-panel-label" for="tb-tag">Tags</label>
+        {# Current tag filter state, picked up by every select's hx-include. #}
+        {% for t in filter.tags %}<input type="hidden" name="tag" value="{{ t }}">{% endfor %}
+        {% for t in filter.not_tags %}<input type="hidden" name="not_tag" value="{{ t }}">{% endfor %}
+        {# No hx-push-url: /jobs/tag-filter answers with HX-Push-Url. #}
+        <form class="tb-tag-form" hx-get="/jobs/tag-filter" hx-target="#jobs-content" hx-swap="innerHTML"
+              hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
+              hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
+          <input type="text" id="tb-tag" name="name" list="tag-options" autocomplete="off" placeholder="Tag name" required>
+          <span class="tb-tag-actions">
+            <button type="submit" name="mode" value="include" class="btn">Must have</button>
+            <button type="submit" name="mode" value="exclude" class="btn">Exclude</button>
+          </span>
+        </form>
         {% if not filter.searching %}
         <label class="tb-panel-label" for="tb-order">Sort</label>
         <select id="tb-order" name="order" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
                 hx-push-url="true" hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
-                hx-include="[name='scenario'],[name='source_id'],[name='org']">
+                hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='tag'],[name='not_tag']">
           <option value="change" {% if filter.order == 'change' %}selected{% endif %}>Newest changes</option>
           <option value="score" {% if filter.order == 'score' %}selected{% endif %}>Fit score</option>
           <option value="age" {% if filter.order == 'age' %}selected{% endif %}>Posting age</option>
@@ -153,6 +170,26 @@
     {% endif %}
   </div>
 </div>
+{% if filter.tags or filter.not_tags %}
+<div class="tb-tag-chips" aria-label="Tag filters">
+  {% for t in filter.tags %}
+  <span class="tag-chip tag-chip-include">
+    <a hx-get="/jobs?{{ filter.with_tag_flipped(t).query_params() | urlencode }}" hx-target="#jobs-content"
+       hx-swap="innerHTML" hx-push-url="true" title="Must have — click to exclude instead"><span class="tag-chip-sign" aria-label="must have">+</span>{{ t }}</a>
+    <a hx-get="/jobs?{{ filter.without_tag(t).query_params() | urlencode }}" hx-target="#jobs-content"
+       hx-swap="innerHTML" hx-push-url="true" class="tag-chip-x" aria-label="Remove tag filter {{ t }}" title="Remove filter">&times;</a>
+  </span>
+  {% endfor %}
+  {% for t in filter.not_tags %}
+  <span class="tag-chip tag-chip-exclude">
+    <a hx-get="/jobs?{{ filter.with_tag_flipped(t).query_params() | urlencode }}" hx-target="#jobs-content"
+       hx-swap="innerHTML" hx-push-url="true" title="Excluded — click to require instead"><span class="tag-chip-sign" aria-label="excluded">&minus;</span>{{ t }}</a>
+    <a hx-get="/jobs?{{ filter.without_tag(t).query_params() | urlencode }}" hx-target="#jobs-content"
+       hx-swap="innerHTML" hx-push-url="true" class="tag-chip-x" aria-label="Remove tag filter {{ t }}" title="Remove filter">&times;</a>
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
 <div class="bulk-bar decision-panel">
   <button type="button" class="bulk-clear bulk-clear-x" aria-label="Clear selection" title="Clear selection">×</button>
   <label class="decision-panel-note">Note (optional):

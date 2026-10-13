@@ -4,7 +4,9 @@ import json
 import re
 import secrets
 import sqlite3
+from collections.abc import Sequence
 from app.cv.instruction import DEFAULT_BASE_CV, DEFAULT_GUARDRAILS, DEFAULT_DIRECTIVES_TEMPLATE
+from app.tags import normalize_tag_name
 from app.url_canon import canonicalize_url
 
 # Letters + digits, no underscore — keeps Unicode words (Norwegian "ø/æ/å",
@@ -411,8 +413,8 @@ def list_tailored_cvs(conn: sqlite3.Connection) -> list[dict]:
     else the lowest-id base CV — as in resolve_job_base_cv_id), and whether
     any of its tailored versions is accepted."""
     rows = conn.execute(
-        """
-        SELECT job_cv.job_id, jobs.title, jobs.company,
+        f"""
+        SELECT job_cv.job_id, jobs.title, {_EFFECTIVE_ORG} AS company,
                cv_versions.updated_at AS cv_updated_at,
                EXISTS (SELECT 1 FROM cv_versions AS acc
                        WHERE acc.entity_type = 'tailored' AND acc.entity_id = job_cv.job_id
@@ -978,6 +980,71 @@ def add_job_event(conn: sqlite3.Connection, job_id: int, kind: str, message: str
     conn.commit()
 
 
+def set_company_override(conn: sqlite3.Connection, job_id: int, raw: str | None) -> bool:
+    """Set (or, with an empty value, clear) the manual organization. A value
+    equal to the LLM-extracted company is stored as no override. Returns
+    whether anything changed; logs an 'org_override' job event when it did."""
+    row = conn.execute("SELECT company, company_override FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return False
+    name = normalize_tag_name(raw)
+    new = name if name and name != row["company"] else None
+    if new == row["company_override"]:
+        return False
+    conn.execute("UPDATE jobs SET company_override = ? WHERE id = ?", (new, job_id))
+    conn.commit()
+    message = f"Organization set to “{new}”" if new else "Organization override cleared"
+    add_job_event(conn, job_id, "org_override", message)
+    return True
+
+
+def add_job_tag(conn: sqlite3.Connection, job_id: int, raw: str | None) -> dict | None:
+    name = normalize_tag_name(raw)
+    if not name:
+        return None
+    # tags.name is UNIQUE COLLATE NOCASE: an existing tag in any casing is reused.
+    conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (name,))
+    tag = conn.execute("SELECT id, name FROM tags WHERE name = ?", (name,)).fetchone()
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES (?, ?)", (job_id, tag["id"])
+    )
+    conn.commit()
+    if cur.rowcount:
+        add_job_event(conn, job_id, "tag_added", f"Tag added: {tag['name']}")
+    return {"id": tag["id"], "name": tag["name"]}
+
+
+def remove_job_tag(conn: sqlite3.Connection, job_id: int, tag_id: int) -> str | None:
+    tag = conn.execute("SELECT name FROM tags WHERE id = ?", (tag_id,)).fetchone()
+    cur = conn.execute("DELETE FROM job_tags WHERE job_id = ? AND tag_id = ?", (job_id, tag_id))
+    if not cur.rowcount:
+        conn.commit()
+        return None
+    conn.execute(
+        "DELETE FROM tags WHERE id = ? AND NOT EXISTS (SELECT 1 FROM job_tags WHERE tag_id = ?)",
+        (tag_id, tag_id),
+    )
+    conn.commit()
+    add_job_event(conn, job_id, "tag_removed", f"Tag removed: {tag['name']}")
+    return tag["name"]
+
+
+def get_job_tags(conn: sqlite3.Connection, job_id: int) -> list[dict]:
+    return _rows_to_dicts(conn.execute(
+        "SELECT tags.id, tags.name FROM job_tags JOIN tags ON tags.id = job_tags.tag_id "
+        "WHERE job_tags.job_id = ? ORDER BY tags.name COLLATE NOCASE",
+        (job_id,),
+    ).fetchall())
+
+
+def get_tag_names_by_usage(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT tags.name FROM tags JOIN job_tags ON job_tags.tag_id = tags.id "
+        "GROUP BY tags.id ORDER BY COUNT(*) DESC, tags.name COLLATE NOCASE"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def get_job_events(conn: sqlite3.Connection, job_id: int) -> list[dict]:
     return _rows_to_dicts(
         conn.execute(
@@ -1305,8 +1372,17 @@ def mark_profile_feedback_handled(conn: sqlite3.Connection, job_ids: list[int]) 
     conn.commit()
 
 
-_GATE_SELECT = """
+# Manual override wins over the LLM-extracted company (spec: manual tags).
+_EFFECTIVE_ORG = "COALESCE(NULLIF(jobs.company_override, ''), jobs.company)"
+
+_GATE_SELECT = f"""
     jobs.*,
+    {_EFFECTIVE_ORG} AS org,
+    (SELECT json_group_array(json_object('id', t.id, 'name', t.name))
+       FROM (SELECT tags.id, tags.name FROM job_tags
+             JOIN tags ON tags.id = job_tags.tag_id
+             WHERE job_tags.job_id = jobs.id
+             ORDER BY tags.name COLLATE NOCASE) AS t) AS tags_json,
     (SELECT fetcher_type FROM sources WHERE sources.id = jobs.source_id) AS source_fetcher_type,
     gate.passed_count AS passed_gate_count,
     gate.passed_scenario_names AS passed_scenario_names,
@@ -1390,21 +1466,36 @@ def _fts_match_query(raw: str) -> str | None:
     return " ".join(quoted)
 
 
+_TAG_EXISTS = (
+    "EXISTS (SELECT 1 FROM job_tags jt JOIN tags t ON t.id = jt.tag_id "
+    "WHERE jt.job_id = jobs.id AND t.name = ?)"
+)
+
+
+def _tag_clauses(tags: Sequence[str] = (), not_tags: Sequence[str] = ()) -> tuple[list[str], list]:
+    """One EXISTS per must-have tag, one NOT EXISTS per excluded tag.
+    tags.name is COLLATE NOCASE, so `=` matches case-insensitively."""
+    clauses = [_TAG_EXISTS for _ in tags] + ["NOT " + _TAG_EXISTS for _ in not_tags]
+    return clauses, [*tags, *not_tags]
+
+
 def _composable_clauses(
     *,
     source_id: int | None = None,
     scenario_id: int | None = None,
     org: str | None = None,
     org_none: bool = False,
+    tags: Sequence[str] = (),
+    not_tags: Sequence[str] = (),
 ) -> tuple[list[str], list]:
     clauses, params = [], []
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
     if org_none:
-        clauses.append("jobs.company = ''")
+        clauses.append(f"{_EFFECTIVE_ORG} = ''")
     elif org is not None:
-        clauses.append("jobs.company = ?")
+        clauses.append(f"{_EFFECTIVE_ORG} = ?")
         params.append(org)
     if scenario_id is not None:
         clauses.append(
@@ -1414,6 +1505,9 @@ def _composable_clauses(
             )"""
         )
         params.append(scenario_id)
+    tc, tp = _tag_clauses(tags, not_tags)
+    clauses += tc
+    params += tp
     return clauses, params
 
 
@@ -1431,12 +1525,15 @@ def search_jobs(
     scenario_id: int | None = None,
     org: str | None = None,
     org_none: bool = False,
+    tags: Sequence[str] = (),
+    not_tags: Sequence[str] = (),
 ) -> list[dict]:
     match = _fts_match_query(query)
     if match is None:
         return []
     clauses, params = _composable_clauses(
-        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none,
+        tags=tags, not_tags=not_tags,
     )
     if tabs:
         clauses = [_tabs_clause(tabs), *clauses]
@@ -1477,12 +1574,15 @@ def get_jobs_for_tabs(
     scenario_id: int | None = None,
     org: str | None = None,
     org_none: bool = False,
+    tags: Sequence[str] = (),
+    not_tags: Sequence[str] = (),
     scenario_none: bool = False,
     order: str = "change",
 ) -> list[dict]:
     clauses = [_tabs_clause(tabs)]
     _c, params = _composable_clauses(
-        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none,
+        tags=tags, not_tags=not_tags,
     )
     clauses += _c
     if scenario_none:
@@ -1509,11 +1609,14 @@ def get_jobs(
     org: str | None = None,
     scenario_gate: str | None = None,
     org_none: bool = False,
+    tags: Sequence[str] = (),
+    not_tags: Sequence[str] = (),
     order: str = "change",
 ) -> list[dict]:
     clauses, params = [], []
     _c, _p = _composable_clauses(
-        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none
+        source_id=source_id, scenario_id=scenario_id, org=org, org_none=org_none,
+        tags=tags, not_tags=not_tags,
     )
     clauses += _c
     params += _p
@@ -1546,9 +1649,13 @@ def get_job_counts(
     source_id: int | None = None,
     org: str | None = None,
     org_none: bool = False,
+    tags: Sequence[str] = (),
+    not_tags: Sequence[str] = (),
     q: str = "",
 ) -> dict[str, int]:
-    extra, eparams = _count_filter_sql(scenario_id, scenario_none, source_id, org, org_none)
+    extra, eparams = _count_filter_sql(
+        scenario_id, scenario_none, source_id, org, org_none, tags, not_tags
+    )
     counts = {"new": 0, "accepted": 0, "pending": 0, "rejected": 0, "trash": 0, "lead": 0, "not_relevant": 0}
 
     # Same FTS join/predicate search_jobs() uses, so tab counts reflect the
@@ -1596,15 +1703,16 @@ def get_job_counts(
 def _count_filter_sql(
     scenario_id: int | None, scenario_none: bool, source_id: int | None,
     org: str | None, org_none: bool = False,
+    tags: Sequence[str] = (), not_tags: Sequence[str] = (),
 ) -> tuple[str, list]:
     clauses, params = [], []
     if source_id is not None:
         clauses.append("jobs.source_id = ?")
         params.append(source_id)
     if org_none:
-        clauses.append("jobs.company = ''")
+        clauses.append(f"{_EFFECTIVE_ORG} = ''")
     elif org is not None:
-        clauses.append("jobs.company = ?")
+        clauses.append(f"{_EFFECTIVE_ORG} = ?")
         params.append(org)
     if scenario_id is not None:
         clauses.append(
@@ -1616,12 +1724,16 @@ def _count_filter_sql(
         clauses.append(
             "(scored.scored_count IS NOT NULL AND (gate.passed_count IS NULL OR gate.passed_count = 0))"
         )
+    tc, tp = _tag_clauses(tags, not_tags)
+    clauses += tc
+    params += tp
     return ("".join(" AND " + c for c in clauses), params)
 
 
 def get_distinct_companies(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
-        "SELECT DISTINCT company FROM jobs WHERE company != '' ORDER BY company COLLATE NOCASE"
+        f"SELECT DISTINCT {_EFFECTIVE_ORG} AS org FROM jobs "
+        "WHERE org != '' ORDER BY org COLLATE NOCASE"
     ).fetchall()
     return [r[0] for r in rows]
 

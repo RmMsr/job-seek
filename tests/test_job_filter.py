@@ -1,3 +1,6 @@
+from starlette.datastructures import QueryParams
+from app.job_filter import JobFilter
+from app.template_env import templates
 from app.job_filter import JobFilter
 
 
@@ -229,3 +232,53 @@ def test_cleared_drops_query_and_filters_keeps_statuses_and_order():
 
 def test_order_closing_is_valid():
     assert JobFilter.from_params({"order": "closing"}).order == "closing"
+
+
+
+def test_tags_parse_from_query_params_multi():
+    f = JobFilter.from_params(QueryParams("tag=Remote&tag=Language:+English&not_tag=Agency"))
+    assert f.tags == ("Remote", "Language: English")
+    assert f.not_tags == ("Agency",)
+
+
+def test_tags_parse_from_dict_list_or_str_and_dedupe():
+    f = JobFilter.from_params({"tag": ["Remote", "remote", "  "], "not_tag": "Agency"})
+    assert f.tags == ("Remote",)
+    assert f.not_tags == ("Agency",)
+
+
+def test_tag_in_both_lists_stays_include_only():
+    f = JobFilter.from_params({"tag": ["Remote"], "not_tag": ["remote"]})
+    assert f.tags == ("Remote",) and f.not_tags == ()
+
+
+def test_query_params_roundtrip_and_query_string():
+    f = JobFilter(tags=("Remote", "A B"), not_tags=("Agency",))
+    p = f.query_params()
+    assert p["tag"] == ["Remote", "A B"] and p["not_tag"] == ["Agency"]
+    assert "tag=Remote&tag=A+B&not_tag=Agency" in f.query_string()
+    assert JobFilter.from_params(p) == f
+    assert "tag" not in JobFilter().query_params()
+
+
+def test_jinja_urlencode_handles_lists():
+    out = templates.env.from_string("{{ p | urlencode }}").render(p=JobFilter(tags=("A B", "c")).query_params())
+    assert "tag=A+B&amp;tag=c" in out  # autoescaped, as in HTML attributes
+
+
+def test_tag_helpers():
+    f = JobFilter()
+    f = f.with_tag("Remote").with_tag("remote")
+    assert f.tags == ("Remote",)
+    f = f.with_tag_flipped("REMOTE")
+    assert f.tags == () and f.not_tags == ("Remote",)
+    f = f.with_tag_flipped("Remote")
+    assert f.tags == ("Remote",) and f.not_tags == ()
+    f = f.with_not_tag("Agency").without_tag("remote")
+    assert f.tags == () and f.not_tags == ("Agency",)
+
+
+def test_tags_narrow_and_clear():
+    f = JobFilter(not_tags=("X",))
+    assert f.is_narrowed
+    assert f.cleared().not_tags == ()

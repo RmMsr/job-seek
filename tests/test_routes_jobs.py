@@ -3206,3 +3206,65 @@ def test_job_link_icon_is_plain_link_not_copy_control(client, conn):
     assert "navigator.clipboard.writeText(full)" not in client.get("/jobs").text
 
 
+
+
+def _seed_tagged(conn):
+    sid = q.insert_source(conn, "s", "https://s.example", "generic_listing")
+    ids = {}
+    for title, tags in [("RemoteJob", ["Remote"]), ("AgencyJob", ["Remote", "Agency"]), ("PlainJob", [])]:
+        jid = q.insert_job(conn, source_id=sid, url=f"https://s.example/{title}", title=title, company="", raw_text="r")
+        q.update_job_pipeline(conn, jid, simplified_content="c", content_type="lead")
+        for t in tags:
+            q.add_job_tag(conn, jid, t)
+        ids[title] = jid
+    return ids
+
+
+def test_job_list_filters_by_tag_and_not_tag(client, conn):
+    _seed_tagged(conn)
+    html = client.get("/jobs?status=lead&tag=remote&not_tag=Agency").text
+    assert "RemoteJob" in html and "AgencyJob" not in html and "PlainJob" not in html
+
+
+def test_tag_filter_route_adds_include_and_pushes_url(client, conn):
+    _seed_tagged(conn)
+    resp = client.get("/jobs/tag-filter", params={"status": "lead", "name": "Agency", "mode": "include"},
+                      headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "AgencyJob" in resp.text and "RemoteJob" not in resp.text
+    assert resp.headers["HX-Push-Url"] == "/jobs?status=lead&tag=Agency"
+
+
+def test_tag_filter_route_exclude_keeps_existing_tags(client, conn):
+    _seed_tagged(conn)
+    resp = client.get("/jobs/tag-filter", params={"status": "lead", "tag": "Remote", "name": "Agency", "mode": "exclude"},
+                      headers={"HX-Request": "true"})
+    assert "RemoteJob" in resp.text and "AgencyJob" not in resp.text
+    assert resp.headers["HX-Push-Url"] == "/jobs?status=lead&tag=Remote&not_tag=Agency"
+
+
+def test_bulk_feedback_keeps_tag_filters(client, conn):
+    ids = _seed_tagged(conn)
+    resp = client.post("/jobs/bulk-feedback", data={
+        "job_ids": [ids["PlainJob"]], "status": "rejected", "note": "",
+        "status_filter": "lead", "tag_filter": ["Remote"], "not_tag_filter": ["Agency"],
+    })
+    assert resp.status_code == 200
+    assert "RemoteJob" in resp.text and "AgencyJob" not in resp.text
+
+
+def test_tag_filter_chips_and_hidden_inputs(client, conn):
+    _seed_tagged(conn)
+    html = client.get("/jobs?status=lead&tag=Remote&not_tag=Agency").text
+    assert "tag-chip-include" in html and "tag-chip-exclude" in html
+    assert '<input type="hidden" name="tag" value="Remote">' in html
+    assert '<input type="hidden" name="not_tag_filter" value="Agency" form="bulk-form">' in html
+    # flip link turns Remote into an exclusion and keeps Agency excluded
+    assert "not_tag=Agency&amp;not_tag=Remote" in html or "not_tag=Agency&not_tag=Remote" in html
+    assert 'hx-get="/jobs/tag-filter"' in html
+
+
+def test_filter_badge_counts_tag_filters(client, conn):
+    _seed_tagged(conn)
+    html = client.get("/jobs?status=lead&tag=Remote&not_tag=Agency").text
+    assert '<span class="tb-badge">2</span>' in html

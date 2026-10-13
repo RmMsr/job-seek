@@ -34,7 +34,7 @@ def _job_context(job: dict) -> str:
     prose = markdown_to_text(body)[:_JOB_CONTEXT_CAP]
     return (
         f"Title: {job.get('title', '')}\n"
-        f"Company: {job.get('company', '') or '(unknown)'}\n\n"
+        f"Company: {job.get('org', '') or '(unknown)'}\n\n"
         f"{prose}"
     )
 

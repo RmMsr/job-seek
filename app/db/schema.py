@@ -1323,6 +1323,29 @@ def _migrate_jobs_add_apply_by(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_add_manual_tags(conn: sqlite3.Connection) -> None:
+    # Additive: manual org override column + free tag tables. Runs last so
+    # earlier jobs-rebuild migrations can't drop the column.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    if cols and "company_override" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN company_override TEXT")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE
+        );
+        CREATE TABLE IF NOT EXISTS job_tags (
+            job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            PRIMARY KEY (job_id, tag_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_job_tags_tag ON job_tags(tag_id);
+        """
+    )
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     _migrate_sources_fetcher_type(conn)
@@ -1374,3 +1397,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_add_fit_score_override(conn)
     _migrate_jobs_backfill_published_at(conn)
     _migrate_jobs_add_apply_by(conn)
+    _migrate_add_manual_tags(conn)

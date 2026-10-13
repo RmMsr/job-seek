@@ -4,8 +4,34 @@ from dataclasses import dataclass, replace
 from typing import Mapping
 from urllib.parse import urlencode
 
+from app.tags import normalize_tag_name
+
 VALID_TABS = ("new", "lead", "accepted", "pending", "rejected", "not_relevant", "trash")
 VALID_ORDERS = ("change", "score", "age", "closing")
+
+
+def _param_list(params, key: str) -> list[str]:
+    if hasattr(params, "getlist"):
+        return list(params.getlist(key))
+    v = params.get(key)
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v] if v else []
+
+
+def _unique_names(raw: list[str], skip: tuple[str, ...] = ()) -> tuple[str, ...]:
+    seen = {s.casefold() for s in skip}
+    out: list[str] = []
+    for r in raw:
+        name = normalize_tag_name(r)
+        if name and name.casefold() not in seen:
+            seen.add(name.casefold())
+            out.append(name)
+    return tuple(out)
+
+
+def _drop(names: tuple[str, ...], name: str) -> tuple[str, ...]:
+    return tuple(n for n in names if n.casefold() != name.casefold())
 
 
 @dataclass(frozen=True)
@@ -27,9 +53,13 @@ class JobFilter:
     # status to the multi-tab search scope, but must never override an
     # explicit pick back to that combo.
     solo: bool = False
+    # Free manual tags: every name in `tags` must be on the job, none in
+    # `not_tags` may be. Compared case-insensitively.
+    tags: tuple[str, ...] = ()
+    not_tags: tuple[str, ...] = ()
 
     @classmethod
-    def from_params(cls, params: Mapping[str, str]) -> "JobFilter":
+    def from_params(cls, params: Mapping) -> "JobFilter":
         get = params.get
         raw_status = get("status") or ""
         picked: list[str] = []
@@ -61,7 +91,13 @@ class JobFilter:
 
         solo = (get("solo") or "").strip() == "1"
 
-        return cls(statuses, scenario_id, scenario_none, source_id, org, org_none, order_pick, query, solo)
+        tags = _unique_names(_param_list(params, "tag"))
+        not_tags = _unique_names(_param_list(params, "not_tag"), skip=tags)
+
+        return cls(
+            statuses, scenario_id, scenario_none, source_id, org, org_none, order_pick, query, solo,
+            tags, not_tags,
+        )
 
     @property
     def order(self) -> str:
@@ -80,14 +116,16 @@ class JobFilter:
             or self.source_id is not None
             or self.org is not None
             or self.org_none
+            or self.tags
+            or self.not_tags
         )
 
     @property
     def searching(self) -> bool:
         return bool(self.q)
 
-    def query_params(self) -> dict[str, str]:
-        out = {"status": ",".join(self.statuses)}
+    def query_params(self) -> dict[str, str | list[str]]:
+        out: dict[str, str | list[str]] = {"status": ",".join(self.statuses)}
         if self.scenario_none:
             out["scenario"] = "none"
         elif self.scenario_id is not None:
@@ -104,15 +142,22 @@ class JobFilter:
             out["q"] = self.q
         if self.solo:
             out["solo"] = "1"
+        if self.tags:
+            out["tag"] = list(self.tags)
+        if self.not_tags:
+            out["not_tag"] = list(self.not_tags)
         return out
+
+    def query_string(self) -> str:
+        return urlencode(self.query_params(), doseq=True)
 
     def query_suffix(self, *, detail: bool = False) -> str:
         if detail:
             return "?detail=1"
-        return "?" + urlencode(self.query_params())
+        return "?" + self.query_string()
 
     def cleared(self) -> "JobFilter":
-        """Drop the query and every scenario/source/org narrowing; keep statuses + order."""
+        """Drop the query and every scenario/source/org/tag narrowing; keep statuses + order."""
         return JobFilter(statuses=self.statuses, order_pick=self.order_pick)
 
     @property
@@ -146,3 +191,28 @@ class JobFilter:
 
     def with_org(self, org: str) -> "JobFilter":
         return replace(self, org=org)
+
+    def with_tag(self, name: str) -> "JobFilter":
+        name = normalize_tag_name(name)
+        if not name or any(t.casefold() == name.casefold() for t in self.tags):
+            return self
+        return replace(self, tags=(*self.tags, name), not_tags=_drop(self.not_tags, name))
+
+    def with_not_tag(self, name: str) -> "JobFilter":
+        name = normalize_tag_name(name)
+        if not name or any(t.casefold() == name.casefold() for t in self.not_tags):
+            return self
+        return replace(self, not_tags=(*self.not_tags, name), tags=_drop(self.tags, name))
+
+    def with_tag_flipped(self, name: str) -> "JobFilter":
+        # Flip using the stored spelling, so "REMOTE" flips "Remote" as-is.
+        for t in self.tags:
+            if t.casefold() == name.casefold():
+                return self.with_not_tag(t)
+        for t in self.not_tags:
+            if t.casefold() == name.casefold():
+                return self.with_tag(t)
+        return self.with_tag(name)
+
+    def without_tag(self, name: str) -> "JobFilter":
+        return replace(self, tags=_drop(self.tags, name), not_tags=_drop(self.not_tags, name))

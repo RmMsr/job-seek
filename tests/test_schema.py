@@ -20,7 +20,7 @@ def test_init_db_creates_all_tables(conn):
     init_db(conn)
     assert _tables(conn) == {
         "profile", "cv_versions", "base_cvs", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
-        "tasks", "inbox_items", "job_events",
+        "tasks", "inbox_items", "job_events", "tags", "job_tags",
     }
 
 
@@ -29,7 +29,7 @@ def test_init_db_is_idempotent(conn):
     init_db(conn)  # should not raise
     assert _tables(conn) == {
         "profile", "cv_versions", "base_cvs", "cv_settings", "cv_scope_options", "job_cv", "sources", "scenarios", "criteria", "jobs", "job_scores", "fetch_runs", "scenario_feedback",
-        "tasks", "inbox_items", "job_events",
+        "tasks", "inbox_items", "job_events", "tags", "job_tags",
     }
 
 
@@ -1911,3 +1911,12 @@ def test_migrate_jobs_add_apply_by_adds_column_to_existing_table(conn):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
     assert "apply_by" in cols
     _migrate_jobs_add_apply_by(conn)  # idempotent
+
+
+def test_manual_tags_migration_is_idempotent(conn):
+    from app.db.schema import init_db
+    init_db(conn)  # second run must be a no-op
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    assert "company_override" in cols
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"tags", "job_tags"} <= tables

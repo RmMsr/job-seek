@@ -2,7 +2,7 @@
 {% set p = request.url.path %}
 <header class="job-header">
   <h1 class="job-header-title">{{ job.title or "(no title)" }}</h1>
-  {% if job.company %}<p class="job-header-org">{{ job.company }}</p>{% endif %}
+  {% if job.org %}<p class="job-header-org">{{ job.org }}</p>{% endif %}
   {{ macros.meta_tags(job) }}
   <nav class="job-subnav">
     <span class="job-subnav-tabs">

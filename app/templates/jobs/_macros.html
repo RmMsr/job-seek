@@ -59,7 +59,13 @@
 {% endif %}
 {% endmacro %}
 
-{% macro meta_tags(job, filter=none) %}
+{#- Pill row shared by list rows, expanded cards and the detail header.
+    Organization and manual tags are editable inline. Every editable <dd>
+    stops click/key propagation so the list row (_row.html) doesn't toggle;
+    edit controls target the enclosing <dl> (no ids: one job can appear in
+    both header and card on a page). filter=none means the detail page. -#}
+{% macro meta_tags(job, filter=none, open_tag_input=false) %}
+{% set sfx = qsuffix(filter, detail=filter is none) %}
 <dl class="job-tags">
   <dt class="sr-only">Status</dt>
   <dd>{{ status_pill(job) }}</dd>
@@ -75,17 +81,59 @@
     {% else %}<span class="tag tag-accent">{{ name }}</span>{% endif %}</dd>
   {% endfor %}
   {% endif %}
-  {% if job.company %}
   <dt class="sr-only">Organization</dt>
-  <dd>{% if filter %}<a class="tag tag-org" onclick="event.stopPropagation()"
-      hx-get="/jobs?{{ filter.with_org(job.company).query_params() | urlencode }}"
-      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ job.company }}</a>
-    {% else %}<span class="tag tag-org">{{ job.company }}</span>{% endif %}</dd>
-  {% endif %}
+  <dd class="tag-editable" onclick="event.stopPropagation()" onkeyup="event.stopPropagation()" onkeydown="event.stopPropagation()">
+    {%- if job.org %}
+    {%- set org_cls = "tag tag-org" ~ (" tag-org-manual" if job.company_override else "") %}
+    {%- set org_title = ("Set manually" ~ (" — extracted: " ~ job.company if job.company else "")) if job.company_override else "" %}
+    {% if filter %}<a class="{{ org_cls }}"{% if org_title %} title="{{ org_title }}"{% endif %}
+      hx-get="/jobs?{{ filter.with_org(job.org).query_params() | urlencode }}"
+      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ job.org }}</a>
+    {%- else %}<span class="{{ org_cls }}"{% if org_title %} title="{{ org_title }}"{% endif %}>{{ job.org }}</span>{% endif %}
+    <button type="button" class="tag-edit-btn" aria-label="Edit organization" title="Edit organization"
+      onclick="openInlineEdit(this)">&#9998;</button>
+    {%- else %}
+    <button type="button" class="tag tag-add" onclick="openInlineEdit(this)">+ organization</button>
+    {%- endif %}
+    <form class="tag-inline-form" hidden
+      hx-post="/jobs/{{ job.id }}/organization{{ sfx }}"
+      hx-target="closest dl.job-tags" hx-swap="outerHTML">
+      <input name="name" list="org-options" value="{{ job.org or '' }}"
+        aria-label="Organization" autocomplete="off" placeholder="Organization"
+        onkeydown="if (event.key === 'Escape') { this.value = this.defaultValue; this.blur(); }"
+        onblur="closeInlineEdit(this.form)">
+    </form>
+  </dd>
   <dt class="sr-only">Source</dt>
   <dd>{% if filter and job.source_id %}<a class="tag tag-source" onclick="event.stopPropagation()"
       hx-get="/jobs?{{ filter.with_source_id(job.source_id).query_params() | urlencode }}"
       hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ job.source_name or "" }}</a>
     {% else %}<span class="tag tag-source">{{ job.source_name or "" }}</span>{% endif %}</dd>
+  <dt class="sr-only">Tags</dt>
+  {% for t in job.tags_json | job_tags %}
+  {% set key, sep, val = t.name.partition(": ") %}
+  {% set label %}{% if sep and key and val %}<span class="tag-key">{{ key }}:</span> {{ val }}{% else %}{{ t.name }}{% endif %}{% endset %}
+  <dd class="tag-manual-group" onclick="event.stopPropagation()" onkeyup="event.stopPropagation()" onkeydown="event.stopPropagation()">
+    {%- if filter %}<a class="tag tag-manual" title="Filter by this tag"
+      hx-get="/jobs?{{ filter.with_tag(t.name).query_params() | urlencode }}"
+      hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">{{ label }}</a>
+    {%- else %}<span class="tag tag-manual">{{ label }}</span>{% endif -%}
+    <button type="button" class="tag-remove"
+      hx-delete="/jobs/{{ job.id }}/tags/{{ t.id }}{{ sfx }}"
+      hx-target="closest dl.job-tags" hx-swap="outerHTML"
+      aria-label="Remove tag {{ t.name }}" title="Remove tag">&times;</button>
+  </dd>
+  {% endfor %}
+  <dd class="tag-editable" onclick="event.stopPropagation()" onkeyup="event.stopPropagation()" onkeydown="event.stopPropagation()">
+    <button type="button" class="tag tag-add" onclick="openInlineEdit(this)"{% if open_tag_input %} hidden{% endif %}>+ tag</button>
+    <form class="tag-inline-form"{% if not open_tag_input %} hidden{% endif %}
+      hx-post="/jobs/{{ job.id }}/tags{{ sfx }}"
+      hx-target="closest dl.job-tags" hx-swap="outerHTML">
+      <input name="name" list="tag-options" value=""
+        aria-label="Add tag" autocomplete="off" placeholder="Tag"{% if open_tag_input %} autofocus{% endif %}
+        onkeydown="if (event.key === 'Escape') { this.value = ''; this.blur(); }"
+        onblur="closeInlineEdit(this.form)">
+    </form>
+  </dd>
 </dl>
 {% endmacro %}

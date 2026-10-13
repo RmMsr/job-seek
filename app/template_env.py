@@ -1,4 +1,7 @@
 from __future__ import annotations
+import json
+from collections.abc import Mapping
+from urllib.parse import urlencode as _urlencode
 from pathlib import Path
 from fastapi.templating import Jinja2Templates
 from app.markdown_render import render_markdown, render_markdown_inline, markdown_to_text
@@ -64,3 +67,25 @@ def short_url(url: str, limit: int = 50) -> str:
 
 
 templates.env.filters["short_url"] = short_url
+
+
+def job_tags(value: str | None) -> list[dict]:
+    """Decode a job row's tags_json column (see queries._GATE_SELECT)."""
+    return json.loads(value) if value else []
+
+
+templates.env.filters["job_tags"] = job_tags
+
+
+_jinja_urlencode = templates.env.filters["urlencode"]
+
+
+def urlencode_multi(value):
+    """Jinja's urlencode, but list values in a mapping become repeated params
+    (JobFilter.query_params() carries tag/not_tag lists)."""
+    if isinstance(value, Mapping):
+        return _urlencode(value, doseq=True)
+    return _jinja_urlencode(value)
+
+
+templates.env.filters["urlencode"] = urlencode_multi
