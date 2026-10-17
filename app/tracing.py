@@ -7,25 +7,24 @@ _initialized = False
 
 
 def _setup(config: Config) -> None:
-    from opentelemetry import trace
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from openinference.instrumentation.openai import OpenAIInstrumentor
+    import openlit
 
-    provider = TracerProvider(
-        resource=Resource.create({"service.name": config.tracing_project})
+    # openlit probes ~60 libraries and logs an INFO line for each one missing.
+    logging.getLogger("openlit").setLevel(logging.WARNING)
+    openlit.init(
+        otlp_endpoint=config.tracing_endpoint,
+        application_name=config.tracing_project,
+        environment="production",
+        disable_batch=False,
+        capture_message_content=True,
+        # Only LLM calls are of interest; per-request HTTP spans (incl. the
+        # 2s /tasks/active poll) would bury them.
+        disabled_instrumentors=["fastapi", "starlette", "httpx", "requests", "urllib", "urllib3"],
     )
-    provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=config.tracing_endpoint))
-    )
-    trace.set_tracer_provider(provider)
-    OpenAIInstrumentor().instrument()
 
 
 def init_tracing(config: Config) -> None:
-    """Enable OpenInference tracing of LLM calls when [tracing].endpoint is set.
+    """Enable OpenLit tracing of LLM calls when [tracing].endpoint is set.
     No-op (and imports nothing) otherwise. Safe to call more than once."""
     global _initialized
     if _initialized or not config.tracing_endpoint:
@@ -33,6 +32,6 @@ def init_tracing(config: Config) -> None:
     try:
         _setup(config)
         _initialized = True
-        logger.info("LLM tracing enabled -> %s", config.tracing_endpoint)
+        logger.info("LLM tracing enabled via OpenLit -> %s", config.tracing_endpoint)
     except Exception:
         logger.warning("LLM tracing setup failed; continuing without it", exc_info=True)

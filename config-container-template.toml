@@ -9,5 +9,8 @@ path = "data/job-seek.db"
 profile_dir = "data/browser-profile"
 
 # [tracing]
-# endpoint = "http://localhost:6006/v1/traces"   # OTLP-HTTP collector (e.g. Phoenix); omit to disable
+# Uncomment to export LLM call traces to an OTLP-HTTP collector (e.g. Phoenix) — omit to disable.
+# Inside this container "localhost" is the container itself, so point at the host via
+# host.containers.internal (or at "localhost" if the collector shares a podman pod with this app).
+# endpoint = "http://host.containers.internal:6006/v1/traces"
 # project_name = "job-seek"
