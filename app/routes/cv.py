@@ -4,7 +4,7 @@ import logging
 import sqlite3
 import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from app.db import queries as q
 from app.deps import get_db
 from app.markdown_render import markdown_to_text
@@ -56,6 +56,14 @@ def _job_notes(conn, job: dict) -> str:
 
 def _job_base_cv_id(conn: sqlite3.Connection, job_id: int) -> int:
     return q.resolve_job_base_cv_id(conn, job_id)
+
+
+def _job_css(conn: sqlite3.Connection, job_id: int) -> str:
+    """Global CV CSS plus this job's optional override, appended so it wins."""
+    css = q.get_cv_settings(conn)["css"]
+    row = q.get_job_cv(conn, job_id)
+    override = row["css_override"] if row else ""
+    return f"{css}\n{override}" if override.strip() else css
 
 
 def _resolved_settings(conn: sqlite3.Connection, base_cv_id: int) -> dict:
@@ -396,7 +404,6 @@ def cv_preview_html(job_id: int, variant: str = "tailored", version: int | None 
     job = q.get_job(conn, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    settings = q.get_cv_settings(conn)
     if variant == "base":
         markdown = q.resolve_base_cv(conn, _job_base_cv_id(conn, job_id))
     elif version is not None:
@@ -412,7 +419,7 @@ def cv_preview_html(job_id: int, variant: str = "tailored", version: int | None 
     if not doc_write_available():
         raise HTTPException(status_code=503, detail="doc-write-cli is not installed")
     try:
-        return HTMLResponse(render_preview_html(markdown, settings["css"]))
+        return HTMLResponse(render_preview_html(markdown, _job_css(conn, job_id)))
     except CvRenderError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -445,7 +452,6 @@ def cv_diff_html(job_id: int, request: Request, version: int | None = None,
         )
     else:
         against_content = row["base_cv_snapshot"]
-    settings = q.get_cv_settings(conn)
     try:
         annotated = build_cv_diff(against_content, tailored).annotated_markdown
     except Exception:
@@ -453,7 +459,7 @@ def cv_diff_html(job_id: int, request: Request, version: int | None = None,
         annotated = tailored
     if doc_write_available():
         try:
-            return HTMLResponse(render_diff_html(annotated, settings["css"]))
+            return HTMLResponse(render_diff_html(annotated, _job_css(conn, job_id)))
         except CvRenderError as exc:
             raise HTTPException(status_code=503, detail=str(exc))
     body_html = _markdown.markdown(annotated, extensions=["nl2br"])
@@ -1011,6 +1017,19 @@ async def cv_save_scope(job_id: int, request: Request,
                                       _workbench_ctx(conn, job_id))
 
 
+@router.post("/jobs/{job_id}/cv/save-css")
+async def cv_save_job_css(job_id: int, request: Request,
+                          conn: sqlite3.Connection = Depends(get_db)):
+    _require_job(conn, job_id)
+    form = await request.form()
+    css = form.get("css", "")
+    err = validate_css(css)
+    if err:
+        return PlainTextResponse(err, status_code=400)
+    q.upsert_job_cv(conn, job_id, css_override=css)
+    return Response(status_code=204)
+
+
 @router.post("/jobs/{job_id}/cv/save-tailored", response_class=HTMLResponse)
 async def cv_save_tailored(job_id: int, request: Request,
                           conn: sqlite3.Connection = Depends(get_db)):
@@ -1101,9 +1120,8 @@ def cv_pdf(job_id: int, version: int | None = None, conn: sqlite3.Connection = D
         content = row["tailored_cv"]
     if not content:
         raise HTTPException(status_code=404, detail="No tailored CV")
-    settings = q.get_cv_settings(conn)
     try:
-        data = render_pdf(content, settings["css"])
+        data = render_pdf(content, _job_css(conn, job_id))
     except CvRenderError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return Response(content=data, media_type="application/pdf",

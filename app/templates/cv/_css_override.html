@@ -1,0 +1,17 @@
+{# Per-job CSS override, appended after the global CSS (Advanced CV
+   settings) for every render of this job. Reload saves via
+   /jobs/{id}/cv/save-css and redraws the preview stage — see the
+   .cv-css-reload handler in base.html. #}
+{% set _css = job_cv.css_override if job_cv else '' %}
+<details class="cv-css-override">
+  <summary>Custom CSS for this job
+    <span class="cv-css-active"{% if not _css.strip() %} hidden{% endif %}>active</span></summary>
+  <p class="muted">Appended after the global CSS from
+    <a href="/cv/advanced">Advanced CV settings</a>; applies to this job's previews and PDF.</p>
+  <textarea name="css" spellcheck="false">{{ _css }}</textarea>
+  <div class="cv-css-actions">
+    <button type="button" class="btn btn-subtle cv-css-reload"
+            data-save-url="/jobs/{{ job.id }}/cv/save-css">&#8635; Reload preview</button>
+    <span class="cv-css-status" aria-live="polite"></span>
+  </div>
+</details>

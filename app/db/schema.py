@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS job_cv (
     edited_at TEXT,
     guardrails_checked_at TEXT,
     plan_context_hash TEXT,
+    css_override TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1047,6 +1048,13 @@ def _migrate_job_cv_add_guardrails_hash(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_job_cv_add_css_override(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(job_cv)")}
+    if "css_override" not in cols:
+        conn.execute("ALTER TABLE job_cv ADD COLUMN css_override TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+
+
 def _migrate_cv_content_to_versions(conn: sqlite3.Connection) -> None:
     """base_cv / tailored_cv text and the finalized_at flag move out of
     cv_settings / job_cv into cv_versions, each entity's live content carried
@@ -1398,3 +1406,4 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_jobs_backfill_published_at(conn)
     _migrate_jobs_add_apply_by(conn)
     _migrate_add_manual_tags(conn)
+    _migrate_job_cv_add_css_override(conn)

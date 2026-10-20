@@ -539,6 +539,15 @@
       border-radius: 6px; background: var(--ground); color: var(--text-primary);
       font-family: ui-monospace, "JetBrains Mono", monospace;
     }
+    .cv-css-override { font-size: 0.85em; margin: 0.4rem 0; }
+    .cv-css-override summary { cursor: pointer; color: var(--text-muted); }
+    .cv-css-override p { margin: 0.4rem 0; }
+    .cv-css-override textarea { width: 100%; min-height: 8rem; box-sizing: border-box;
+      font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.95em; }
+    .cv-css-actions { display: flex; gap: 0.6rem; align-items: center; margin-top: 0.4rem; }
+    .cv-css-active { font-size: 0.8em; padding: 0 0.45em; border-radius: 0.5em;
+      border: 1px solid var(--border); margin-left: 0.3em; }
+    .cv-css-status[data-state="error"] { color: var(--alert); }
     .cv-scope-label { font-weight: 600; }
     .cv-latitude { margin-bottom: 0.75rem; }
     .cv-latitude .cv-scope-row { margin-top: 0.3rem; }
@@ -2212,6 +2221,44 @@ document.body.addEventListener('input', function (e) {
     });
     var stage = bar.parentNode.querySelector('.cv-preview-stage');
     if (stage) activate(stage, tab.dataset.variant);
+  });
+
+  // Per-job CSS override: save, then drop every iframe's src back to data-src
+  // and re-activate the visible tab, so it re-renders now and the others
+  // re-render lazily on their next activation.
+  document.body.addEventListener('click', function (e) {
+    var btn = e.target.closest('.cv-css-reload');
+    if (!btn) return;
+    var panel = btn.closest('.cv-css-override');
+    var status = panel.querySelector('.cv-css-status');
+    var css = panel.querySelector('textarea[name="css"]').value;
+    var body = new FormData();
+    body.append('css', css);
+    btn.disabled = true;
+    status.dataset.state = '';
+    status.textContent = 'Saving…';
+    fetch(btn.dataset.saveUrl, { method: 'POST', body: body })
+      .then(function (r) {
+        if (r.ok) return '';
+        return r.text().then(function (t) { throw new Error(t || 'Save failed'); });
+      })
+      .then(function () {
+        status.textContent = '';
+        panel.querySelector('.cv-css-active').hidden = !css.trim();
+        var stage = (panel.closest('#cv-preview-pane') || document).querySelector('.cv-preview-stage');
+        if (!stage) return;
+        stage.querySelectorAll('iframe.cv-preview-doc').forEach(function (f) {
+          var src = f.getAttribute('src');
+          if (src) { f.setAttribute('data-src', src); f.removeAttribute('src'); }
+        });
+        var active = stage.querySelector('.cv-preview-doc.is-active');
+        if (active) activate(stage, active.dataset.variant);
+      })
+      .catch(function (err) {
+        status.dataset.state = 'error';
+        status.textContent = err.message;
+      })
+      .finally(function () { btn.disabled = false; });
   });
 
   // Called by the task-poll code when a task finishes, so a failed regen that

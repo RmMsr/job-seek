@@ -643,3 +643,91 @@ def test_history_meta_shows_age_type_parent_note_in_order(client, conn):
     label_pos = history.rindex("Applied plan", 0, parent_pos)
     note_pos = history.index("scope-beta", parent_pos)
     assert label_pos < parent_pos < note_pos
+
+
+def _capture_css(target):
+    """Patch app.routes.cv.<target> and return the list of css args it got."""
+    from unittest.mock import patch
+    seen = []
+    def fake(markdown, css):
+        seen.append(css)
+        return b"%PDF" if target == "render_pdf" else "<html></html>"
+    return seen, patch(f"app.routes.cv.{target}", side_effect=fake)
+
+
+def test_job_renders_append_css_override(client, conn):
+    from unittest.mock import patch
+    jid = _job(conn)
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
+                       css="h1{color:red}", default_scope=["select", "reorder"])
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n", css_override="h1{color:blue}",
+                    base_cv_snapshot="# Me")
+    expected = "h1{color:red}\nh1{color:blue}"
+    with patch("app.routes.cv.doc_write_available", return_value=True):
+        for target, url in [
+            ("render_preview_html", f"/jobs/{jid}/cv/preview.html?variant=base"),
+            ("render_preview_html", f"/jobs/{jid}/cv/preview.html?variant=tailored"),
+            ("render_diff_html", f"/jobs/{jid}/cv/diff.html"),
+            ("render_pdf", f"/jobs/{jid}/cv.pdf"),
+        ]:
+            seen, p = _capture_css(target)
+            with p:
+                assert client.get(url).status_code == 200, url
+            assert seen == [expected], url
+
+
+def test_job_renders_use_global_css_without_override(client, conn):
+    from unittest.mock import patch
+    jid = _job(conn)
+    q.save_cv_settings(conn, base_instruction="", base_guardrails="",
+                       css="h1{color:red}", default_scope=["select", "reorder"])
+    q.upsert_job_cv(conn, jid, tailored_cv="# Draft\n")
+    seen, p = _capture_css("render_preview_html")
+    with patch("app.routes.cv.doc_write_available", return_value=True), p:
+        client.get(f"/jobs/{jid}/cv/preview.html?variant=tailored")
+    assert seen == ["h1{color:red}"]
+
+
+def test_save_css_override_persists(client, conn):
+    jid = _job(conn)
+    r = client.post(f"/jobs/{jid}/cv/save-css", data={"css": "h1{color:blue}"})
+    assert r.status_code == 204
+    assert q.get_job_cv(conn, jid)["css_override"] == "h1{color:blue}"
+    r = client.post(f"/jobs/{jid}/cv/save-css", data={"css": ""})
+    assert r.status_code == 204
+    assert q.get_job_cv(conn, jid)["css_override"] == ""
+
+
+def test_save_css_override_rejects_unsafe_css(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, css_override="h1{color:blue}")
+    r = client.post(f"/jobs/{jid}/cv/save-css", data={"css": "@import 'x.css';"})
+    assert r.status_code == 400
+    assert "@import" in r.text
+    assert q.get_job_cv(conn, jid)["css_override"] == "h1{color:blue}"
+
+
+def test_save_css_override_404_for_missing_job(client):
+    assert client.post("/jobs/999/cv/save-css", data={"css": ""}).status_code == 404
+
+
+def test_preview_pane_has_css_override_panel_below_help(client, conn):
+    jid = _job(conn)
+    text = client.get(f"/jobs/{jid}/cv/preview").text
+    assert '<details class="cv-css-override"' in text
+    assert text.index('class="cv-help"') < text.index('class="cv-css-override"')
+    assert f'data-save-url="/jobs/{jid}/cv/save-css"' in text
+    assert 'class="btn btn-subtle cv-css-reload"' in text
+    panel = text[text.index('class="cv-css-override"'):]
+    panel = panel[:panel.index("</details>")]
+    assert '<span class="cv-css-active" hidden>' in panel
+
+
+def test_preview_pane_css_override_shows_value_and_active_badge(client, conn):
+    jid = _job(conn)
+    q.upsert_job_cv(conn, jid, css_override="h1{color:blue}")
+    text = client.get(f"/jobs/{jid}/cv/preview").text
+    panel = text[text.index('class="cv-css-override"'):]
+    panel = panel[:panel.index("</details>")]
+    assert "h1{color:blue}</textarea>" in panel
+    assert '<span class="cv-css-active">active</span>' in panel

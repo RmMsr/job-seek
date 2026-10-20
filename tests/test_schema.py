@@ -1366,7 +1366,7 @@ def test_cv_settings_and_job_cv_columns_after_version_migration():
         "handled_suggestions", "guardrail_findings", "change_report", "base_hash",
         "base_cv_snapshot", "guardrails_hash", "plan_generated_at", "directives_edited_at",
         "generated_at", "scope_edited_at", "edited_at", "guardrails_checked_at",
-        "plan_context_hash", "updated_at",
+        "plan_context_hash", "css_override", "updated_at",
     }
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(cv_versions)")}
     assert cols == {
@@ -1635,6 +1635,24 @@ def test_init_db_drops_cv_scope_options_is_baseline(conn):
     assert "is_baseline" not in cols
     # the pre-existing row survives
     assert conn.execute("SELECT description FROM cv_scope_options WHERE name='correct'").fetchone()[0] == "keep me"
+
+
+def test_init_db_adds_job_cv_css_override_defaulting_empty(conn):
+    conn.executescript(
+        """
+        CREATE TABLE job_cv (
+            job_id INTEGER PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT '[]',
+            plan TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO job_cv (job_id) VALUES (1)")
+    conn.commit()
+    init_db(conn)
+    assert conn.execute("SELECT css_override FROM job_cv WHERE job_id = 1").fetchone()[0] == ""
+    init_db(conn)  # idempotent
 
 
 def test_init_db_adds_job_cv_handled_suggestions_defaulting_empty(conn):
