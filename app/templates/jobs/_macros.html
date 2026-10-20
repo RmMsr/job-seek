@@ -98,7 +98,7 @@
     <form class="tag-inline-form" hidden
       hx-post="/jobs/{{ job.id }}/organization{{ sfx }}"
       hx-target="closest dl.job-tags" hx-swap="outerHTML">
-      <input name="name" list="org-options" value="{{ job.org or '' }}"
+      <input name="name" data-suggest="org-options" value="{{ job.org or '' }}"
         aria-label="Organization" autocomplete="off" placeholder="Organization"
         onkeydown="if (event.key === 'Escape') { this.value = this.defaultValue; this.blur(); }"
         onblur="closeInlineEdit(this.form)">
@@ -129,7 +129,7 @@
     <form class="tag-inline-form"{% if not open_tag_input %} hidden{% endif %}
       hx-post="/jobs/{{ job.id }}/tags{{ sfx }}"
       hx-target="closest dl.job-tags" hx-swap="outerHTML">
-      <input name="name" list="tag-options" value=""
+      <input name="name" data-suggest="tag-options" value=""
         aria-label="Add tag" autocomplete="off" placeholder="Tag"{% if open_tag_input %} autofocus{% endif %}
         onkeydown="if (event.key === 'Escape') { this.value = ''; this.blur(); }"
         onblur="closeInlineEdit(this.form)">

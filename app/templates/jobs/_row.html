@@ -22,7 +22,8 @@
       title="Open job page" aria-label="Open job page"
       onclick="event.stopPropagation()">&#128279;</a>
     {% if job.stale_badge %}
-      <p class="stale-note">
+      {% if job.move_prompt %}{% include "jobs/_move_prompt.html" %}{% endif %}
+      <p class="stale-note"{% if job.move_prompt %} hidden{% endif %}>
         {% if job.stale_badge.href %}
           <a href="{{ job.stale_badge.href }}" onclick="event.stopPropagation()">{{ job.stale_badge.label }} &rarr;</a>
         {% else %}

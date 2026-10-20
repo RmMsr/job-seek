@@ -46,7 +46,7 @@ class JobFilter:
     order_pick: str | None = None
     q: str = ""
     # Set by an explicit single-status pick (a tab/More-panel link, the mobile
-    # status <select>, or a Combine checkbox toggle) -- distinguishes "the
+    # status <select>, or the Combine form's Apply) -- distinguishes "the
     # user chose exactly this one status" from "statuses defaulted to a
     # single tab because nothing else was specified". Search seeding
     # (app/routes/jobs.py's _effective_tabs) widens an untouched single
@@ -61,12 +61,14 @@ class JobFilter:
     @classmethod
     def from_params(cls, params: Mapping) -> "JobFilter":
         get = params.get
-        raw_status = get("status") or ""
+        # `status` may repeat (the Combine form's checkboxes) and/or be
+        # comma-joined (links built from query_params()); merge them all.
         picked: list[str] = []
-        for part in raw_status.split(","):
-            part = part.strip()
-            if part in VALID_TABS and part not in picked:
-                picked.append(part)
+        for raw_status in _param_list(params, "status"):
+            for part in (raw_status or "").split(","):
+                part = part.strip()
+                if part in VALID_TABS and part not in picked:
+                    picked.append(part)
         statuses = tuple(picked) or ("new",)
 
         raw_scenario = (get("scenario") or get("scenario_id") or "").strip()

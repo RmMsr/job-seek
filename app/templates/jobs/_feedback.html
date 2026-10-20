@@ -10,6 +10,7 @@
   <a href="/jobs/{{ job.id }}" class="job-link-icon"
     title="Open job page" aria-label="Open job page"
     onclick="event.stopPropagation()">&#128279;</a>
+  {% if job.move_prompt %}{% include "jobs/_move_prompt.html" %}{% endif %}
   {% if is_detail_page %}
   <div class="job-detail-extra">
     <div class="job-detail-meta">

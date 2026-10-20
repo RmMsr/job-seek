@@ -2710,14 +2710,14 @@ def test_no_after_title_badge(client, conn):
     assert "status-pill" not in header
 
 
-def test_tab_checkbox_link_toggles_one_status(client, conn):
+def test_combine_panel_has_checkbox_per_status(client, conn):
     _seed(conn)
     html = client.get("/jobs?status=new").text
-    # the Combine panel always renders a toggle checkbox for all 7 statuses,
+    # the Combine panel always renders a checkbox for all 7 statuses,
     # even in single-status mode (multi-select is secondary, not hidden)
     assert html.count('class="tb-check-row"') == 7
-    # an "add Accepted to the view" checkbox pointing at status=new,accepted
-    assert "status=new%2Caccepted" in html or "status=new,accepted" in html
+    assert 'name="status" value="new" checked' in html
+    assert 'name="status" value="accepted">' in html
 
 
 def test_search_view_keeps_tab_bar(client, conn):
@@ -2738,10 +2738,10 @@ def test_search_tab_bar_shows_seeded_scope(client, conn):
     # inside the More panel).
     assert html.count('class="tb-tab active"') == 4
     assert 'class="tb-more-link active"' in html
-    # a checkbox toggle to add Trash carries the whole seeded scope (pending included) + the query
-    assert ("status=new%2Clead%2Caccepted%2Cpending%2Crejected%2Ctrash" in html
-            or "status=new,lead,accepted,pending,rejected,trash" in html)
-    assert "q=kappa" in html
+    # the Combine checkboxes start from the whole seeded scope (pending included)
+    for tab in ("new", "lead", "accepted", "pending", "rejected"):
+        assert f'name="status" value="{tab}" checked' in html
+    assert 'name="status" value="trash">' in html
 
 
 def test_status_marker_carries_full_set(client, conn):
@@ -3268,3 +3268,166 @@ def test_filter_badge_counts_tag_filters(client, conn):
     _seed_tagged(conn)
     html = client.get("/jobs?status=lead&tag=Remote&not_tag=Agency").text
     assert '<span class="tb-badge">2</span>' in html
+
+
+def test_combine_panel_is_form_with_apply_and_no_per_checkbox_requests(client, conn):
+    _seed(conn)
+    html = client.get("/jobs?status=new&org=Acme&tag=Remote&tag=Agency").text
+    form_tag, rest = html.split('<form class="tb-panel tb-combine-form"', 1)[1].split(">", 1)
+    panel = rest.split("</form>", 1)[0]
+    assert 'hx-get="/jobs"' in form_tag
+    # the current narrowing is carried along with the Apply
+    assert """hx-vals='{"org": "Acme", "tag": ["Remote", "Agency"]}'""" in form_tag
+    assert panel.count('type="checkbox" name="status"') == 7
+    assert 'name="status" value="new" checked' in panel
+    assert "hx-get" not in panel  # checkboxes send nothing on their own
+    assert "Apply</button>" in panel
+    assert 'name="solo" value="1"' in panel
+
+
+def test_tag_and_org_inputs_use_compact_suggest_not_datalist(client, conn):
+    _seed(conn)
+    html = client.get("/jobs?status=new").text
+    assert 'list="tag-options"' not in html and 'list="org-options"' not in html
+    assert 'id="tb-tag" name="name" data-suggest="tag-options"' in html
+    assert 'name="name" data-suggest="org-options"' in html
+    assert html.count('data-suggest="tag-options"') >= 2  # toolbar + row's inline tag editor
+    # the datalists stay as the data source
+    assert '<datalist id="tag-options"' in html and '<datalist id="org-options"' in html
+
+
+def test_jobs_list_accepts_repeated_status_params(client, conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    _seed_searchable(conn, sid, "http://s/1", "Kappa Engineer")
+    _seed_searchable(conn, sid, "http://s/2", "Kappa Analyst", status="accepted")
+    html = client.get("/jobs?status=new&status=accepted&solo=1").text
+    assert "Kappa Engineer" in html and "Kappa Analyst" in html
+    assert html.count('class="tb-tab active"') == 2
+
+
+# --- move prompt after single-job actions ---------------------------------
+
+def _fake_reprocess_full(score):
+    def fake(conn, client, model, job, scenarios, profile, progress_prefix=""):
+        q.reset_job(conn, job["id"])
+        q.update_job_pipeline(conn, job["id"], simplified_content="clean", content_type="job_posting",
+                              title=job["title"], headline="", summary="s")
+        q.upsert_job_score(conn, job["id"], scenarios[0]["id"], score, "r", "h2")
+        q.mark_job_evaluation_complete(conn, job["id"])
+        yield "Reset complete"
+    return fake
+
+
+def _fake_reevaluate_to(score):
+    def fake(conn, client, model, job, scenarios, profile, progress_prefix=""):
+        q.upsert_job_score(conn, job["id"], scenarios[0]["id"], score, "r", "h2")
+        yield "Scored"
+    return fake
+
+
+def _run(conn, kind, params, target, fake):
+    task = q.enqueue_task(conn, kind=kind, params=params)
+    with patch(target, side_effect=fake):
+        execute_task(conn, MagicMock(), "model", MagicMock(), task)
+    return q.get_task(conn, task["id"])["result"]
+
+
+def test_reset_accepted_job_shows_move_prompt_with_keep(conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    result = _run(conn, "job_reset", {"job_id": jid, "filter": {"status": "accepted"}},
+                  "app.routes.jobs.run_reprocess_job", _fake_reprocess_full(0.95))
+    html = result["html_chunks"][0]
+    assert 'class="move-prompt"' in html
+    assert "Reset moved this job from <strong>Accepted</strong> to <strong>New</strong>." in html
+    assert f'hx-post="/jobs/{jid}/keep-tab?status=accepted"' in html
+    assert ">Keep in Accepted</button>" in html
+    assert "data-move-dismiss" in html
+    assert f'href="/jobs?status=new#job-{jid}">Move &amp; go to New' in html
+    # the moved-stub's own badge waits behind the prompt
+    assert '<p class="stale-note" hidden>' in html
+
+
+def test_reevaluate_new_job_to_not_relevant_offers_keep(conn):
+    sid, jid, scenario_id = _seed(conn)
+    result = _run(conn, "job_reevaluate", {"job_id": jid, "filter": {"status": "new"}},
+                  "app.routes.jobs.run_reevaluate_job", _fake_reevaluate_to(0.1))
+    html = result["html_chunks"][0]
+    assert "Re-evaluate moved this job from <strong>New</strong> to <strong>Not relevant</strong>." in html
+    assert ">Keep in New</button>" in html
+    assert '"prev_tab": "new"' in html
+
+
+def test_reset_not_relevant_job_that_now_passes_has_no_keep(conn):
+    sid = q.insert_source(conn, "s", "https://s", "generic_listing")
+    jid = q.insert_job(conn, source_id=sid, url="https://s/1", title="T", company="", raw_text="r")
+    q.update_job_pipeline(conn, jid, simplified_content="c", content_type="job_posting", summary="")
+    scn = q.insert_scenario(conn, "A", "")
+    q.upsert_job_score(conn, jid, scn, 0.2, "no", "h")
+    q.mark_job_evaluation_complete(conn, jid)
+    assert q.get_job_tab(conn, jid) == "not_relevant"
+    result = _run(conn, "job_reset", {"job_id": jid, "filter": {"status": "not_relevant"}},
+                  "app.routes.jobs.run_reprocess_job", _fake_reprocess_full(0.95))
+    html = result["html_chunks"][0]
+    assert "from <strong>Not relevant</strong> to <strong>New</strong>" in html
+    assert "Keep in" not in html
+    assert "data-move-dismiss" in html
+
+
+def test_reset_that_keeps_tab_has_no_move_prompt(conn):
+    sid, jid, scenario_id = _seed(conn)
+    result = _run(conn, "job_reset", {"job_id": jid, "filter": {"status": "new"}},
+                  "app.routes.jobs.run_reprocess_job", _fake_reprocess_full(0.95))
+    assert "move-prompt" not in result["html_chunks"][0]
+
+
+def test_revisit_closing_accepted_job_shows_move_prompt(conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    result = _run(conn, "jobs_revisit",
+                  {"job_ids": [jid], "trigger": "manual", "filter": {"status": "accepted"}},
+                  "app.routes.jobs.run_revisit_job", _fake_revisit_closed)
+    row = result["html_chunks"][1]
+    assert "Revisit moved this job from <strong>Accepted</strong> to <strong>Trash</strong>." in row
+    assert ">Keep in Accepted</button>" in row
+
+
+def test_move_prompt_on_detail_page_has_no_go_link(conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "accepted", "")
+    result = _run(conn, "job_reset", {"job_id": jid, "detail": True},
+                  "app.routes.jobs.run_reprocess_job", _fake_reprocess_full(0.95))
+    html = result["html_chunks"][0]
+    assert 'class="move-prompt"' in html
+    assert f'hx-post="/jobs/{jid}/keep-tab?detail=1"' in html
+    assert "Move &amp; go" not in html
+
+
+def test_keep_tab_restores_previous_tab(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    q.update_job_feedback(conn, jid, "new", "", record_event=False)
+    resp = client.post(f"/jobs/{jid}/keep-tab?status=accepted",
+                       data={"prev_tab": "accepted", "prev_status": "accepted",
+                             "prev_content_type": "job_posting"})
+    assert resp.status_code == 200
+    assert q.get_job(conn, jid)["status"] == "accepted"
+    assert f'id="job-{jid}"' in resp.text and "move-prompt" not in resp.text
+    assert 'id="count-accepted" hx-swap-oob="true"' in resp.text
+    assert any("Kept in Accepted" in e["message"] for e in q.get_job_events(conn, jid))
+
+
+def test_keep_tab_returns_409_when_job_cannot_go_back(client, conn):
+    sid, jid, scenario_id = _seed(conn)  # gate passes -> New
+    resp = client.post(f"/jobs/{jid}/keep-tab?status=not_relevant",
+                       data={"prev_tab": "not_relevant", "prev_status": "new",
+                             "prev_content_type": "job_posting"})
+    assert resp.status_code == 409
+    assert q.get_job_tab(conn, jid) == "new"
+
+
+def test_keep_tab_rejects_bad_input(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    bad = client.post(f"/jobs/{jid}/keep-tab", data={"prev_tab": "bogus", "prev_status": "new"})
+    assert bad.status_code == 400
+    missing = client.post("/jobs/999/keep-tab", data={"prev_tab": "new", "prev_status": "new"})
+    assert missing.status_code == 404

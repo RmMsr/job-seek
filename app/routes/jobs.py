@@ -187,6 +187,35 @@ def _render_removed_job_html(job_id: int) -> str:
     )
 
 
+def _tab_snapshot(conn: sqlite3.Connection, job: dict) -> dict:
+    """Where a job sits before a single-job action, so a move can be offered back."""
+    return {
+        "tab": q.get_job_tab(conn, job["id"]),
+        "status": job["status"],
+        "content_type": job["content_type"],
+    }
+
+
+def _move_prompt(conn: sqlite3.Connection, job_id: int, before: dict, action: str) -> dict | None:
+    """Prompt data when `action` moved the job to another tab, else None."""
+    after = q.get_job_tab(conn, job_id)
+    if not before["tab"] or not after or after == before["tab"]:
+        return None
+    return {
+        "action": action,
+        "from_tab": before["tab"],
+        "to_tab": after,
+        "from_label": q.TAB_LABELS[before["tab"]],
+        "to_label": q.TAB_LABELS[after],
+        "prev_status": before["status"],
+        "prev_content_type": before["content_type"] or "",
+        "can_keep": q.restore_job_tab(
+            conn, job_id, before["tab"], before["status"], before["content_type"], dry_run=True
+        ),
+        "href": f"/jobs?status={after}#job-{job_id}",
+    }
+
+
 def _render_updated_job_html(
     conn: sqlite3.Connection,
     request: Request | None,
@@ -194,12 +223,14 @@ def _render_updated_job_html(
     f: JobFilter,
     *,
     detail: bool = False,
+    move_prompt: dict | None = None,
 ) -> str:
     job = q.get_job(conn, job_id)
     if job is None:
         return _render_removed_job_html(job_id)
     sources = {s["id"]: s for s in q.get_sources(conn)}
     job["source_name"] = sources.get(job["source_id"], {}).get("name", "")
+    job["move_prompt"] = move_prompt
 
     stale_badge = None if detail else _stale_badge(conn, job, f)
     if stale_badge:
@@ -465,6 +496,7 @@ def _task_job_reset(conn, client, model, config, params):
     job = q.get_job(conn, params["job_id"])
     if job is None:
         return {"html_chunks": [], "notices": []}
+    before = _tab_snapshot(conn, job)
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
     gen = run_reprocess_job(conn, client, model, job, scenarios, profile)
@@ -474,7 +506,10 @@ def _task_job_reset(conn, client, model, config, params):
     except StopIteration:
         pass
     f, detail = _filter_from_task_params(params)
-    html = _render_updated_job_html(conn, None, params["job_id"], f, detail=detail)
+    html = _render_updated_job_html(
+        conn, None, params["job_id"], f, detail=detail,
+        move_prompt=_move_prompt(conn, params["job_id"], before, "Reset"),
+    )
     counts_html = templates.get_template("jobs/_counts_oob.html").render(
         request=None, counts=_counts_for_filter(conn, f)
     )
@@ -506,6 +541,7 @@ def _task_job_reevaluate(conn, client, model, config, params):
     job = q.get_job(conn, params["job_id"])
     if job is None:
         return {"html_chunks": [], "notices": []}
+    before = _tab_snapshot(conn, job)
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
     gen = run_reevaluate_job(conn, client, model, job, scenarios, profile)
@@ -515,7 +551,10 @@ def _task_job_reevaluate(conn, client, model, config, params):
     except StopIteration:
         pass
     f, detail = _filter_from_task_params(params)
-    html = _render_updated_job_html(conn, None, params["job_id"], f, detail=detail)
+    html = _render_updated_job_html(
+        conn, None, params["job_id"], f, detail=detail,
+        move_prompt=_move_prompt(conn, params["job_id"], before, "Re-evaluate"),
+    )
     counts_html = templates.get_template("jobs/_counts_oob.html").render(
         request=None, counts=_counts_for_filter(conn, f)
     )
@@ -544,6 +583,8 @@ def _task_jobs_revisit(conn, client, model, config, params):
             yield f"Revisiting the first {_REVISIT_SWEEP_CAP} of {len(jobs)} eligible jobs"
             jobs = jobs[:_REVISIT_SWEEP_CAP]
 
+    single = bool(job_ids) and len(jobs) == 1
+    before = _tab_snapshot(conn, jobs[0]) if single else None
     scenarios = q.get_scenarios(conn)
     profile = q.get_profile(conn)
     outcomes = []
@@ -583,7 +624,10 @@ def _task_jobs_revisit(conn, client, model, config, params):
         job, outcome = outcomes[0]
         level, tmpl = _REVISIT_NOTICE[outcome.verdict]
         f, detail = _filter_from_task_params(params)
-        row_html = _render_updated_job_html(conn, None, job["id"], f, detail=detail)
+        row_html = _render_updated_job_html(
+            conn, None, job["id"], f, detail=detail,
+            move_prompt=_move_prompt(conn, job["id"], before, "Revisit") if before else None,
+        )
         counts_html = templates.get_template("jobs/_counts_oob.html").render(
             request=None, counts=_counts_for_filter(conn, f)
         )
@@ -648,6 +692,39 @@ def job_reevaluate(job_id: int, request: Request, conn: sqlite3.Connection = Dep
         conn, kind="job_reevaluate", params={"job_id": job_id, **_filter_task_params(request)}
     )
     return {"task_id": task["id"], "already_active": task["already_active"]}
+
+
+_JOB_STATUSES = ("new", "accepted", "pending", "rejected", "trash")
+
+
+@router.post("/jobs/{job_id}/keep-tab", response_class=HTMLResponse)
+def job_keep_tab(
+    job_id: int,
+    request: Request,
+    prev_tab: str = Form(...),
+    prev_status: str = Form(...),
+    prev_content_type: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """'Keep in X' from the move prompt: undo the tab move a single-job
+    action caused, then re-render the job like the feedback route does."""
+    if q.get_job(conn, job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if prev_tab not in VALID_TABS or prev_status not in _JOB_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid previous tab")
+    if not q.restore_job_tab(conn, job_id, prev_tab, prev_status, prev_content_type or None):
+        return HTMLResponse(
+            f"Can't put this job back in {q.TAB_LABELS[prev_tab]} any more.", status_code=409
+        )
+    f = _filter_from_request(request)
+    detail = _is_detail_page_request(request)
+    row_html = _render_updated_job_html(conn, request, job_id, f, detail=detail)
+    counts_html = ""
+    if not f.searching:
+        counts_html = templates.get_template("jobs/_counts_oob.html").render(
+            request=request, counts=_counts_for_filter(conn, f)
+        )
+    return HTMLResponse(content=row_html + counts_html)
 
 
 @register_task_kind("jobs_bulk_reset")

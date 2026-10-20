@@ -83,17 +83,26 @@
   <div class="tb-utility">
     <details>
       <summary class="tb-trigger{% if scope_is_multi %} active{% endif %}">Combine <span class="tb-chev">▾</span></summary>
-      <div class="tb-panel">
+      {# Checkboxes only collect; Apply sends them all at once (status
+         repeated, solo=1). The rest of the current view rides along as
+         hx-vals -- not hidden inputs, which the other controls' global
+         [name='org'] etc. hx-include selectors would pick up twice. #}
+      {% set carry = scope_filter.query_params() %}
+      {% set _ = carry.pop("status", none) %}{% set _ = carry.pop("solo", none) %}
+      <form class="tb-panel tb-combine-form" hx-get="/jobs" hx-target="#jobs-content" hx-swap="innerHTML"
+            hx-push-url="true" hx-vals='{{ carry | tojson }}'>
         <span class="tb-panel-label">Add statuses to this view</span>
+        <input type="hidden" name="solo" value="1">
         {% for tab, label, count_id, count, tip in tab_defs %}
-        {% set toggle = scope_filter.with_status_toggled(tab).query_params() | urlencode %}
         <label class="tb-check-row">
-          <input type="checkbox" {% if tab in scope_tabs %}checked{% endif %}
-                 hx-get="/jobs?{{ toggle }}" hx-target="#jobs-content" hx-swap="innerHTML" hx-push-url="true">
+          <input type="checkbox" name="status" value="{{ tab }}"{% if tab in scope_tabs %} checked{% endif %}>
           {{ label }} <span class="tb-count-plain">{{ count }}</span>
         </label>
         {% endfor %}
-      </div>
+        <div class="tb-combine-actions">
+          <button type="submit" class="btn btn-primary">Apply</button>
+        </div>
+      </form>
     </details>
 
     <details>
@@ -136,7 +145,7 @@
         <form class="tb-tag-form" hx-get="/jobs/tag-filter" hx-target="#jobs-content" hx-swap="innerHTML"
               hx-vals='{"status": "{{ filter.statuses | join(',') }}"}'
               hx-include="[name='scenario'],[name='source_id'],[name='org'],[name='order'],[name='q'],[name='tag'],[name='not_tag']">
-          <input type="text" id="tb-tag" name="name" list="tag-options" autocomplete="off" placeholder="Tag name" required>
+          <input type="text" id="tb-tag" name="name" data-suggest="tag-options" autocomplete="off" placeholder="Tag name" required>
           <span class="tb-tag-actions">
             <button type="submit" name="mode" value="include" class="btn">Must have</button>
             <button type="submit" name="mode" value="exclude" class="btn">Exclude</button>

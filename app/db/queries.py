@@ -1566,6 +1566,59 @@ def _tabs_clause(tabs: list[str]) -> str:
     return "(" + " OR ".join(parts) + ")"
 
 
+def get_job_tab(conn: sqlite3.Connection, job_id: int) -> str | None:
+    """The list tab the job currently shows up in (same predicates as the
+    list), or None if it's in none of them (e.g. not evaluated yet)."""
+    cases = " ".join(f"WHEN {pred} THEN '{tab}'" for tab, pred in _TAB_PREDICATE.items())
+    row = conn.execute(
+        f"SELECT CASE {cases} END {_GATE_JOIN} WHERE jobs.id = ?", (job_id,)
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def restore_job_tab(
+    conn: sqlite3.Connection,
+    job_id: int,
+    prev_tab: str,
+    prev_status: str,
+    prev_content_type: str | None,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Put a job that an action moved back into `prev_tab`: restore its
+    status and content type (and force the gate open when it came from New).
+    Only commits when the job really lands in `prev_tab` again; otherwise --
+    or on a dry run -- rolls back. Returns whether the restore works."""
+    if prev_tab not in _TAB_PREDICATE:
+        return False
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute(
+        "UPDATE jobs SET status = ?, content_type = ?, "
+        "gate_override = CASE WHEN ? = 'new' THEN 1 ELSE gate_override END, "
+        "status_changed_at = datetime('now') WHERE id = ?",
+        (prev_status, prev_content_type, prev_tab, job_id),
+    )
+    ok = get_job_tab(conn, job_id) == prev_tab
+    if dry_run or not ok:
+        conn.rollback()
+        return ok
+    conn.commit()
+    add_job_event(conn, job_id, "status", f"Kept in {TAB_LABELS[prev_tab]} after it was moved")
+    return True
+
+
+TAB_LABELS: dict[str, str] = {
+    "new": "New",
+    "lead": "Leads",
+    "accepted": "Accepted",
+    "pending": "Pending",
+    "rejected": "Rejected",
+    "not_relevant": "Not relevant",
+    "trash": "Trash",
+}
+
+
 def get_jobs_for_tabs(
     conn: sqlite3.Connection,
     tabs: list[str],

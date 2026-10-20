@@ -1,0 +1,21 @@
+{#- Shown after a single-job Reset / Re-evaluate / Revisit moved the job to
+    another tab (routes/jobs.py _move_prompt). "Move" just dismisses it
+    (base.html), "Keep" undoes the move via /keep-tab. -#}
+{% import "jobs/_macros.html" as macros %}
+{% set mp = job.move_prompt %}
+<div class="move-prompt" role="status"
+  onclick="event.stopPropagation()" onkeyup="event.stopPropagation()" onkeydown="event.stopPropagation()">
+  <p class="move-prompt-text">{{ mp.action }} moved this job from <strong>{{ mp.from_label }}</strong> to <strong>{{ mp.to_label }}</strong>.</p>
+  <div class="move-prompt-actions">
+    {% if mp.can_keep %}
+    <button type="button" class="btn" data-keep-tab
+      hx-post="/jobs/{{ job.id }}/keep-tab{{ macros.qsuffix(filter, detail=is_detail_page|default(false)) }}"
+      hx-vals='{{ {"prev_tab": mp.from_tab, "prev_status": mp.prev_status, "prev_content_type": mp.prev_content_type} | tojson }}'
+      hx-target="#job-{{ job.id }}" hx-swap="outerHTML">Keep in {{ mp.from_label }}</button>
+    {% endif %}
+    <button type="button" class="btn btn-primary" data-move-dismiss>Move</button>
+    {% if not is_detail_page %}
+    <a class="move-prompt-go" href="{{ mp.href }}">Move &amp; go to {{ mp.to_label }} &rarr;</a>
+    {% endif %}
+  </div>
+</div>

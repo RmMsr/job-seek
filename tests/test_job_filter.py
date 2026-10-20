@@ -282,3 +282,17 @@ def test_tags_narrow_and_clear():
     f = JobFilter(not_tags=("X",))
     assert f.is_narrowed
     assert f.cleared().not_tags == ()
+
+
+def test_status_repeated_param_is_merged():
+    f = JobFilter.from_params(QueryParams("status=new&status=lead"))
+    assert f.statuses == ("new", "lead")
+
+
+def test_status_repeated_and_comma_mixed_dedupes():
+    f = JobFilter.from_params(QueryParams("status=new,accepted&status=accepted&status=trash"))
+    assert f.statuses == ("new", "accepted", "trash")
+
+
+def test_status_list_value_in_plain_dict():
+    assert JobFilter.from_params({"status": ["lead", "new"]}).statuses == ("lead", "new")

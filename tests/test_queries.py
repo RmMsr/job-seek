@@ -2378,3 +2378,61 @@ def test_sort_key_closing_matches_sql_order(conn):
     shuffled = list(reversed(rows))
     resorted = sorted(shuffled, key=_sort_key("closing"), reverse=True)
     assert [names[j["id"]] for j in resorted] == _CLOSING_EXPECTED
+
+
+def test_get_job_tab_for_each_tab(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    expect = {
+        _tab_job(conn, sid, "http://s/new", scenario_id=scn, score=0.95): "new",
+        _tab_job(conn, sid, "http://s/nr", scenario_id=scn, score=0.1): "not_relevant",
+        _tab_job(conn, sid, "http://s/lead", content_type="lead"): "lead",
+        _tab_job(conn, sid, "http://s/acc", status="accepted"): "accepted",
+        _tab_job(conn, sid, "http://s/pen", status="pending"): "pending",
+        _tab_job(conn, sid, "http://s/rej", status="rejected"): "rejected",
+        _tab_job(conn, sid, "http://s/tr", status="trash"): "trash",
+    }
+    for jid, tab in expect.items():
+        assert q.get_job_tab(conn, jid) == tab
+        assert jid in {j["id"] for j in q.get_jobs_for_tabs(conn, [tab])}
+    unevaluated = q.insert_job(conn, source_id=sid, url="http://s/raw", title="R", company="", raw_text="r")
+    assert q.get_job_tab(conn, unevaluated) is None
+    assert q.get_job_tab(conn, 9999) is None
+
+
+def test_restore_job_tab_accepted_after_reset(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    jid = _tab_job(conn, sid, "http://s/1", scenario_id=scn, score=0.95, status="accepted")
+    q.update_job_feedback(conn, jid, "new", "", record_event=False)  # what a reset does
+    assert q.get_job_tab(conn, jid) == "new"
+
+    assert q.restore_job_tab(conn, jid, "accepted", "accepted", "job_posting", dry_run=True)
+    assert q.get_job_tab(conn, jid) == "new"  # dry run rolled back
+    events_before = len(q.get_job_events(conn, jid))
+
+    assert q.restore_job_tab(conn, jid, "accepted", "accepted", "job_posting")
+    assert q.get_job_tab(conn, jid) == "accepted"
+    events = q.get_job_events(conn, jid)
+    assert len(events) == events_before + 1 and "Kept in Accepted" in events[0]["message"]
+
+
+def test_restore_job_tab_new_after_gate_now_fails_sets_override(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    jid = _tab_job(conn, sid, "http://s/1", scenario_id=scn, score=0.1)
+    assert q.get_job_tab(conn, jid) == "not_relevant"
+    assert q.restore_job_tab(conn, jid, "new", "new", "job_posting")
+    assert q.get_job_tab(conn, jid) == "new"
+    assert q.get_job(conn, jid)["gate_override"] == 1
+
+
+def test_restore_job_tab_not_relevant_when_gates_now_pass_is_impossible(conn):
+    sid = q.insert_source(conn, "s", "http://s", "generic_listing")
+    scn = q.insert_scenario(conn, "S", "")
+    jid = _tab_job(conn, sid, "http://s/1", scenario_id=scn, score=0.95)
+    events_before = len(q.get_job_events(conn, jid))
+    assert not q.restore_job_tab(conn, jid, "not_relevant", "new", "job_posting")
+    assert q.get_job_tab(conn, jid) == "new"
+    assert q.get_job(conn, jid)["gate_override"] == 0
+    assert len(q.get_job_events(conn, jid)) == events_before
