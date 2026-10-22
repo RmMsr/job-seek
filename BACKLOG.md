@@ -3,6 +3,7 @@
 Known gaps, not yet scheduled.
 
 quick:
+- ux: On a job's tailor cv page the textarea of suggestions does not expand with the content when they are first rendered. Just after a page reload they expand fullt. They should always expand to fit all text.
 - ux: combine fetch all and refresh open actions to just "update"
 
 Triage:
