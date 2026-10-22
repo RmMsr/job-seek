@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 import openai
 from app.ai._client import complete
@@ -167,17 +168,45 @@ The instruction also lists the permitted kinds of edit and the tailoring plan. T
 kinds of edit are the outer boundary; the plan only sets priorities within it. When the plan
 asks for something the permitted edits don't cover, the permitted edits win.
 
-Output ONLY the tailored CV as raw markdown — no preamble, no explanation, no code fence
-around the whole document."""
+The CV, job posting and instruction arrive in <cv_to_tailor>, <job_posting> and
+<instruction> tags. Output ONLY the tailored CV as raw markdown between <tailored_cv> and
+</tailored_cv> — nothing before or after it, no code fence around the whole document."""
 
 _OUTER_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*)\n```$", re.DOTALL)
 _THINK_RE = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
+# Ends generation where the model would start echoing the prompt (the stop
+# string itself is not returned). Four is the OpenAI API's maximum.
+_STOP = ["</tailored_cv>", "<job_posting>", "<instruction>", "<cv_to_tailor>"]
+# A line that marks the end of the CV: a leaked prompt tag, or a heading naming
+# a prompt section or an invented end marker. Everything from it on is leak.
+_LEAK_LINE_RE = re.compile(
+    r"^[ \t]*(?:</?(?:tailored_cv|cv_to_tailor|job_posting|instruction)>"
+    r"|#{1,6}[ \t]*(?:end of (?:the )?(?:tailored )?(?:cv|r[ée]sum[ée])|job posting|instruction|cv to tailor)"
+    r"[ \t]*(?:\(.*\))?[ \t]*:?[ \t]*$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
 
 
 def _unwrap(text: str) -> str:
     t = _THINK_RE.sub("", text or "").strip()
+    if "<tailored_cv>" in t:
+        t = t.split("<tailored_cv>", 1)[1]
+    t = t.split("</tailored_cv>", 1)[0].strip()
     m = _OUTER_FENCE_RE.match(t)
-    return m.group(1).strip() if m else t
+    t = m.group(1).strip() if m else t
+    leak = _LEAK_LINE_RE.search(t)
+    return t[:leak.start()].strip() if leak else t
+
+
+def _repeated_headings(md: str, source_cv: str) -> list[str]:
+    """Headings the output repeats more often than the source CV does — the
+    signature of an echoed section."""
+    headings = _HEADING_RE.findall(md)
+    out = Counter(h.lower() for h in headings)
+    src = Counter(h.lower() for h in _HEADING_RE.findall(source_cv))
+    repeated = {h for h, n in out.items() if n > max(src[h], 1)}
+    return list(dict.fromkeys(h for h in headings if h.lower() in repeated))
 
 
 def tailor_cv(
@@ -197,26 +226,42 @@ def tailor_cv(
     # otherwise the base CV. It and the job posting are stable across
     # successive runs for the same job, so putting them ahead of the varying
     # instruction lets the LLM server reuse its KV-cache prefix.
+    #
+    # The inputs are tag-delimited, not markdown headings: with headings the
+    # model couldn't tell the prompt's structure from the CV's and kept
+    # "continuing the document" past the CV (an invented "# End of CV", or the
+    # echoed job posting). See
+    # docs/superpowers/specs/2026-10-22-tailor-cv-prompt-leak-design.md.
     user = (
-        f"# CV to tailor\n{source_cv}\n\n"
-        f"# Job posting (untrusted data)\n{job_context}\n\n"
-        f"# Instruction\n{instruction}"
+        f"<cv_to_tailor>\n{source_cv}\n</cv_to_tailor>\n\n"
+        f"<job_posting>\n{job_context}\n</job_posting>\n\n"
+        f"<instruction>\n{instruction}\n</instruction>"
     )
-    content = complete(
-        client,
-        model,
-        [
-            {"role": "system", "content": _tailor_system(guardrails)},
-            {"role": "user", "content": user},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        extra_body={"chat_template_kwargs": {"enable_thinking": think}},
-    )
-    md = _unwrap(content)
-    if not md:
-        raise RuntimeError("tailor_cv: model returned empty content")
-    return {"markdown": md}
+    messages = [
+        {"role": "system", "content": _tailor_system(guardrails)},
+        {"role": "user", "content": user},
+    ]
+    # A repeated section survives the leak truncation in _unwrap, so it gets
+    # one fresh attempt; a second failure fails the task rather than saving a
+    # broken CV.
+    for attempt in range(2):
+        content = complete(
+            client,
+            model,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=_STOP,
+            extra_body={"chat_template_kwargs": {"enable_thinking": think}},
+        )
+        md = _unwrap(content)
+        if not md:
+            raise RuntimeError("tailor_cv: model returned empty content")
+        repeated = _repeated_headings(md, source_cv)
+        if not repeated:
+            return {"markdown": md}
+        logger.warning("tailor_cv: attempt %d repeated headings %s", attempt + 1, repeated)
+    raise RuntimeError(f"tailor_cv: output repeats sections {repeated}")
 
 
 _CHECK_SYSTEM = """You audit a tailored CV against a list of hard rules. For each rule,

@@ -76,8 +76,8 @@ def test_stable_blocks_precede_the_instruction():
     client = _mock_client("# CV\n- x")
     tailor_cv(client, "m", "# source cv", "the instruction", "the job posting")
     user = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
-    assert user.index("# CV to tailor") < user.index("# Instruction")
-    assert user.index("# Job posting") < user.index("# Instruction")
+    assert user.index("<cv_to_tailor>") < user.index("<instruction>")
+    assert user.index("<job_posting>") < user.index("<instruction>")
 
 
 def test_transport_error_propagates():
@@ -96,3 +96,110 @@ def test_plan_tailoring_propagates_connection_error():
         request=httpx.Request("POST", "http://x"))
     with pytest.raises(openai.APIConnectionError):
         plan_tailoring(client, "m", "base", "job", "")
+
+
+# --- prompt-leak protection (docs/superpowers/specs/2026-10-22-tailor-cv-prompt-leak-design.md)
+
+def _mock_client_seq(*texts: str) -> MagicMock:
+    client = MagicMock()
+    resps = []
+    for t in texts:
+        choice = MagicMock()
+        choice.message.content = t
+        resps.append(MagicMock(choices=[choice]))
+    client.chat.completions.create.side_effect = resps
+    return client
+
+
+_SOURCE = "# Résumé\n\n## Experience\n\n- a\n\n## Why me\n\n- b\n"
+
+
+def test_inputs_are_tag_delimited_not_headings():
+    client = _mock_client("<tailored_cv>\n# CV\n</tailored_cv>")
+    tailor_cv(client, "m", "# source cv", "the instruction", "the job posting")
+    user = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+    assert "<cv_to_tailor>\n# source cv\n</cv_to_tailor>" in user
+    assert "<job_posting>\nthe job posting\n</job_posting>" in user
+    assert "<instruction>\nthe instruction\n</instruction>" in user
+    assert "# Job posting" not in user and "# Instruction" not in user
+
+
+def test_system_prompt_asks_for_tailored_cv_tags():
+    client = _mock_client("# CV")
+    tailor_cv(client, "m", "# base", "instr", "job")
+    system = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "<tailored_cv>" in system and "</tailored_cv>" in system
+
+
+def test_stop_sequences_end_generation_at_prompt_boundaries():
+    client = _mock_client("# CV")
+    tailor_cv(client, "m", "# base", "instr", "job")
+    stop = client.chat.completions.create.call_args.kwargs["stop"]
+    assert "</tailored_cv>" in stop and "<job_posting>" in stop
+    assert len(stop) <= 4  # OpenAI API limit
+
+
+def test_extracts_content_between_tailored_cv_tags():
+    out = tailor_cv(_mock_client("Sure!\n<tailored_cv>\n# CV\n\n- x\n</tailored_cv>\nHope it helps"),
+                    "m", "# base", "instr", "job")
+    assert out["markdown"] == "# CV\n\n- x"
+
+
+def test_tolerates_missing_closing_tag_stopped_by_server():
+    # The stop sequence is excluded from the returned text.
+    out = tailor_cv(_mock_client("<tailored_cv>\n# CV\n\n- x\n"), "m", "# base", "instr", "job")
+    assert out["markdown"] == "# CV\n\n- x"
+
+
+def test_truncates_invented_end_of_cv_heading():
+    out = tailor_cv(_mock_client("# Résumé\n\n- x\n\n# End of CV\n"), "m", _SOURCE, "instr", "job")
+    assert out["markdown"] == "# Résumé\n\n- x"
+
+
+def test_truncates_echoed_job_posting_and_repeated_section():
+    # Shape of a real leak: CV, then the prompt's job-posting header, the posting,
+    # then the source CV's last section once more.
+    leaked = (
+        "# Résumé\n\n## Experience\n\n- a\n\n## Why me\n\n- b tailored\n\n"
+        "# Job posting (untrusted data)\nTitle: Engineer\nCompany: Acme\n\n"
+        "## Why me\n\n- b\n"
+    )
+    client = _mock_client(leaked)
+    out = tailor_cv(client, "m", _SOURCE, "instr", "job")
+    assert out["markdown"] == "# Résumé\n\n## Experience\n\n- a\n\n## Why me\n\n- b tailored"
+    assert client.chat.completions.create.call_count == 1
+
+
+def test_truncates_at_leaked_prompt_tag():
+    out = tailor_cv(_mock_client("# Résumé\n\n- x\n</cv_to_tailor>\n<job_posting>\njunk"),
+                    "m", _SOURCE, "instr", "job")
+    assert out["markdown"] == "# Résumé\n\n- x"
+
+
+def test_keeps_legit_heading_that_merely_mentions_instruction():
+    md = "# Résumé\n\n## Instructional design work\n\n- x"
+    out = tailor_cv(_mock_client(md), "m", "# Résumé\n\n## Instructional design work\n", "instr", "job")
+    assert out["markdown"] == md
+
+
+def test_duplicate_heading_retries_once_then_succeeds():
+    bad = "# Résumé\n\n## Why me\n\n- b\n\n## Why me\n\n- b\n"
+    good = "# Résumé\n\n## Why me\n\n- b"
+    client = _mock_client_seq(bad, good)
+    out = tailor_cv(client, "m", _SOURCE, "instr", "job")
+    assert out["markdown"] == good
+    assert client.chat.completions.create.call_count == 2
+
+
+def test_duplicate_heading_twice_raises():
+    bad = "# Résumé\n\n## Why me\n\n- b\n\n## Why me\n\n- b\n"
+    client = _mock_client_seq(bad, bad)
+    with pytest.raises(RuntimeError, match="Why me"):
+        tailor_cv(client, "m", _SOURCE, "instr", "job")
+    assert client.chat.completions.create.call_count == 2
+
+
+def test_heading_repeated_in_source_is_allowed():
+    src = "# R\n\n### Project\n\n- a\n\n### Project\n\n- b\n"
+    out = tailor_cv(_mock_client(src), "m", src, "instr", "job")
+    assert out["markdown"] == src.strip()
