@@ -2,6 +2,9 @@
 
 Known gaps, not yet scheduled.
 
+quick:
+- ux: combine fetch all and refresh open actions to just "update"
+
 Triage:
 - Generating a job preview repeatedly fails in cutting off the new CV at the correct marker and returning the "End of CV" header or other content of the prompt.
 
