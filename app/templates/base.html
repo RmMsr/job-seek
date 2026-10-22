@@ -1537,8 +1537,16 @@
           if (!existing) return;
           existing.outerHTML = node.outerHTML;
           var replaced = document.getElementById(node.id);
-          if (replaced && window.htmx) window.htmx.process(replaced);
+          processSwapped(replaced);
         });
+      }
+      // htmx.process() wires up hx-* attributes but, unlike a real htmx swap,
+      // never fires htmx:load — so the htmx:load init hooks (textarea autosize,
+      // expand buttons) would skip content swapped in here. Fire it ourselves.
+      function processSwapped(el) {
+        if (!el || !window.htmx) return;
+        window.htmx.process(el);
+        window.htmx.trigger(el, "htmx:load");
       }
       // Shared with the edit-latitude handler below (a separate IIFE) — same
       // by-id fragment-replace used for task-poll OOB results.
@@ -1658,7 +1666,7 @@
           var target = document.querySelector(landingSelector);
           if (target) {
             target.innerHTML = chunks[chunks.length - 1];
-            if (window.htmx) window.htmx.process(target);
+            processSwapped(target);
             if (target.id.indexOf("proposals-area-") === 0) {
               flashHighlight(target.closest(".scenario-feedback-block") || target, "scenario-feedback-block-target-highlight");
             }
