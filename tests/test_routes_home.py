@@ -159,7 +159,7 @@ def test_home_shows_fetch_all_root_as_one_aggregate_row(client, conn):
     c1 = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
     q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
     html = client.get("/").text
-    assert "Fetch all" in html
+    assert ">Update<" in html
     assert "2 sources" in html  # count moved into the derived next-step line
     assert f'href="/tasks/{root["id"]}"' in html
     # children are not their own top-level rows

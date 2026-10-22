@@ -34,6 +34,10 @@ def _auth_error_result(conn: sqlite3.Connection, source: dict, run_id: int) -> d
     return {}
 
 
+def _fetchable_sources(conn: sqlite3.Connection) -> list[dict]:
+    return [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
+
+
 @register_task_kind("fetch_source")
 def _task_fetch_source(conn, client, model, config, params):
     source = q.get_source(conn, params["source_id"])
@@ -61,16 +65,21 @@ def _task_fetch_source(conn, client, model, config, params):
 
 @register_task_kind("fetch_all")
 def _task_fetch_all(conn, client, model, config, params):
-    """Root task for a "fetch everything" run: fan out one fetch_source child
-    per enabled source, all pointing back at this task. Completes immediately —
+    """Root task for an "Update" run: fan out one fetch_source child per
+    enabled source, plus one jobs_revisit sweep of the open jobs, all pointing
+    back at this task and running alongside each other. Completes immediately —
     its displayed state is derived from the children."""
-    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
+    sources = _fetchable_sources(conn)
     for s in sources:
         q.enqueue_task(
             conn, kind="fetch_source", params={"source_id": s["id"]},
             parent_task_id=params["_task_id"],
         )
-    yield f"Queued {len(sources)} source{'s' if len(sources) != 1 else ''}"
+    msg = f"Queued {len(sources)} source{'s' if len(sources) != 1 else ''}"
+    if q.get_revisitable_jobs(conn):
+        q.enqueue_task(conn, kind="jobs_revisit", params={}, parent_task_id=params["_task_id"])
+        msg += " and an open-jobs re-check"
+    yield msg
     return {}
 
 
@@ -81,9 +90,8 @@ def fetch_panel(request: Request, conn: sqlite3.Connection = Depends(get_db)):
 
 @router.post("/fetch/all")
 def trigger_fetch_all(conn: sqlite3.Connection = Depends(get_db)):
-    sources = [s for s in q.get_sources(conn) if s["fetcher_type"] != "manual" and s["enabled"]]
-    if not sources:
-        return {"skipped": True, "message": "No sources to fetch."}
+    if not _fetchable_sources(conn) and not q.get_revisitable_jobs(conn):
+        return {"skipped": True, "message": "No sources to fetch and no open jobs to re-check."}
     task = q.enqueue_task(conn, kind="fetch_all", params={})
     return {"task_id": task["id"], "already_active": task["already_active"]}
 

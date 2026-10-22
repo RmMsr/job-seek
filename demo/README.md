@@ -8,7 +8,7 @@ Run these from a separate demo data directory (own `config.toml`/`job-seek.db`, 
 # 1. Seed profile, scenarios, and sources (creates job-seek.db if needed)
 uv run --project /path/to/job-seek python /path/to/job-seek/demo/jumpstart_demo.py
 
-# 2. Populate real jobs — either start the app and click "Fetch All", or:
+# 2. Populate real jobs — either start the app and click "Update" on the Fetch page, or:
 uv run --project /path/to/job-seek python /path/to/job-seek/demo/qa_fetch_sources.py
 ```
 

@@ -365,7 +365,7 @@ def main():
         print(f"\nNext steps:")
         print(f"  1. Start the dev server: uv run uvicorn app.main:app --port 8000")
         print(f"  2. Open http://localhost:8000 in your browser")
-        print(f"  3. Click 'Fetch All' to populate jobs from real sources")
+        print(f"  3. Click 'Update' on the Fetch page to populate jobs from real sources")
         print(f"  4. Watch scores populate as jobs are evaluated")
 
     finally:

@@ -100,12 +100,15 @@ def test_fetch_panel_does_not_repeat_source_url(client, conn):
     assert "https://finn.no" not in resp.text
 
 
-def test_fetch_panel_has_fetch_all_button(client, conn):
+def test_fetch_panel_has_single_update_button(client, conn):
     _seed(conn)
     resp = client.get("/fetch")
     assert resp.status_code == 200
-    assert '/fetch/all' in resp.text
-    assert '>Fetch all<' in resp.text
+    assert resp.text.count('data-progress-url="/fetch/all"') == 1
+    assert '>Update<' in resp.text
+    assert '>Fetch all<' not in resp.text
+    assert "Refresh open jobs" not in resp.text
+    assert 'data-progress-url="/revisit/all"' not in resp.text
 
 
 def test_fetch_panel_has_notice_stack_and_content_wrapper(client, conn):
@@ -248,6 +251,43 @@ def test_post_fetch_all_with_no_sources_is_skipped(client, conn):
     assert resp.json()["skipped"] is True
 
 
+def _open_job(conn) -> int:
+    sid = q.get_or_create_manual_source(conn)
+    jid = q.insert_job(conn, source_id=sid, url="http://example.com/a", title="A",
+                       company="", raw_text="b")
+    q.update_job_feedback(conn, jid, "accepted", None)
+    return jid
+
+
+def test_fetch_all_fanout_includes_revisit_child_when_open_jobs(client, conn):
+    sid = q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    _open_job(conn)
+    root_id = client.post("/fetch/all").json()["task_id"]
+    execute_task(conn, MagicMock(), "m", MagicMock(browser_profile_dir="/tmp"), q.get_task(conn, root_id))
+    kids = q.get_task_children(conn, root_id)
+    assert sorted(k["kind"] for k in kids) == ["fetch_source", "jobs_revisit"]
+    assert next(k for k in kids if k["kind"] == "fetch_source")["params"]["source_id"] == sid
+    assert next(k for k in kids if k["kind"] == "jobs_revisit")["params"] == {}
+    assert all(k["parent_task_id"] == root_id for k in kids)
+
+
+def test_fetch_all_fanout_has_no_revisit_child_without_open_jobs(client, conn):
+    q.insert_source(conn, "finn.no", "https://finn.no", "generic_listing")
+    root_id = client.post("/fetch/all").json()["task_id"]
+    execute_task(conn, MagicMock(), "m", MagicMock(browser_profile_dir="/tmp"), q.get_task(conn, root_id))
+    assert {k["kind"] for k in q.get_task_children(conn, root_id)} == {"fetch_source"}
+
+
+def test_post_fetch_all_with_only_open_jobs_runs_revisit(client, conn):
+    _open_job(conn)
+    body = client.post("/fetch/all").json()
+    assert "skipped" not in body
+    root_id = body["task_id"]
+    assert q.get_task(conn, root_id)["kind"] == "fetch_all"
+    execute_task(conn, MagicMock(), "m", MagicMock(browser_profile_dir="/tmp"), q.get_task(conn, root_id))
+    assert [k["kind"] for k in q.get_task_children(conn, root_id)] == ["jobs_revisit"]
+
+
 def test_revisit_all_skipped_when_nothing_eligible(client, conn):
     r = client.post("/revisit/all")
     assert r.json() == {"skipped": True, "message": "No jobs to revisit."}
@@ -265,10 +305,9 @@ def test_revisit_all_enqueues_sweep(client, conn):
     assert task["kind"] == "jobs_revisit" and task["params"] == {}
 
 
-def test_fetch_panel_has_revisit_button(client, conn):
+def test_fetch_panel_shows_update_button_without_sources(client, conn):
     html = client.get("/fetch").text
-    assert 'data-progress-url="/revisit/all"' in html
-    # Renamed, tooltip'd, and oob so a refresh doesn't reload the panel.
-    assert "Refresh open jobs" in html
-    assert "data-progress-oob" in html
+    assert 'data-progress-url="/fetch/all"' in html
+    assert ">Update<" in html
+    assert "moves to Trash" in html
     assert 'class="hint"' not in html

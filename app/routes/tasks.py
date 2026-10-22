@@ -72,7 +72,7 @@ def _title(conn: sqlite3.Connection, task: dict) -> str:
         source = q.get_source(conn, params.get("source_id"))
         return f"Fetch: {source['name']}" if source else "fetch source"
     if kind == "fetch_all":
-        return "Fetch all"
+        return "Update"
     if kind == "job_add_by_url":
         return "Add job by URL"
     if kind == "job_add_listing_source":
@@ -113,7 +113,7 @@ _task_label = _title
 def _goal(conn: sqlite3.Connection, task: dict) -> str:
     kind, params = task["kind"], task["params"]
     if kind == "fetch_all":
-        return "Pull new postings from every enabled source"
+        return "Pull new postings from every enabled source and re-check open jobs"
     if kind == "fetch_source":
         src = q.get_source(conn, params.get("source_id"))
         return f"Pull new postings from {src['name']}" if src else "Pull new postings from a source"
@@ -369,8 +369,12 @@ def root_presentation(conn: sqlite3.Connection, root: dict, children: list[dict]
     elif status == "cancelled":
         next_step = "Cancelled"
     elif kind == "fetch_all" and root["status"] != "failed":
-        settled, total, failed = _child_step_counts(children)
-        next_step = f"{total} source{'s' if total != 1 else ''} — {settled} done"
+        settled, _, failed = _child_step_counts(children)
+        total = sum(1 for t in children if t["kind"] == "fetch_source")
+        next_step = f"{total} source{'s' if total != 1 else ''}"
+        if any(t["kind"] == "jobs_revisit" for t in children):
+            next_step += " + open jobs"
+        next_step += f" — {settled} done"
         if failed:
             next_step += f", {failed} failed"
         if status in ("done", "failed"):

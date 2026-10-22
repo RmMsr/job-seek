@@ -160,7 +160,7 @@ def test_root_presentation_fetch_all_aggregates(conn):
     b = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 2}, parent_task_id=root["id"])
     q.fail_task(conn, b["id"], "boom")
     p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
-    assert p["title"] == "Fetch all"
+    assert p["title"] == "Update"
     assert "2 sources" in p["next_step"]
     assert "1" in p["next_step"] and "fail" in p["next_step"].lower()
     assert p["status"] == "running"  # child a still queued
@@ -195,6 +195,23 @@ def test_root_presentation_fetch_all_failed_child_last_keeps_counts(conn):
     p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
     assert p["status"] == "failed"
     assert "2 sources" in p["next_step"]
+    assert "1 failed" in p["next_step"]
+
+
+def test_root_presentation_fetch_all_counts_revisit_child(conn):
+    root = q.enqueue_task(conn, kind="fetch_all", params={})
+    q.complete_task(conn, root["id"], {})
+    a = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
+    r = q.enqueue_task(conn, kind="jobs_revisit", params={}, parent_task_id=root["id"])
+    q.complete_task(conn, a["id"], {"jobs_new": 1, "new_job_ids": []})
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "running"  # revisit still queued
+    assert p["next_step"] == "1 source + open jobs — 1 done"
+    q.fail_task(conn, r["id"], "boom")
+    conn.execute("UPDATE tasks SET finished_at = datetime('now', '-1 minute') WHERE id = ?", (r["id"],))
+    conn.commit()
+    p = root_presentation(conn, q.get_task(conn, root["id"]), q.get_task_children(conn, root["id"]))
+    assert p["status"] == "failed"
     assert "1 failed" in p["next_step"]
 
 
@@ -521,7 +538,7 @@ def test_child_detail_has_breadcrumb_to_parent(client, conn):
     child = q.enqueue_task(conn, kind="fetch_source", params={"source_id": 1}, parent_task_id=root["id"])
     html = client.get(f"/tasks/{child['id']}").text
     assert "Part of:" in html
-    assert f'href="/tasks/{root["id"]}">Fetch all</a>' in html
+    assert f'href="/tasks/{root["id"]}">Update</a>' in html
 
 
 def test_root_detail_has_no_breadcrumb(client, conn):
