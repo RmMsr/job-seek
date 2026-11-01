@@ -228,6 +228,78 @@ def test_generic_listing_fetcher_no_pagination_param_single_call():
 
 
 @respx.mock
+def test_generic_listing_fetcher_js_paginates_when_rendered_and_no_hyperlink_pager():
+    # A JS-driven listing (Sopra Steria, Tieto): no recognized pagination
+    # param on the URL, and page 1 itself only had links once Playwright
+    # rendered it — the signal that this site loads further postings via a
+    # "load more" click or infinite scroll, not a page-N URL.
+    p1 = ["https://example.com/jobs/1", "https://example.com/jobs/2", "https://example.com/jobs/3"]
+    extra = ["https://example.com/jobs/4", "https://example.com/jobs/5"]
+    _mock_details(p1 + extra)
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, p1, rendered=True)), \
+         patch("app.fetchers.generic_listing.render_html_paginated",
+               return_value="<html>more</html>") as mock_paginate, \
+         patch("app.fetchers.generic_listing.detect_listing",
+               return_value={"is_listing": True, "job_links": extra}) as mock_detect:
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    mock_paginate.assert_called_once_with("https://example.com/careers", 4)
+    mock_detect.assert_called_once()
+    assert {j.url for j in jobs} == set(p1 + extra)
+
+
+@respx.mock
+def test_generic_listing_fetcher_skips_js_pagination_when_page1_not_rendered():
+    links = ["https://example.com/jobs/1", "https://example.com/jobs/2"]
+    _mock_details(links)
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, links, rendered=False)), \
+         patch("app.fetchers.generic_listing.render_html_paginated") as mock_paginate:
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    mock_paginate.assert_not_called()
+    assert {j.url for j in jobs} == set(links)
+
+
+@respx.mock
+def test_generic_listing_fetcher_js_pagination_handles_render_failure():
+    p1 = ["https://example.com/jobs/1", "https://example.com/jobs/2"]
+    _mock_details(p1)
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, p1, rendered=True)), \
+         patch("app.fetchers.generic_listing.render_html_paginated", return_value=None):
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    assert {j.url for j in jobs} == set(p1)
+
+
+@respx.mock
+def test_generic_listing_fetcher_js_pagination_handles_detection_error():
+    p1 = ["https://example.com/jobs/1", "https://example.com/jobs/2"]
+    _mock_details(p1)
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               return_value=_detection(True, p1, rendered=True)), \
+         patch("app.fetchers.generic_listing.render_html_paginated", return_value="<html>more</html>"), \
+         patch("app.fetchers.generic_listing.detect_listing", side_effect=RuntimeError("boom")):
+        jobs = GenericListingFetcher(_SOURCE, MagicMock(), "m").fetch()
+    assert {j.url for j in jobs} == set(p1)
+
+
+@respx.mock
+def test_generic_listing_fetcher_prefers_hyperlink_pagination_over_js_when_both_possible():
+    p1 = [f"https://example.com/jobs/{i}" for i in range(10)]
+    p2 = [f"https://example.com/jobs/{i}" for i in range(10, 13)]  # short -> last page
+    _mock_details(p1 + p2)
+    with patch("app.fetchers.generic_listing.detect_listing_page",
+               side_effect=_by_url({
+                   "https://example.com/jobs?start=0": _detection(True, p1, rendered=True),
+                   "https://example.com/jobs?start=10": _detection(True, p2, rendered=True),
+               })), \
+         patch("app.fetchers.generic_listing.render_html_paginated") as mock_paginate:
+        jobs = GenericListingFetcher(_PAGED_SOURCE, MagicMock(), "m").fetch()
+    mock_paginate.assert_not_called()
+    assert {j.url for j in jobs} == set(p1 + p2)
+
+
+@respx.mock
 def test_generic_listing_fetcher_does_not_paginate_below_min_job_links():
     _mock_details(["https://example.com/jobs/1"])
     calls: list[str] = []

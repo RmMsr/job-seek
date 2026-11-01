@@ -2,14 +2,16 @@ from __future__ import annotations
 import logging
 import time
 import openai
+from app.ai.detect_listing import detect_listing
 from app.fetchers.base import RawJob
 from app.fetchers.content import (
     MIN_CONTENT_LENGTH, MIN_ARTICLE_LENGTH, has_enough_content, extract_readable_text, FetchError,
 )
 from app.fetchers.http import HttpFetcher
+from app.fetchers.links import extract_links
 from app.fetchers.listing_detect import detect_listing_page, ListingDetection, MIN_JOB_LINKS
 from app.fetchers.pagination import next_page_url
-from app.fetchers.playwright_pool import render_html
+from app.fetchers.playwright_pool import render_html, render_html_paginated
 from app.url_canon import canonicalize_url
 
 logger = logging.getLogger("job_seek")
@@ -17,6 +19,7 @@ logger = logging.getLogger("job_seek")
 MAX_LISTING_PAGES = 5         # hard cap on paginated listing pages walked per run
 MAX_DETAIL_FETCHES = 50       # cap on new posting detail pages fetched per run
 MAX_PLAYWRIGHT_FALLBACKS = 10  # cap on detail-page Playwright renders per run
+JS_PAGINATION_STEPS = MAX_LISTING_PAGES - 1  # click/scroll rounds tried on a JS-paginated listing
 PAGE_FETCH_DELAY_SECONDS = 2.0  # pause before each page-2+ request; LinkedIn's guest
                                 # search endpoint serves an empty 200 when hit too fast
 
@@ -95,6 +98,14 @@ class GenericListingFetcher:
             return ordered
 
         page_url = self._source["url"]
+        if page1.rendered and next_page_url(page_url, page1_count) is None:
+            # No hyperlink pager, but page 1 itself needed a headless-browser
+            # render to find any links at all — a JS-driven listing (e.g.
+            # Sopra Steria, Tieto) that loads further postings via a "load
+            # more" click or infinite scroll rather than a page-N URL.
+            add(self._walk_js_pagination(page_url))
+            return ordered
+
         for _ in range(2, MAX_LISTING_PAGES + 1):
             next_url = next_page_url(page_url, page1_count)  # stride fixed at page1_count
             if next_url is None:
@@ -117,6 +128,22 @@ class GenericListingFetcher:
             page_url = next_url
 
         return ordered
+
+    def _walk_js_pagination(self, url: str) -> list[str]:
+        """Re-render ``url`` while driving ``JS_PAGINATION_STEPS`` rounds of
+        load-more clicks / scrolling (see ``playwright_pool._paginate``), then
+        re-run link detection on the resulting, fuller DOM. Returns the
+        canonicalized job links found; empty if the render or detection
+        fails."""
+        html = render_html_paginated(url, JS_PAGINATION_STEPS)
+        if not html:
+            return []
+        try:
+            result = detect_listing(self._client, self._model, extract_links(html, url), url)
+        except Exception:
+            logger.exception("generic_listing: JS-pagination detection failed at %s", url)
+            return []
+        return [canonicalize_url(h) for h in result["job_links"]]
 
     def _fetch_listing_page(self, url: str) -> ListingDetection | None:
         """``detect_listing_page(url)`` with a fixed pre-request delay and one

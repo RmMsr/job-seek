@@ -164,6 +164,93 @@ def test_stop_on_pool_with_no_thread_started_is_a_noop(make_pool):
     pool.stop()
 
 
+def test_render_paginated_scrolls_when_no_load_more_control_found(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    anchor_counts = iter([3, 6, 9, 12])  # initial, then grows every step -> runs all 3 steps
+
+    def qsa(selector):
+        if selector == "a":
+            return [None] * next(anchor_counts)
+        return []  # no load-more button/link found
+
+    page.query_selector_all.side_effect = qsa
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        html = pool.render_paginated("https://example.com", max_steps=3)
+    assert html == "<html>rendered</html>"
+    assert page.evaluate.call_count == 3
+    page.evaluate.assert_called_with("window.scrollTo(0, document.body.scrollHeight)")
+
+
+def test_render_paginated_clicks_load_more_control_instead_of_scrolling(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    button = MagicMock()
+    button.is_visible.return_value = True
+    button.inner_text.return_value = "Load more jobs"
+    anchor_counts = iter([3, 6])
+
+    def qsa(selector):
+        if selector == "a":
+            return [None] * next(anchor_counts)
+        return [button]
+
+    page.query_selector_all.side_effect = qsa
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render_paginated("https://example.com", max_steps=1)
+    button.click.assert_called_once()
+    page.evaluate.assert_not_called()
+
+
+def test_render_paginated_ignores_invisible_or_non_matching_controls(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    hidden_load_more = MagicMock()
+    hidden_load_more.is_visible.return_value = False
+    hidden_load_more.inner_text.return_value = "Load more jobs"
+    unrelated_link = MagicMock()
+    unrelated_link.is_visible.return_value = True
+    unrelated_link.inner_text.return_value = "Privacy policy"
+    anchor_counts = iter([3, 3])  # no growth -> stops after the one step
+
+    def qsa(selector):
+        if selector == "a":
+            return [None] * next(anchor_counts)
+        return [hidden_load_more, unrelated_link]
+
+    page.query_selector_all.side_effect = qsa
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render_paginated("https://example.com", max_steps=3)
+    hidden_load_more.click.assert_not_called()
+    unrelated_link.click.assert_not_called()
+    page.evaluate.assert_called_once_with("window.scrollTo(0, document.body.scrollHeight)")
+
+
+def test_render_paginated_stops_early_when_a_step_adds_no_links(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    anchor_counts = iter([5, 5, 5, 5])  # never grows
+
+    def qsa(selector):
+        if selector == "a":
+            return [None] * next(anchor_counts)
+        return []
+
+    page.query_selector_all.side_effect = qsa
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render_paginated("https://example.com", max_steps=3)
+    assert page.evaluate.call_count == 1  # one step tried, then the no-growth break
+
+
+def test_render_without_paginate_steps_never_queries_for_links(make_pool):
+    sync_playwright_mock, pw, browser, page = _mock_playwright()
+    pool = make_pool(idle_timeout_seconds=1.0)
+    with patch("app.fetchers.playwright_pool.sync_playwright", sync_playwright_mock):
+        pool.render("https://example.com")
+    page.query_selector_all.assert_not_called()
+    page.evaluate.assert_not_called()
+
+
 def test_render_logs_failure_with_exception_on_navigation_error(caplog, make_pool):
     sync_playwright_mock, pw, browser, page = _mock_playwright()
     page.goto.side_effect = RuntimeError("nav timeout")

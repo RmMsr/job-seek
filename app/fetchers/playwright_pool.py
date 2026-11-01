@@ -18,8 +18,12 @@ MAX_BROWSER_INSTANCES = 1  # single dedicated worker thread owns at most one bro
 # won't render.
 _BROWSER_MISSING_RE = re.compile(r"Executable doesn't exist|playwright install", re.IGNORECASE)
 
+# Text on a button/link that loads more listings in place (infinite-scroll
+# sites usually have one of these too, as a progressive-enhancement fallback).
+_LOAD_MORE_RE = re.compile(r"load more|show more|more (jobs|results|positions|openings)", re.IGNORECASE)
+
 # Sentinel queue item telling the worker thread to exit its loop, distinct from
-# a real (url, timeout_ms, result_q) render job.
+# a real (url, timeout_ms, result_q, paginate_steps) render job.
 _STOP = object()
 
 
@@ -46,7 +50,19 @@ class BrowserPool:
         logger.info("Escalating to headless-browser render: %s", url)
         self._ensure_thread()
         result_q: queue.Queue = queue.Queue(maxsize=1)
-        self._jobs.put((url, timeout_ms, result_q))
+        self._jobs.put((url, timeout_ms, result_q, 0))
+        status, payload = result_q.get()
+        return payload if status == "ok" else None
+
+    def render_paginated(self, url: str, max_steps: int, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
+        """Like ``render``, but after the initial load, drive up to
+        ``max_steps`` rounds of "click a load-more control, else scroll to
+        the bottom" to pull in further JS-paginated content before returning
+        the page's HTML. Stops early once a round adds no new links."""
+        logger.info("Escalating to headless-browser render with pagination (%d steps): %s", max_steps, url)
+        self._ensure_thread()
+        result_q: queue.Queue = queue.Queue(maxsize=1)
+        self._jobs.put((url, timeout_ms, result_q, max_steps))
         status, payload = result_q.get()
         return payload if status == "ok" else None
 
@@ -88,7 +104,7 @@ class BrowserPool:
                     browser.close()
                     pw.stop()
                 return
-            url, timeout_ms, result_q = item
+            url, timeout_ms, result_q, paginate_steps = item
             try:
                 if browser is None:
                     pw = sync_playwright().start()
@@ -98,7 +114,7 @@ class BrowserPool:
                         "Playwright browser pool: launched browser (active=1/%d)",
                         MAX_BROWSER_INSTANCES,
                     )
-                html = self._render_one(browser, url, timeout_ms)
+                html = self._render_one(browser, url, timeout_ms, paginate_steps)
                 result_q.put(("ok", html))
             except Exception as exc:
                 if _BROWSER_MISSING_RE.search(str(exc)):
@@ -120,15 +136,49 @@ class BrowserPool:
                         pass
                     pw = None
 
-    def _render_one(self, browser, url: str, timeout_ms: int) -> str:
+    def _render_one(self, browser, url: str, timeout_ms: int, paginate_steps: int = 0) -> str:
         ctx = browser.new_context()
         try:
             page = ctx.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             page.wait_for_timeout(SETTLE_MS)
+            if paginate_steps:
+                self._paginate(page, paginate_steps)
             return page.content()
         finally:
             ctx.close()
+
+    def _paginate(self, page, max_steps: int) -> None:
+        """Click a load-more control, or failing that scroll to the bottom,
+        once per step, settling after each — the two mechanisms JS-paginated
+        listings (no hyperlink pager) use to reveal further postings. Stops
+        early once a step adds no new links, so a page that isn't actually
+        paginated this way doesn't burn through every remaining step."""
+        prev_links = len(page.query_selector_all("a"))
+        for _ in range(max_steps):
+            if not self._click_load_more(page):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(SETTLE_MS)
+            links = len(page.query_selector_all("a"))
+            if links <= prev_links:
+                break
+            prev_links = links
+
+    def _click_load_more(self, page) -> bool:
+        for el in page.query_selector_all("button, a"):
+            try:
+                if not el.is_visible():
+                    continue
+                text = el.inner_text().strip()
+            except Exception:
+                continue
+            if text and _LOAD_MORE_RE.search(text):
+                try:
+                    el.click(timeout=2000)
+                    return True
+                except Exception:
+                    continue
+        return False
 
 
 _pool = BrowserPool()
@@ -136,6 +186,10 @@ _pool = BrowserPool()
 
 def render_html(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
     return _pool.render(url, timeout_ms)
+
+
+def render_html_paginated(url: str, max_steps: int, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> str | None:
+    return _pool.render_paginated(url, max_steps, timeout_ms)
 
 
 def browser_install_missing() -> bool:
