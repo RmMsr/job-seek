@@ -209,6 +209,23 @@ def test_job_list_card_is_article(client, conn):
     assert '<article class="job-row"' in resp.text
 
 
+def test_job_list_row_has_swipe_feedback_url(client, conn):
+    # Swipe-to-decide (BACKLOG.md) posts straight to the feedback endpoint
+    # from the collapsed card -- it needs the same filter-scoped URL the
+    # feedback form itself uses once expanded.
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get("/jobs?status=new")
+    assert f'data-feedback-url="/jobs/{jid}/feedback?status=new"' in resp.text
+    assert '<div class="job-swipe-hint job-swipe-hint-accept"' in resp.text
+    assert '<div class="job-swipe-hint job-swipe-hint-reject"' in resp.text
+
+
+def test_job_collapse_row_has_swipe_feedback_url(client, conn):
+    sid, jid, scenario_id = _seed(conn)
+    resp = client.get(f"/jobs/{jid}/collapse?status=new")
+    assert f'data-feedback-url="/jobs/{jid}/feedback?status=new"' in resp.text
+
+
 def test_job_list_tags_are_semantic_definition_list(client, conn):
     _seed(conn)
     resp = client.get("/jobs")

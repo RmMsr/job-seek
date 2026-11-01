@@ -332,9 +332,34 @@
       display: flex;
       align-items: stretch;
       overflow: hidden;
+      touch-action: pan-y;
       transition: border-color 0.15s, box-shadow 0.15s;
     }
     .job-row:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
+    /* Swipe gesture (touch only, see base.html script): dragging the row
+       horizontally slides .job-row-score/.job-row-content via --swipe-x,
+       uncovering the accept/reject hint layer sized to match underneath. */
+    .job-swipe-hint {
+      position: absolute; inset: 0; z-index: 0;
+      display: flex; align-items: center;
+      padding: 0 1.1rem; font-weight: 700; font-size: 0.95rem;
+      opacity: 0; pointer-events: none; color: #fff;
+      transition: opacity 0.15s ease;
+    }
+    .job-swipe-hint-accept { justify-content: flex-start; background: var(--success); }
+    .job-swipe-hint-reject { justify-content: flex-end; background: var(--alert); }
+    .job-row.job-row-swipe-accept .job-swipe-hint-accept,
+    .job-row.job-row-swipe-reject .job-swipe-hint-reject { opacity: 1; }
+    .job-row-score, .job-row-content {
+      position: relative; z-index: 1; background: var(--surface);
+      transform: translateX(var(--swipe-x, 0px));
+      transition: transform 0.2s ease;
+    }
+    .job-row.job-row-swiping .job-row-score,
+    .job-row.job-row-swiping .job-row-content { transition: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .job-swipe-hint, .job-row-score, .job-row-content { transition: none; }
+    }
     .job-row-confirm, .job-row-confirm:hover { background: none; border-color: transparent; box-shadow: none; }
     .job-row-stale { opacity: 0.55; }
     .job-row-stale:hover { opacity: 0.85; }
@@ -1992,6 +2017,87 @@
           row.classList.remove("job-row-target-highlight");
         }, { once: true });
       });
+    })();
+  </script>
+  <script>
+    // Swipe gesture on collapsed job cards (touch/pen only -- mouse keeps
+    // its existing click-to-expand and drag-to-select behavior untouched).
+    // Right = accept, left = reject, mirroring the feedback form's buttons.
+    (function () {
+      var THRESHOLD = 88;
+      var active = null;
+      var suppressClickUntil = 0;
+
+      function swipableRow(el) {
+        var row = el.closest(".job-row");
+        if (!row || row.classList.contains("job-row-expanded") || row.classList.contains("job-row-stale")) return null;
+        if (!row.getAttribute("data-feedback-url")) return null;
+        return row;
+      }
+
+      function reset(row) {
+        row.classList.remove("job-row-swiping", "job-row-swipe-accept", "job-row-swipe-reject");
+        row.style.removeProperty("--swipe-x");
+      }
+
+      document.body.addEventListener("pointerdown", function (e) {
+        if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+        if (e.target.closest("a, button, input, label, .job-select-wrap")) return;
+        var row = swipableRow(e.target);
+        if (!row) return;
+        active = { row: row, id: e.pointerId, startX: e.clientX, startY: e.clientY, dx: 0, locked: null };
+      });
+
+      document.body.addEventListener("pointermove", function (e) {
+        if (!active || e.pointerId !== active.id) return;
+        var dx = e.clientX - active.startX;
+        var dy = e.clientY - active.startY;
+        if (active.locked === null) {
+          if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+          active.locked = Math.abs(dx) > Math.abs(dy);
+          if (!active.locked) { active = null; return; }  // vertical: let the page scroll
+          active.row.classList.add("job-row-swiping");
+          active.row.setPointerCapture(e.pointerId);
+        }
+        e.preventDefault();
+        active.dx = dx;
+        active.row.style.setProperty("--swipe-x", dx + "px");
+        active.row.classList.toggle("job-row-swipe-accept", dx > 24);
+        active.row.classList.toggle("job-row-swipe-reject", dx < -24);
+      });
+
+      function endSwipe(commit) {
+        if (!active) return;
+        var row = active.row, dx = active.dx, locked = active.locked;
+        reset(row);
+        if (locked) suppressClickUntil = Date.now() + 300;
+        if (commit && locked && Math.abs(dx) >= THRESHOLD) {
+          var url = row.getAttribute("data-feedback-url");
+          if (url && window.htmx) {
+            htmx.ajax("POST", url, {
+              source: row, target: "#" + row.id, swap: "outerHTML",
+              values: { status: dx > 0 ? "accepted" : "rejected" },
+            });
+          }
+        }
+        active = null;
+      }
+
+      document.body.addEventListener("pointerup", function (e) {
+        if (!active || e.pointerId !== active.id) return;
+        endSwipe(true);
+      });
+      document.body.addEventListener("pointercancel", function (e) {
+        if (!active || e.pointerId !== active.id) return;
+        endSwipe(false);
+      });
+
+      document.body.addEventListener("click", function (e) {
+        if (Date.now() < suppressClickUntil && e.target.closest(".job-row")) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
     })();
   </script>
   <script>
